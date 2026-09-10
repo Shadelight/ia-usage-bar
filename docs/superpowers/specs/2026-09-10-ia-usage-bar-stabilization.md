@@ -26,9 +26,15 @@ are pulled forward specifically so the Hub work does not have to unpick them.
   entirely.
 - Other repos (CarteraGo, `lenadweb/stream-deck-ai-limits`, etc.). This repo is
   the only source of truth.
-- macOS / Linux. Windows 10/11 only for v0.1.0; portability is a north-star
-  concern.
-- Porting any provider logic to TypeScript. The engine stays Rust.
+- **Android companion app + home-screen widget.** This is Priority 3 in the
+  north star (right after the sync contract) — near-term, not "someday" — but
+  M0 does not build it. M0's job is to make the Windows collector and the Rust
+  core solid enough to sync from. The Phase 2 contract below is designed to be
+  the transport payload.
+- macOS / Linux / iOS. Windows 10/11 only for v0.1.0; the architecture stays
+  open to them but they are later milestones (no hardware to test).
+- Porting any provider logic to another language. The engine stays Rust; every
+  other surface renders its normalized output.
 - CLI, local HTTP API, TUI, adaptive refresh, pace/headroom engine, provider
   status pages, multi-account UI. North star, later milestones.
 
@@ -123,7 +129,11 @@ captured JSON per provider) and for percentage / reset parsing in `model.rs`.
 - Delete tracked-but-removed `src-tauri/src/claude_api.rs`, `credentials.rs`.
 - Move `Claude Bar.html` → `docs/design/canvas-2026-09.html`.
 - `git mv docs/*.png docs/screenshots/` (replaced in Phase 3).
-- Delete `src-tauri/icons/android/`, `src-tauri/icons/ios/`.
+- Delete the unused Tauri-generated Android/iOS icon trees
+  (`src-tauri/icons/android/`, `src-tauri/icons/ios/`) from the **Windows
+  desktop application**. This is not a statement about platform support — the
+  future Android companion (and any later iOS one) keeps its own platform
+  assets in its own module and is not built from these directories.
 - Keep a copy of the old `icon.ico` in `docs/design/` for reference.
 - User renames the local folder `Claude Bar` → `IA Usage Bar`; Claude adjusts
   the working directory.

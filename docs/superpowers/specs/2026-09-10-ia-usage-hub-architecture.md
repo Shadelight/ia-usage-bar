@@ -1,4 +1,4 @@
-# IA Usage Bar → AI Usage Hub — North-Star Architecture
+# IA Usage Bar — Rust Core, Windows Collector, Android Companion
 
 Date: 2026-09-10
 Status: Direction agreed — a roadmap, not an implementation spec
@@ -12,7 +12,7 @@ and is the foundation everything here builds on.
 
 ## Vision
 
-A **local-first** desktop tool that answers, from one place, without opening ten
+A **local-first** tool that answers, from one place, without opening ten
 dashboards:
 
 - how much have I used, how much is left, when does it reset;
@@ -24,20 +24,46 @@ dashboards:
 - which providers are working or erroring;
 - which accounts are connected.
 
-One core, many surfaces, each rendering the **same** normalized snapshot.
-Provider logic exists once and is never duplicated per surface.
+The immediate personal use case that drives every design choice: **work on the
+Windows PC with Claude / Codex / Gemini / etc., then pull out the Android phone
+and in two seconds see what's left, what's about to run out, and when each
+limit comes back.**
+
+One Rust core produces one normalized snapshot. Every surface — Windows now,
+Android next, macOS/Linux/iOS later — renders that snapshot. Provider logic
+exists once, in Rust, and is never reimplemented per platform.
+
+## Platforms and roles
+
+| Platform | Role | Status |
+|---|---|---|
+| **Windows** | Primary desktop + tray **and the collector** — most integrations depend on local credential files, CLIs, session files, and running processes that only exist on the PC | Priority 1 (Milestone 0) |
+| **Android** | Companion app + home-screen widget. Consumes normalized snapshots only. Never runs provider integrations, never receives credentials | Priority 3 (after the sync protocol) |
+| macOS / Linux | Desktop + tray, same Rust core. Also potential collectors | Architecture stays open; not built now (no hardware to test) |
+| iOS | Companion, like Android | Architecture stays open; later |
+
+Windows is the collector because that is where the credentials live. The phone
+is a viewer. The Rust core is the single source of truth.
 
 ## Out of scope, permanently
 
-- **Stream Deck** — not a surface, client, or integration.
-- **Mandatory cloud services** — no account, no server dependency, no telemetry
-  by default.
-- Storing passwords. Showing full tokens. Writing secrets to logs.
+- **Stream Deck** — not a surface, client, or integration. Do not design
+  modules, clients, or architecture for it.
+- **Mandatory cloud services** — no account required, no server the tool cannot
+  run without, no telemetry by default. An **optional, end-to-end-encrypted
+  relay** for phone sync is allowed (see Snapshot sync) — the server never sees
+  plaintext.
+- Reimplementing provider logic in Kotlin / Swift / TypeScript. Every non-Rust
+  surface renders snapshots.
+- Storing passwords. Showing full tokens. Writing secrets to logs. Sending any
+  credential to any companion device.
 
 ## Differentiators (what makes this worth building)
 
-1. Cross-platform, local-first, open source.
-2. Desktop + tray + CLI + local HTTP API from a **single core**.
+1. Local-first, open source, no mandatory cloud.
+2. **Windows desktop + tray + Android companion + home-screen widget from a
+   single Rust core** — the phone shows real usage without reimplementing a
+   single provider.
 3. **Pace** — not "Claude is at 70%" but "you are burning 2.1× the sustainable
    rate; at this pace you run out 1h 17m before the reset."
 4. **Headroom** — normalized "capacity available" across providers with
@@ -54,38 +80,36 @@ Not "we support more providers." Quality and the operational features above.
 ## Layered architecture
 
 ```
-                       ┌──────────────────┐
-                       │  Provider Engine  │
-                       └────────┬─────────┘
-              ┌─────────────────┼──────────────────┐
-           Claude             Codex              Cursor        (per-provider modules)
-              │                 │                  │
-        AuthSources[]      AuthSources[]      AuthSources[]     (ordered by priority)
-        FetchStrategies[]  FetchStrategies[]  FetchStrategies[] (ordered, with fallback)
-        Parser + Mapper    Parser + Mapper    Parser + Mapper
-              └─────────────────┼──────────────────┘
-                                │
-                        ProviderSnapshot            (normalized; carries source,
-                                │                    freshness, confidence, errors)
-                       ┌────────┴─────────┐
-                       │  Shared Usage Core │
-                       │  Cache (SWR)       │
-                       │  Request dedup     │
-                       │  Adaptive refresh  │
-                       │  Pace engine       │
-                       │  Headroom          │
-                       │  Spend + pricing   │
-                       │  Diagnostics       │
-                       │  Provider status   │
-                       │  Alerts engine     │
-                       └────────┬─────────┘
-              ┌────────┬────────┼────────┬───────────┐
-            Tray    Desktop    CLI    HTTP API      TUI          (surfaces — render only)
-                    Dashboard          (loopback)  (optional)
+                         PROVIDER ENGINE (Rust)
+                     per-provider modules: auth sources,
+                     ordered fetch strategies, parser, mapper
+                                   │
+                            ProviderSnapshot
+                    (normalized; source, freshness,
+                     confidence, errors, schema_version)
+                                   │
+                         SHARED USAGE CORE (Rust)
+                cache (SWR) · request dedup · adaptive refresh
+                pace · headroom · spend + pricing · diagnostics
+                       provider status · alerts engine
+                                   │
+                ┌──────────────────┴───────────────────┐
+                │                                      │
+            WINDOWS                              SYNC LAYER
+        Tauri desktop                    encrypted ProviderSnapshot
+        tray / dashboard                  (never credentials)
+        the COLLECTOR                              │
+                                        ┌──────────┴──────────┐
+                                        │                     │
+                                    ANDROID              FUTURE
+                                 companion app       macOS / Linux
+                                  + widget            iOS
+                              (renders snapshots)  (same core / viewer)
 ```
 
 A surface never knows how Claude authenticates or how Codex computes weekly
-usage. It receives snapshots.
+usage. It receives snapshots. A companion device receives only the snapshot,
+never a credential.
 
 ## Provider engine
 
@@ -166,6 +190,11 @@ extensions:
 - **Data confidence:** high (official API/CLI), medium (local state / dashboard
   scrape), low (heuristic). Normal UI need not show it; diagnostics always do.
 - **"No data" is never `0`.**
+- **Transport-ready:** the snapshot carries a `schema_version` and serializes to
+  plain JSON with no host-specific types (no absolute paths, no `PathBuf`, no
+  credential fields). It is both the frontend payload and the sync payload — see
+  Snapshot sync. Changes are additive; a breaking change bumps `schema_version`
+  and the companion degrades gracefully on an unknown version.
 
 ## Shared core services
 
@@ -250,29 +279,147 @@ never replace values with zero.
 
 ## Surfaces
 
-- **Tray / menu bar** — Windows now; macOS/Linux later. Modes: multi-icon
+### Primary
+
+- **Windows tray / menu bar** — the collector's face. Modes: multi-icon
   (`Claude 72%  Codex 42%`) or merged (`AI 72%`). Click → compact dashboard.
   User picks what shows: icon only / percentage / remaining / reset countdown /
-  mini bar / provider+percentage. **Pinned metrics** can surface directly in
-  the bar.
-- **Desktop dashboard** — operational first: header (last updated, refresh),
-  then providers, each with icon / name / plan / optional account, primary
-  metrics as bars with remaining + reset, optional today's spend, then pace /
-  source / freshness. No wall of technical data by default.
+  mini bar / provider+percentage. **Pinned metrics** surface directly in the
+  bar.
+- **Windows desktop dashboard** — operational first: header (last updated,
+  refresh), then providers, each with icon / name / plan / optional account,
+  primary metrics as bars with remaining + reset, optional today's spend, then
+  pace / source / freshness. No wall of technical data by default.
+- **Android companion app** — see below. Priority 3.
+- **Android home-screen widget** — see below. Priority feature, not a
+  far-future experiment.
+
+### Later / optional
+
 - **CLI** — `aiusage status`, `aiusage provider claude`, `aiusage --json`,
-  `aiusage refresh`, `aiusage providers`, `aiusage diagnose claude`. JSON
-  output is a **versioned contract** for scripts, agents, CI.
-- **Local HTTP API** — loopback only (`127.0.0.1`). `GET /v1/providers`,
-  `GET /v1/usage`, `GET /v1/providers/:id`, `POST /v1/refresh`,
-  `GET /v1/health`. Never exposes credentials. Restrictive CORS. Documented
-  risk that local processes/sites may probe the port. Fully disableable.
-- **TUI** — optional, later.
-- **Widgets** — where the OS allows, later.
-- **IDE / editor extension** — exploratory, far future.
+  `aiusage refresh`, `aiusage diagnose claude`. JSON output is a versioned
+  contract for scripts, agents, CI. Cheap to add once the core is a library;
+  not on the critical path to the personal use case.
+- **Local HTTP API** — loopback (`127.0.0.1`), and the transport for sync V1
+  (see Snapshot sync). Never exposes credentials. Restrictive CORS. Documented
+  probe risk. Fully disableable.
+- **macOS / Linux desktop + tray** — same Rust core; needs test hardware.
+- **iOS companion** — like Android; later.
+- **TUI, IDE / editor extension** — exploratory, far future.
 
 Customization across surfaces: enable/disable and reorder providers and
 metrics, hide / always-visible / on-demand / pin, compact vs comfortable
 density, theme system/dark/light, relative vs absolute reset times.
+
+## Snapshot sync
+
+The Windows collector produces snapshots; the phone needs them, and the PC may
+be asleep or off. This is a distinct architectural layer.
+
+### Hard rule: the phone never receives credentials
+
+```
+Claude credentials ──▶ Claude provider ──▶ ProviderSnapshot ──▶ sync ──▶ Android
+        (stay on the PC, always)                              (snapshot only)
+```
+
+What crosses the sync boundary: `provider`, `plan`, `status`, `updatedAt`,
+`metrics[]` (id, label, kind, used/limit/percent, resetsAt, pace, spend basis),
+`schema_version`. What never crosses: OAuth/refresh tokens, cookies, API keys,
+credential file contents, absolute paths. Enforced by the type that gets
+serialized for sync being a distinct `SyncPayload`, not the internal state.
+
+### V1 — local encrypted transport (no backend)
+
+```
+Windows collector ──▶ local encrypted API / file ──▶ Android
+```
+
+- The collector exposes the snapshot on the loopback HTTP API and/or writes an
+  encrypted snapshot blob to a path the user already syncs (Syncthing, a
+  cloud-drive folder — the tool does not care which).
+- Reachability: same Wi-Fi, or the user's own Tailscale / VPN / WireGuard. No
+  server operated by this project.
+- Encryption: a symmetric key derived from a passphrase the user sets on both
+  devices (Argon2id → key; AES-256-GCM or XChaCha20-Poly1305 for the blob).
+- Pairing: show a QR on the desktop containing the endpoint + a pairing secret;
+  the phone scans it once.
+
+### V2 — optional end-to-end-encrypted relay
+
+```
+Windows ─▶ encrypt locally ─▶ relay (stores ciphertext) ─▶ Android ─▶ decrypt locally
+```
+
+- For "check from anywhere" without VPN setup. Opt-in, off by default.
+- The relay stores only `{ ciphertext, deviceId, timestamp, schema_version }`.
+  It cannot read anything. Keys never leave the devices.
+- Keeps the honest framing: **local-first and end-to-end encrypted**, not
+  "no byte ever leaves the PC" — those are different claims and the docs say
+  which one applies.
+
+### Staleness
+
+The companion always keeps the last valid snapshot and renders it immediately.
+If the last sync is old it shows the age and a `STALE` marker — never `0%`,
+never a blank. Example: `Claude 22% · Updated 4h ago · STALE`.
+
+## Android companion
+
+Priority 3, right after the sync protocol. **Android runs no provider
+integrations.** It consumes normalized snapshots.
+
+### What it shows
+
+- Provider list (All / Claude / Codex / Cursor / …), sorted by remaining
+  capacity.
+- Provider detail: session, weekly, credits, reset, pace, spend, status, last
+  sync.
+- The app caches the last valid snapshot locally and works while the PC is
+  disconnected (shown as stale).
+
+### Home-screen widget — three sizes
+
+| Widget | Content |
+|---|---|
+| **2×1 compact** | one provider + % remaining + reset |
+| **2×2 provider** | session + weekly + reset + status for one provider |
+| **4×2 overview** | 3–5 providers sorted by remaining capacity, + "updated Nm ago" |
+
+```
+┌────────────────────────┐      ┌───────────────────┐
+│ IA Usage               │      │ CLAUDE            │
+│ Claude     18%   1h42m  │      │ Session      82%  │
+│ Codex      63%   3d 4h  │      │ ████████░░        │
+│ Gemini     87%   2h11m  │      │ 18% remaining     │
+│ Updated 2m ago          │      │ Reset in 1h 42m   │
+└────────────────────────┘      └───────────────────┘
+```
+
+Renders cached data instantly; marks stale data clearly.
+
+### Technology
+
+Native — Tauri is not reused here just for the sake of reuse.
+
+```
+Kotlin + Jetpack Compose        app UI
+Glance                          home-screen widgets
+Room / DataStore                snapshot cache + config
+WorkManager                     periodic sync
+```
+
+Module shape — client concerns only, no provider names:
+
+```
+SnapshotRepository   holds + persists the latest SyncPayload
+SyncClient           V1 local / V2 relay transport, decryption, pairing
+ProviderScreen       Compose UI over SnapshotRepository
+WidgetRepository     feeds Glance widgets from the cache
+```
+
+There is no `ClaudeProvider.kt`. The shared contract is the `SyncPayload` JSON
+schema (Kotlin data classes generated from or mirrored against the Rust types).
 
 ## Host capability interfaces
 
@@ -284,13 +431,23 @@ implementations receive these as dependencies. Minimal globals.
 
 ## Security model
 
-- Local-first, no telemetry by default, usage never leaves the machine.
+- Local-first, no telemetry by default. Credentials never leave the collector
+  machine — not to a companion device, not to a relay, never.
+- What may leave the machine: a normalized snapshot, and only encrypted. V1
+  keeps it on the LAN / the user's own VPN. V2's optional relay stores
+  ciphertext only and cannot decrypt it. "Local-first + end-to-end encrypted"
+  is the claim; the docs never overstate it as "nothing ever leaves the PC".
 - Secrets stay local, redacted in logs, files with restrictive permissions.
 - **Per-provider domain allowlist** — a provider cannot request an undeclared
   domain. Mandatory timeout on every request.
 - No provider accesses another provider's secrets.
 - No shell command is ever built from a remote response.
-- All external data validated at the boundary.
+- All external data validated at the boundary — including the decrypted sync
+  payload on the companion side (treat it as untrusted input, validate against
+  `schema_version`).
+- The `SyncPayload` type is structurally incapable of carrying a credential —
+  it has no such field, and the internal state type is never serialized to the
+  wire.
 
 ## Architecture gatekeeper
 
@@ -304,9 +461,9 @@ provider knowledge:
   icon, a docs page, tests, no credential leak, a timeout, a domain allowlist.
 - A contract-conformance suite every provider must pass.
 
-## ADR — desktop framework
+## ADR — framework choices
 
-**Decision: keep Tauri 2 + Rust backend + vanilla TypeScript/Vite frontend.**
+### Desktop: keep Tauri 2 + Rust backend + vanilla TypeScript/Vite frontend
 
 - Reuse: the entire provider engine, quota/cost/pace logic, config, and tray
   are already Rust + Tauri 2 and build clean. A framework switch reuses none of
@@ -317,43 +474,64 @@ provider knowledge:
 - Secure filesystem / keychain access: native in Rust.
 - Auto-update, simple installers (MSI/NSIS/dmg), signing/notarization: Tauri 2
   supports all.
-- A core rewrite to Rust-only-native or Swift needs a concrete, measurable
-  advantage. There is none here — the core is already Rust.
 
 Electron rejected (footprint, no reuse). Native per-OS shells rejected
 (duplicate work, no reuse). Revisit only if a Tauri 2 limitation blocks a
 required capability.
 
+### Android: native Kotlin, not Tauri mobile
+
+- The companion is a thin viewer over a JSON snapshot. It needs no webview and
+  no Rust on the device — shipping either would be weight for nothing.
+- Home-screen widgets require the native widget frameworks (Glance / AppWidget)
+  regardless; Tauri mobile does not provide them.
+- Stack: Kotlin + Jetpack Compose (app), Glance (widgets), Room/DataStore
+  (cache/config), WorkManager (sync). No provider logic — only
+  `SnapshotRepository`, `SyncClient`, `ProviderScreen`, `WidgetRepository`.
+- The shared contract is the `SyncPayload` schema, not shared code.
+
+### Core: stays Rust
+
+A rewrite of the core to another language needs a concrete, measurable
+advantage. There is none — the core is already Rust and every surface is a
+renderer of its output.
+
 ## Milestone roadmap
 
-Each milestone ships working. No mega-branch.
+Each milestone ships working. No mega-branch. Ordered around the personal use
+case (Windows + phone), not around an impressive feature list.
 
 | # | Milestone | Ends with |
 |---|---|---|
-| **M0** | Stabilization (separate doc) | Publishable v0.1.0, provider contract + normalized snapshot formalized |
-| M1 | Fetch strategies + fallback records + host-capability interfaces | Providers try ordered strategies; snapshot records source/attempts/confidence |
+| **M0** | Windows stabilization (separate doc) | Publishable v0.1.0; `ProviderDescriptor` + normalized, transport-ready snapshot formalized |
+| M1 | Fetch strategies + host-capability interfaces | Providers try ordered strategies; snapshot records source/attempts/confidence |
 | M2 | Shared cache (SWR) + request dedup + adaptive refresh | One refresh feeds all consumers; adaptive polling |
 | M3 | Pace + Headroom | Pace states + capacity panel in the dashboard |
 | M4 | Spend / history / pricing engine | Normalized periods, standalone pricing module, labeled basis |
-| M5 | CLI | Versioned JSON contract, `status` / `provider` / `diagnose` / `refresh` |
-| M6 | Local HTTP API | Loopback, disableable, documented risk, restrictive CORS |
-| M7 | Deep diagnostics + provider status pages | Strategy trace, redacted report export, incident surfacing |
-| M8 | Full alerts engine | Budget, unusual spend, reset, unavailable; dedupe + cooldown |
-| M9 | Additional providers | Gemini CLI, Z.ai/GLM, MiniMax, DeepSeek, OpenRouter consolidation, … (quality gated) |
-| M10 | Multi-account | Account arrays surfaced in UI + CLI + API |
-| M11 | TUI (optional) | Terminal surface on the same core |
-| M12 | macOS / Linux | Tray + build + signing for the other platforms |
-| M13 | Auto-update + release channels | stable / beta, code signing + notarization |
-| M14 | Widgets / IDE extension (exploratory) | — |
+| **M5** | **Snapshot Sync Protocol** | `SyncPayload` type, encryption, pairing (QR), V1 local transport (LAN / user VPN), staleness handling |
+| **M6** | **Android companion app** | Kotlin/Compose app renders provider list + detail from synced snapshots; local cache; stale states |
+| **M7** | **Android home-screen widget** | Glance widgets in 2×1 / 2×2 / 4×2; instant cached render; stale marker |
+| M8 | CLI | Versioned JSON contract: `status` / `provider` / `diagnose` / `refresh` |
+| M9 | Local HTTP API | Loopback, disableable, restrictive CORS, documented probe risk |
+| M10 | Deep diagnostics + provider status pages | Strategy trace, redacted report export, incident surfacing |
+| M11 | Full alerts engine | Budget, unusual spend, reset, unavailable; dedupe + cooldown; optional push to Android |
+| M12 | Additional providers | Gemini CLI, Z.ai/GLM, MiniMax, DeepSeek, OpenRouter consolidation, … (quality gated) |
+| M13 | Multi-account | Account arrays surfaced in desktop + companion |
+| M14 | macOS | Tray + build + signing |
+| M15 | Linux | Tray + build + packaging |
+| M16 | iOS companion | Same `SyncPayload`, native Swift viewer + widget |
+| M17 | TUI / IDE integrations | Exploratory |
+| — | Sync V2 (optional E2E relay) | Slotted whenever "check from anywhere without a VPN" becomes worth the infra |
 
 Order may change only if analysis of the repo shows a strong reason.
 
 ## Documentation to produce (across milestones)
 
 `ARCHITECTURE.md`, `PROVIDER_CONTRACT.md`, `ADDING_PROVIDER.md`, `SECURITY.md`,
-`PRIVACY.md`, `DIAGNOSTICS.md`, `RELEASING.md`, and `docs/providers/<provider>.md`
-per provider (what is tracked, authentication, data source, endpoints, known
-limitations, error meanings).
+`PRIVACY.md`, `DIAGNOSTICS.md`, `RELEASING.md`, `SYNC.md` (the `SyncPayload`
+schema, encryption, pairing, what does and does not cross the boundary), and
+`docs/providers/<provider>.md` per provider (what is tracked, authentication,
+data source, endpoints, known limitations, error meanings).
 
 **Privacy page** must state plainly: which files are read and why, which
 endpoints are contacted, what stays local, where credentials live, whether
@@ -374,12 +552,15 @@ unrelated modifications.
 
 ```
 ClaudeProvider  → ProviderSnapshot
-CodexProvider   → ProviderSnapshot
+CodexProvider   → ProviderSnapshot   (Rust core, on the Windows PC)
 GeminiProvider  → ProviderSnapshot
-        ↓
-Tray(snapshot)  Desktop(snapshot)  CLI(snapshot)  HTTP(snapshot)
+        │
+        ├── Windows tray + dashboard (snapshot)
+        └── encrypted SyncPayload ──▶ Android app + widget (snapshot)
 ```
 
-No surface knows how any provider authenticates or computes usage. A user opens
-one app and understands in under five seconds: which AI they can keep using,
-which limit is close, when quota returns, and how much they are spending.
+No surface — desktop or phone — knows how any provider authenticates or
+computes usage, and no credential ever reaches the phone. The user works on the
+PC, pulls out the phone, and understands in under five seconds: which AI they
+can keep using, which limit is close, when quota returns, and how much they are
+spending.
