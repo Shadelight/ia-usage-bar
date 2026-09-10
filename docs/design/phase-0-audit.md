@@ -92,6 +92,8 @@ reads that way but confirming it needs the running app or a provider account.
 | **F-L9** | lost build knowledge | low | confirmed | `src-tauri/Cargo.toml` (diff) | The comment explaining why `crate-type = ["rlib"]` must stay rlib-only — the GNU linker fails with *"export ordinal too large"* when `cdylib`/`staticlib` are present, because of Tauri's symbol surface — was deleted while the setting was kept. The next person to "fix" the crate type will rediscover this the hard way. → Part 2, Phase 3: restore the comment. |
 | **F-L10** | dead branch | low | confirmed | `src-tauri/src/model.rs:253-261` | In `MetricLine::utilization`, the second arm (`format == "percent"`) is unreachable whenever `limit > 0.0`, and `progress_pct` (`:401-424`) **always** sets `limit: 100.0`. The first arm happens to compute the right answer for percent lines (`used / 100 * 100`), so behaviour is correct — but the guard order is confusing and the second arm only fires for a hand-built line with `limit == 0`. → Part 2, Phase 3. |
 | **F-L11** | input validation | low | confirmed | `src-tauri/src/lib.rs:127-141` | `save_api_key` does `cfg.providers.entry(id.clone()).or_default()` on a caller-supplied `String` **before** checking it against `parse_id`, so an unknown id silently creates a junk entry that is then persisted to `config.toml` forever. (`set_provider_enabled` at `:116-124` gets this right — it validates first.) → Part 2, Phase 3. |
+| **F-L12** | dead code / provider mapping | low | confirmed | `src-tauri/src/providers/codex.rs:258-259` | In `snapshot_from_json`, `let visible = if i == 0 { "always" } else { "always" };` — both branches are identical, so the evident intent to hide a secondary rate-limit window behind `"demand"` (the pattern every other provider uses for its non-primary windows, e.g. `antigravity.rs`'s `push_bucket` calls) was never wired up; every Codex window line is always `"always"`. Separately, only the `id` remap on the next line is scoped to `i == 0`, so a secondary window that also classifies to `"window"` (via `classify()`) keeps that non-standard, non-unique id. → Part 2, Phase 3: make the second arm `"demand"` and give each window a guaranteed-unique `id`. |
+| **F-L13** | fragile Windows path | low | confirmed | `src-tauri/src/paths.rs:5-7`, exercised by `codex.rs:86` (`write_back`'s target, cf. F-H1), `kiro.rs` via `app_config_dir` → `paths::home_dir` fallback, `local.rs:103,135,164,167`, `cursor.rs:50,59`, `copilot.rs:53` | `home_dir()` silently falls back to `PathBuf::from(".")` — the process's current directory — when `dirs::home_dir()` returns `None`. Every credential path derived from it, including `codex::write_back`'s destructive rewrite (F-H1) and `kiro::refresh_oauth`'s cache write (F-L8), would then read/write relative to wherever the app was launched from instead of failing loudly. `dirs::home_dir()` is reliable on Windows, so likelihood is low, but the fallback silently reinterprets a hard failure as "provider not connected" (reads) or redirects a write into the CWD (codex/kiro). → Part 2, Phase 3: return `Option<PathBuf>` (or surface the failure) instead of defaulting to `"."`. |
 
 ### Counts
 
@@ -99,8 +101,8 @@ reads that way but confirming it needs the running app or a provider account.
 | --- | --- | --- | --- |
 | high | 4 | 0 | **4** |
 | med | 11 | 1 | **12** |
-| low | 9 | 2 | **11** |
-| **total** | **24** | **3** | **27** |
+| low | 11 | 2 | **13** |
+| **total** | **26** | **3** | **29** |
 
 Task 2 consumes the four `high / confirmed` rows: **F-H1, F-H2, F-H3, F-H4**.
 
@@ -172,3 +174,73 @@ smoke test in §2 cannot be run from an agent session.
 Run the §2 manual smoke test with the user before the milestone closes — F-M12 and the
 Codex-login half of F-H1 are the two items that genuinely cannot be settled by reading code.
 Defer all 12 `med` and 11 `low` findings to Part 2 as tagged.
+
+## 7. Supplemental full-provider review
+
+Task 1 required every new `providers/*.rs` file to be read end to end before Task 2 starts.
+§1 above recorded that four of them (`codex.rs`, `cursor.rs`, `kiro.rs`, `antigravity.rs`)
+had only been read at the credential / subprocess / token-refresh paths, and three
+(`local.rs`, `apikey.rs`, `openai_admin.rs`) had only been machine-scanned. This section
+closes that gap: all seven were read in full, line by line, against the same checklist as
+§3 (swallowed errors, credential leakage, fragile Windows paths, panic risk on the
+refresh/tray path, destructive file writes, regression vs pre-fork). `mod.rs`, `claude.rs`
+and `copilot.rs` — already fully read for the base audit — were re-skimmed for
+cross-references (dispatch table, shared helpers, `map_fetch_err`) but not re-litigated.
+
+| file | lines | previously | now |
+| --- | --- | --- | --- |
+| `src-tauri/src/providers/codex.rs` | 313 | credential/subprocess/token-refresh paths only | read in full |
+| `src-tauri/src/providers/cursor.rs` | 224 | credential/subprocess/token-refresh paths only | read in full |
+| `src-tauri/src/providers/kiro.rs` | 306 | credential/subprocess/token-refresh paths only | read in full |
+| `src-tauri/src/providers/antigravity.rs` | 373 | credential/subprocess/token-refresh paths only | read in full |
+| `src-tauri/src/providers/local.rs` | 297 | machine-scanned only | read in full |
+| `src-tauri/src/providers/apikey.rs` | 361 | machine-scanned only | read in full |
+| `src-tauri/src/providers/openai_admin.rs` | 109 | machine-scanned only | read in full |
+| **total** | **1983** | | |
+| `src-tauri/src/providers/mod.rs`, `claude.rs`, `copilot.rs` | — | already fully read | re-skimmed for cross-references only |
+
+**Result: the finding set changed, but only at the margins.** No new `high` finding —
+confirmed or suspected — turned up anywhere in the seven files. The full read did not
+overturn, weaken, or contradict any of F-H1–F-H4 or the existing `med`/`low` rows; every
+credential (Codex access/refresh/id tokens, Cursor's `cursorAuth/accessToken` cookie value,
+Kiro's AWS SSO OIDC tokens, Antigravity's keyring blob, every API key handled by `local.rs`
+and `apikey.rs`) stays confined to an HTTP header or an owned struct field, and — confirmed
+again by a full read rather than a scan — there is still no `println!`/`eprintln!`/`log::`/
+`tracing::` call anywhere in these files. The destructive-write surface is exactly the two
+spots already known: `codex.rs`'s `write_back` (F-H1, an externally-owned CLI file) and
+`kiro.rs`'s own-cache write (F-L8); grepping the full text of all seven files for
+`fs::write`/`fs::create`/`Command::new`/`.spawn(`/`std::process` turns up nothing beyond
+those two writes and the two subprocess spawns already tracked (`copilot.rs`'s `gh auth
+token` behind F-M6, and `antigravity.rs`'s `run_hidden` tasklist/netstat calls, which
+already set `CREATE_NO_WINDOW` and so were not re-flagged).
+
+Two new `low`/`confirmed` findings did surface from the parts of `codex.rs` and `paths.rs`
+that had not previously been read closely — **F-L12** (a dead `visible` branch and a
+non-unique secondary-window id in Codex's mapper) and **F-L13** (the `home_dir()` `"."`
+fallback that every provider's file paths ultimately rest on, including the F-H1/F-L8 write
+targets). Both are cosmetic/latent, not `high`, and are filed into the existing findings
+table and Counts above; see those rows for detail. No existing finding's severity, status,
+or fix approach was changed.
+
+Two observations worth recording without minting new ids, because they are more-specific
+instances of an already-tracked pattern rather than new defects:
+
+- **`cursor.rs`'s `read_db_token`** (opening `state.vscdb` with
+  `Connection::open_with_flags(..., SQLITE_OPEN_READ_ONLY)`) and **`kiro.rs`'s
+  `read_credentials`** (same pattern against `data.sqlite3`) can both return `None`/`Err` on
+  a transient `SQLITE_BUSY` while the owning IDE/CLI is mid-write to its own state file. Each
+  failure path bottoms out in a `snapshot_err(..)` with `connected: false, stale: false`,
+  which is exactly the shape F-M3 already describes as replacing a good last-known snapshot
+  with a blank "not connected" state. This is additional evidence for F-M3's Part 2 fix, not
+  a new finding.
+- **`kiro.rs`'s cache write** (F-L8) can lose a *rotated* AWS SSO OIDC refresh token on a
+  failed write, exactly as F-H1 describes for Codex — the difference F-L8 already notes
+  (the target is app-owned, not the CLI's own file) still holds, but the practical effect of
+  losing a rotated token is that the bar's Kiro tile goes into a persistent error state until
+  `kiro-cli login` is re-run, not merely "a re-refresh". This refines the *impact* described
+  under F-L8's existing text; it does not change F-L8's `low`/`confirmed` rating, since
+  `kiro-cli` itself is unaffected and the atomic-write fix already prescribed for F-L8 (share
+  F-H1's helper) also closes this gap.
+
+No file outside the seven above was touched or re-read for this pass, and no production
+code was changed.
