@@ -1,10 +1,15 @@
-//! Genera dinamicamente el icono de la bandeja con el % de la sesion dibujado.
+//! Icono de la bandeja (dibujado dinamicamente con el % de la sesion) y el
+//! comportamiento de la ventana anclada a la bandeja.
 //! En Windows la bandeja no muestra texto al lado del icono (como en macOS),
 //! asi que "pintamos" el numero dentro del propio icono.
 
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
 use std::sync::OnceLock;
 use tauri::image::Image;
+use tauri::{AppHandle, Manager};
+
+use crate::model::Dashboard;
+use crate::state::TrayMenuState;
 
 const SIZE: u32 = 32;
 
@@ -155,4 +160,163 @@ pub fn render(percent: Option<f64>) -> Image<'static> {
     }
 
     Image::new_owned(buf, SIZE, SIZE)
+}
+
+pub(crate) fn position_window(win: &tauri::WebviewWindow, anchor_x: f64, anchor_y: f64) {
+    let size = win
+        .outer_size()
+        .unwrap_or(tauri::PhysicalSize::new(360, 500));
+    let w = size.width as f64;
+    let h = size.height as f64;
+    let mut x = anchor_x - w + 12.0;
+    let mut y = anchor_y - h - 12.0;
+
+    if let Ok(Some(mon)) = win.current_monitor() {
+        let mp = mon.position();
+        let ms = mon.size();
+        let left = mp.x as f64;
+        let top = mp.y as f64;
+        let right = left + ms.width as f64;
+        let bottom = top + ms.height as f64;
+        if x + w > right {
+            x = right - w - 4.0;
+        }
+        if x < left {
+            x = left + 4.0;
+        }
+        if y + h > bottom {
+            y = bottom - h - 4.0;
+        }
+        if y < top {
+            y = top + 4.0;
+        }
+    } else {
+        if x < 0.0 {
+            x = anchor_x + 12.0;
+        }
+        if y < 0.0 {
+            y = anchor_y + 12.0;
+        }
+    }
+    let _ = win.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+}
+
+pub(crate) fn show_window(app: &AppHandle, anchor: Option<(f64, f64)>) {
+    if let Some(win) = app.get_webview_window("main") {
+        if let Some((x, y)) = anchor {
+            position_window(&win, x, y);
+        }
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
+pub(crate) fn on_tray_left_click(app: &AppHandle, x: f64, y: f64) {
+    if let Some(win) = app.get_webview_window("main") {
+        let visible = win.is_visible().unwrap_or(false);
+        let minimized = win.is_minimized().unwrap_or(false);
+        if visible && !minimized {
+            let _ = win.hide();
+        } else {
+            show_window(app, Some((x, y)));
+        }
+    }
+}
+
+pub(crate) fn tooltip(dash: &Dashboard) -> String {
+    let bits: Vec<String> = dash
+        .providers
+        .iter()
+        .filter(|p| p.connected)
+        .filter_map(|p| {
+            p.primary_utilization
+                .map(|u| format!("{} {:.0}%", p.short, u))
+        })
+        .take(4)
+        .collect();
+    if bits.is_empty() {
+        "IA Usage Bar".into()
+    } else {
+        format!("IA Usage Bar — {}", bits.join(" · "))
+    }
+}
+
+pub(crate) fn tray_percent(dash: &Dashboard) -> Option<f64> {
+    let primary = dash
+        .providers
+        .iter()
+        .find(|p| p.id == dash.primary)
+        .and_then(|p| p.primary_utilization);
+    if primary.is_some() {
+        return primary;
+    }
+    dash.providers
+        .iter()
+        .filter_map(|p| p.primary_utilization)
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+pub(crate) fn update_tray_from_dashboard(app: &AppHandle, dash: &Dashboard) {
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_icon(Some(render(tray_percent(dash))));
+        let _ = tray.set_tooltip(Some(tooltip(dash)));
+    }
+    if let Some(menu) = app.try_state::<TrayMenuState>() {
+        let n = dash.providers.iter().filter(|p| p.connected).count();
+        let _ = menu
+            .header
+            .set_text(format!("IA Usage Bar — {n} proveedores"));
+        let _ = menu.status.set_text(tooltip(dash));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{progress_pct, snapshot_ok, VendorId};
+
+    #[test]
+    fn tooltip_lists_connected_percents() {
+        let claude = snapshot_ok(
+            VendorId::Anthropic,
+            "Max",
+            vec![progress_pct("session", "Sesión", 42.0, None, 18_000, "always")],
+        );
+        let cursor = snapshot_ok(
+            VendorId::Cursor,
+            "Ultra",
+            vec![progress_pct("total", "Uso", 71.0, None, 2_592_000, "always")],
+        );
+        let dash = Dashboard {
+            providers: vec![claude, cursor],
+            primary: "anthropic".into(),
+            ..Default::default()
+        };
+        let tip = tooltip(&dash);
+        assert!(tip.contains("CLD"));
+        assert!(tip.contains("42"));
+        assert!(tip.contains("CUR"));
+        assert!(tip.contains("71"));
+    }
+
+    #[test]
+    fn tray_percent_prefers_primary() {
+        let claude = snapshot_ok(
+            VendorId::Anthropic,
+            "Max",
+            vec![progress_pct("session", "Sesión", 10.0, None, 18_000, "always")],
+        );
+        let cursor = snapshot_ok(
+            VendorId::Cursor,
+            "Ultra",
+            vec![progress_pct("total", "Uso", 90.0, None, 2_592_000, "always")],
+        );
+        let dash = Dashboard {
+            providers: vec![claude, cursor],
+            primary: "anthropic".into(),
+            ..Default::default()
+        };
+        assert_eq!(tray_percent(&dash).map(|n| n.round()), Some(10.0));
+    }
 }

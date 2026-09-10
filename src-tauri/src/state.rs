@@ -1,0 +1,96 @@
+//! Estado compartido de la app y helpers de bloqueo.
+
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, MutexGuard};
+use std::time::Instant;
+
+use tauri::{menu::MenuItem, Wry};
+
+use crate::config::AppConfig;
+use crate::model::ProviderSnapshot;
+
+pub(crate) struct AppState {
+    pub(crate) snapshots: Mutex<HashMap<String, ProviderSnapshot>>,
+    pub(crate) config: Mutex<AppConfig>,
+    pub(crate) notify: Mutex<HashMap<String, NotifyState>>,
+    pub(crate) notifications_enabled: AtomicBool,
+    pub(crate) allow_exit: AtomicBool,
+    pub(crate) last_refresh: Mutex<Option<Instant>>,
+    /// True while a refresh fan-out is in flight (F-H3 overlap guard).
+    pub(crate) refreshing: AtomicBool,
+    /// Set when a refresh was requested while `refreshing` was held; consumed
+    /// as a single coalesced rerun when the in-flight refresh finishes.
+    pub(crate) rerun_requested: AtomicBool,
+    pub(crate) backoff_until: Mutex<HashMap<String, Instant>>,
+}
+
+pub(crate) struct TrayMenuState {
+    pub(crate) header: MenuItem<Wry>,
+    pub(crate) status: MenuItem<Wry>,
+}
+
+#[derive(Default, Clone)]
+pub(crate) struct NotifyState {
+    pub(crate) initialized: bool,
+    pub(crate) prev_resets: Option<String>,
+    pub(crate) notified_75: bool,
+    pub(crate) notified_90: bool,
+    pub(crate) notified_limit: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UsageAlert {
+    At75,
+    At90,
+    At95,
+}
+
+/// Lock a mutex, tolerating poisoning instead of cascading the panic. A single
+/// transient panic while a lock is held must not permanently kill refreshing.
+pub(crate) fn lock_or_recover<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// F-H3 overlap guard: returns `true` for exactly one caller at a time. The
+/// winner must `flag.store(false, …)` when its refresh finishes.
+pub(crate) fn claim_refresh(flag: &AtomicBool) -> bool {
+    flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    // F-H3: two threads racing the refresh flag — exactly one wins the claim,
+    // the loser is turned away (it will set the rerun flag instead).
+    #[test]
+    fn claim_refresh_admits_exactly_one() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let a = flag.clone();
+        let b = flag.clone();
+        let ha = std::thread::spawn(move || claim_refresh(&a));
+        let hb = std::thread::spawn(move || claim_refresh(&b));
+        let (ra, rb) = (ha.join().unwrap(), hb.join().unwrap());
+        assert!(ra ^ rb, "exactly one thread claims the refresh");
+        assert!(!claim_refresh(&flag), "flag stays held until released");
+        flag.store(false, Ordering::Release);
+        assert!(claim_refresh(&flag));
+    }
+
+    // F-H4: a mutex poisoned by a panicking thread must still be usable.
+    #[test]
+    fn lock_or_recover_tolerates_poison() {
+        let m = Arc::new(Mutex::new(7));
+        let m2 = m.clone();
+        let _ = std::thread::spawn(move || {
+            let _g = m2.lock().unwrap();
+            panic!("poison the mutex");
+        })
+        .join();
+        assert!(m.lock().is_err(), "mutex is poisoned");
+        assert_eq!(*lock_or_recover(&m), 7);
+    }
+}
