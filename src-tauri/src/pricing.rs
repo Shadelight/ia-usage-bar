@@ -14,9 +14,24 @@ pub struct ModelPrice {
     pub cache_read: f64,
 }
 
-const OPUS: ModelPrice = ModelPrice { input: 15.0, output: 75.0, cache_write_5m: 18.75, cache_read: 1.50 };
-const SONNET: ModelPrice = ModelPrice { input: 3.0, output: 15.0, cache_write_5m: 3.75, cache_read: 0.30 };
-const HAIKU: ModelPrice = ModelPrice { input: 1.0, output: 5.0, cache_write_5m: 1.25, cache_read: 0.10 };
+const OPUS: ModelPrice = ModelPrice {
+    input: 15.0,
+    output: 75.0,
+    cache_write_5m: 18.75,
+    cache_read: 1.50,
+};
+const SONNET: ModelPrice = ModelPrice {
+    input: 3.0,
+    output: 15.0,
+    cache_write_5m: 3.75,
+    cache_read: 0.30,
+};
+const HAIKU: ModelPrice = ModelPrice {
+    input: 1.0,
+    output: 5.0,
+    cache_write_5m: 1.25,
+    cache_read: 0.10,
+};
 
 /// Devuelve el precio para un id de modelo. Coincidencia por substring para
 /// tolerar sufijos de version (claude-opus-4-8, claude-sonnet-4-6, etc.).

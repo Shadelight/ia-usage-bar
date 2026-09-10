@@ -1,15 +1,12 @@
 [package]
-name = "claudebar"
+name = "iausagebar"
 version = "0.1.0"
-description = "Monitor de uso de Claude para la bandeja de Windows (estilo CodexBar)"
-authors = ["Daybi"]
+description = "Monitor de uso de planes de IA para la bandeja de Windows"
+authors = ["Alberth Salazar"]
 edition = "2021"
 
 [lib]
-name = "claudebar_lib"
-# Solo rlib: en escritorio Windows el cdylib/staticlib (para movil) hace que el
-# linker GNU falle con "export ordinal too large" por la enorme superficie de
-# simbolos de Tauri. El binario enlaza el rlib normalmente.
+name = "iausagebar_lib"
 crate-type = ["rlib"]
 
 [build-dependencies]
@@ -28,8 +25,11 @@ chrono = { version = "0.4", features = ["clock", "serde"] }
 walkdir = "2"
 dirs = "5"
 ab_glyph = "0.2"
+toml = "0.8"
+base64 = "0.22"
+rusqlite = { version = "0.32", features = ["bundled"] }
+keyring = "3"
 
-# Binario pequeño y rapido para tener siempre abierto
 [profile.release]
 opt-level = "z"
 lto = true

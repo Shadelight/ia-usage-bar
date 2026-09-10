@@ -3,238 +3,64 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Claude Bar</title>
+    <title>IA Usage Bar</title>
   </head>
   <body>
     <div id="panel" class="panel">
-      <!-- ===== Title bar (draggable) ===== -->
-      <header class="titlebar" data-tauri-drag-region>
-        <div class="brand" data-tauri-drag-region>
-          <span class="logo" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="16" height="16">
-              <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M12 2 V22 M12 12 L4.5 19.5 M12 12 L19.5 19.5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-            </svg>
-          </span>
-          <span class="brand-name">Claude Bar</span>
-          <span id="plan-badge" class="plan-pill">—</span>
+      <header class="head" data-tauri-drag-region>
+        <div class="head-copy" data-tauri-drag-region>
+          <div class="head-title" data-tauri-drag-region>IA Usage</div>
+          <div id="updated" class="head-sub">—</div>
         </div>
-        <div class="title-grip" aria-hidden="true" data-tauri-drag-region>
-          <span></span><span></span><span></span><span></span><span></span><span></span>
-          <span></span><span></span><span></span>
-        </div>
-        <div class="tb-buttons">
-          <button class="tb-btn" data-act="minimize" title="Minimize to tray" aria-label="Minimize">
-            <svg viewBox="0 0 16 16" width="13" height="13"><line x1="3" y1="8" x2="13" y2="8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <div class="head-actions">
+          <button class="icon-btn" data-act="refresh" title="Actualizar" aria-label="Refresh">
+            <svg viewBox="0 0 16 16" width="14" height="14"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 3v2.6h-2.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
-          <button class="tb-btn" id="pin-btn" data-act="pin" title="Always on top" aria-label="Pin">
-            <svg viewBox="0 0 16 16" width="13" height="13"><path d="M9.5 1.5l5 5-2 .5-2.5 2.5L9 13l-1.5-1.5L4 15l1-3.5L3.5 10l3.5-1 2.5-2.5.5-2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          <button class="icon-btn" id="btn-spend" data-act="spend" title="Gasto" aria-label="Spend">
+            <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 2.5v11M10.4 5.2c0-1.1-1-1.7-2.4-1.7S5.6 4.2 5.6 5.2c0 .9.7 1.4 2.5 1.8 1.9.4 2.7 1.1 2.7 2.3 0 1.2-1.1 2-2.8 2s-2.8-.8-2.8-2.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           </button>
-          <button class="tb-btn" data-act="minimize" title="Close to tray" aria-label="Close">
-            <svg viewBox="0 0 16 16" width="13" height="13"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <button class="icon-btn" data-act="settings" title="Ajustes" aria-label="Settings">
+            <svg viewBox="0 0 16 16" width="14" height="14"><path d="M6.5 2.2 7 4.1l.9.3c.3-.1.6-.2.9-.2l.9-.3.5-1.9M9.5 13.8 9 11.9l-.9-.3c-.3.1-.6.2-.9.2l-.9.3-.5 1.9M2.2 6.5 4.1 7l.3.9c-.1.3-.2.6-.2.9l-.3.9-1.9.5M13.8 9.5 11.9 9l-.3-.9c.1-.3.2-.6.2-.9l.3-.9 1.9-.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="8" r="2.1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
           </button>
         </div>
       </header>
 
-      <!-- ===== Full view ===== -->
-      <div id="full-view" class="grid">
-        <!-- Left column: usage cards -->
-        <div class="col col-left">
-          <!-- Session -->
-          <section class="card usage-card accent-green">
-            <div class="card-head">
-              <span class="card-title"><span class="ci icon-badge">
-                <svg viewBox="0 0 16 16" width="13" height="13"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.5V8l2.4 1.6" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
-              </span><span data-i18n="session">Session</span> <span class="card-sub" data-i18n="session5h">(5h limit)</span></span>
-              <span class="reset-tag" data-i18n="resetsIn">Resets in</span>
-            </div>
-            <div class="card-main">
-              <div id="session-pct" class="big-pct">—</div>
-              <div class="reset-vals">
-                <div id="session-reset" class="reset-in">—</div>
-                <div id="session-reset-abs" class="reset-abs"></div>
-              </div>
-            </div>
-            <div class="bar"><div id="session-fill" class="fill"></div></div>
-            <div id="session-detail" class="detail"></div>
-          </section>
-
-          <!-- Weekly -->
-          <section class="card usage-card accent-purple">
-            <div class="card-head">
-              <span class="card-title"><span class="ci icon-badge">
-                <svg viewBox="0 0 16 16" width="13" height="13"><rect x="2.2" y="3" width="11.6" height="10.5" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M2.2 6.2h11.6M5.5 1.6v2.4M10.5 1.6v2.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
-              </span><span data-i18n="weekly">Weekly</span> <span class="card-sub" data-i18n="weekly7d">(7-day limit)</span></span>
-              <span class="reset-tag" data-i18n="resetsIn">Resets in</span>
-            </div>
-            <div class="card-main">
-              <div id="weekly-pct" class="big-pct">—</div>
-              <div class="reset-vals">
-                <div id="weekly-reset" class="reset-in">—</div>
-                <div id="weekly-reset-abs" class="reset-abs"></div>
-              </div>
-            </div>
-            <div class="bar"><div id="weekly-fill" class="fill"></div></div>
-            <div class="detail-row">
-              <span id="weekly-detail" class="detail"></span>
-              <span id="weekly-pace" class="pace"></span>
-            </div>
-          </section>
-
-          <!-- Sonnet -->
-          <section class="card usage-card accent-purple" id="sonnet-block">
-            <div class="card-head">
-              <span class="card-title"><span class="ci icon-badge">
-                <svg viewBox="0 0 16 16" width="13" height="13"><path d="M8 1.8l1.5 4 4 1.5-4 1.5L8 12.8 6.5 8.8l-4-1.5 4-1.5z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-              </span><span>Sonnet</span> <span class="card-sub" data-i18n="weeklyShort">(weekly)</span></span>
-              <span class="reset-tag" data-i18n="resetsIn">Resets in</span>
-            </div>
-            <div class="card-main">
-              <div id="sonnet-pct" class="big-pct">—</div>
-              <div class="reset-vals">
-                <div id="sonnet-reset" class="reset-in">—</div>
-                <div id="sonnet-reset-abs" class="reset-abs"></div>
-              </div>
-            </div>
-            <div class="bar"><div id="sonnet-fill" class="fill"></div></div>
-          </section>
-
-          <!-- Extra usage -->
-          <section class="card accent-gold">
-            <div class="card-head">
-              <span class="card-title"><span class="ci icon-badge">
-                <svg viewBox="0 0 16 16" width="13" height="13"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.6v6.8M9.8 6c-.5-.7-3.6-1-3.6.7 0 1.6 3.6.7 3.6 2.3 0 1.8-3.1 1.4-3.6.7" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linecap="round"/></svg>
-              </span><span data-i18n="extra">Extra usage</span></span>
-              <span id="extra-state" class="badge-on" data-i18n="enabled">Enabled</span>
-            </div>
-            <div class="extra-row">
-              <span id="extra-amount" class="extra-amount">—</span>
-              <span id="extra-pct" class="detail"></span>
-            </div>
-            <div class="bar slim"><div id="extra-fill" class="fill"></div></div>
-          </section>
+      <main id="view-dash" class="dash">
+        <div id="empty" class="empty hidden">
+          <p id="empty-text">Aún no has añadido ninguna IA.</p>
+          <button class="btn" id="empty-detect" data-act="detect">Detectar las que ya uso</button>
+          <button class="btn ghost" id="empty-add" data-act="settings">Añadir manualmente</button>
         </div>
+        <div id="stall" class="stall hidden"></div>
+        <nav id="tabs" class="tabs" aria-label="Proveedores"></nav>
+        <section id="detail" class="detail"></section>
+      </main>
 
-        <!-- Right column: cost, plan, actions -->
-        <div class="col col-right">
-          <!-- Cost -->
-          <section class="card">
-            <div class="card-head">
-              <span class="card-title gold"><span class="ci icon-badge">
-                <svg viewBox="0 0 16 16" width="13" height="13"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.6v6.8M9.8 6c-.5-.7-3.6-1-3.6.7 0 1.6 3.6.7 3.6 2.3 0 1.8-3.1 1.4-3.6.7" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linecap="round"/></svg>
-              </span><span data-i18n="cost">Cost</span> <span class="card-sub" data-i18n="apiEq">(API equivalent)</span></span>
-            </div>
-            <div class="kv"><span class="k" data-i18n="today">Today</span><span id="cost-today" class="v">—</span></div>
-            <div class="kv"><span class="k" data-i18n="thisWeek">This week</span><span id="cost-week" class="v">—</span></div>
-            <div class="kv"><span class="k" data-i18n="last30">Last 30 days</span><span id="cost-30" class="v">—</span></div>
-            <div id="cost-note" class="cost-note"></div>
-          </section>
-
-          <!-- Plan -->
-          <section class="card">
-            <div class="card-head">
-              <span class="card-title gold"><span class="ci icon-badge">
-                <svg viewBox="0 0 16 16" width="13" height="13"><path d="M8 1.8l1.8 3.7 4.1.6-3 2.9.7 4.1L8 11.7 4.4 13.1l.7-4.1-3-2.9 4.1-.6z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-              </span><span data-i18n="plan">Plan</span></span>
-            </div>
-            <div id="plan-name" class="plan-name">—</div>
-            <div class="cost-note" data-i18n="rateLimitTier">Rate limit tier</div>
-          </section>
-
-          <!-- Status / actions -->
-          <section class="card actions-card">
-            <div class="status-row">
-              <span id="updated" class="status-text">—</span>
-              <button class="mini-btn" data-act="refresh" title="Refresh now">
-                <svg viewBox="0 0 16 16" width="12" height="12"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 3v2.6h-2.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                <span data-i18n="refresh">Refresh now</span>
-              </button>
-            </div>
-            <button class="row-btn" data-act="notifications">
-              <span class="rb-left"><span class="ci">
-                <svg viewBox="0 0 16 16" width="13" height="13"><path d="M4 6.5a4 4 0 0 1 8 0c0 3 1 4 1 4H3s1-1 1-4zM6.4 13a1.7 1.7 0 0 0 3.2 0" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </span><span data-i18n="notifications">Notifications</span></span>
-              <span id="notif-toggle" class="switch on"><span class="knob"></span></span>
-            </button>
-            <button class="row-btn" data-act="settings">
-              <span class="rb-left"><span class="ci">
-                <svg viewBox="0 0 16 16" width="13" height="13"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-              </span><span data-i18n="settings">Settings</span></span>
-              <span class="chev">›</span>
-            </button>
-          </section>
+      <main id="view-spend" class="spend hidden">
+        <div class="settings-head">
+          <button class="icon-btn" data-act="back" aria-label="Back">‹</button>
+          <h2 id="spend-title">Gasto del mes</h2>
         </div>
-      </div>
+        <div id="spend-body" class="spend-body"></div>
+      </main>
 
-      <!-- ===== Footer ===== -->
-      <footer class="footbar">
+      <main id="view-settings" class="settings hidden">
+        <div class="settings-head">
+          <button class="icon-btn" data-act="back" aria-label="Back">‹</button>
+          <h2 id="settings-title">Ajustes</h2>
+        </div>
+        <div id="settings-body" class="settings-body"></div>
+      </main>
+
+      <footer class="foot">
+        <span class="foot-name">IA Usage Bar</span>
         <div class="lang-seg">
-          <button class="seg" data-act="lang-en">
-            <svg viewBox="0 0 16 16" width="13" height="13"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M2.5 8h11M8 2a10 10 0 0 1 0 12M8 2a10 10 0 0 0 0 12" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>
-            English
-          </button>
-          <button class="seg" data-act="lang-es">Español</button>
+          <button class="seg" data-act="lang-en">EN</button>
+          <button class="seg" data-act="lang-es">ES</button>
         </div>
-        <button class="foot-toggle" data-act="compact">
-          <span data-i18n="compactMode">Compact mode</span>
-          <span id="compact-switch" class="switch"><span class="knob"></span></span>
-        </button>
-        <button class="foot-link" data-act="logs">
-          <svg viewBox="0 0 16 16" width="14" height="14"><path d="M1.8 5.2h12.4v7.6a1.2 1.2 0 0 1-1.2 1.2H3a1.2 1.2 0 0 1-1.2-1.2zM1.8 5.2V3.7A1.2 1.2 0 0 1 3 2.5h3l1.2 1.4H13a1.2 1.2 0 0 1 1.2 1.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
-          <span data-i18n="openLogs">Open logs folder</span>
-        </button>
-        <button class="foot-link danger" data-act="quit">
-          <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 1.8v6M4.3 4.8a5 5 0 1 0 7.4 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-          <span data-i18n="quit">Quit</span>
-        </button>
+        <button class="foot-quit" data-act="quit" id="btn-quit">Salir</button>
       </footer>
-
-      <!-- ===== Compact view ===== -->
-      <div id="compact-view">
-        <div class="cv-drag" data-tauri-drag-region></div>
-        <div class="cv-head" data-tauri-drag-region>
-          <span class="brand">
-            <span class="logo"><svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2 V22 M12 12 L4.5 19.5 M12 12 L19.5 19.5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg></span>
-            <span class="brand-name">Claude Bar</span>
-            <span id="cv-plan" class="plan-pill">—</span>
-          </span>
-          <button class="cv-expand" data-act="expand" title="Expand" aria-label="Expand">
-            <svg viewBox="0 0 14 14" width="11" height="11"><path d="M2 9v3h3M12 5V2H9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
-        </div>
-        <div class="cv-cols">
-          <div class="cv-card accent-green">
-            <div class="cv-label"><span data-i18n="session">Session</span> <span class="card-sub" data-i18n="session5h">(5h limit)</span></div>
-            <div class="cv-main"><span id="cv-session-pct" class="cv-pct">—</span><span id="cv-session-reset" class="cv-reset"></span></div>
-            <div class="bar slim"><div id="cv-session-fill" class="fill"></div></div>
-            <div id="cv-session-detail" class="cv-detail"></div>
-          </div>
-          <div class="cv-card accent-purple">
-            <div class="cv-label"><span data-i18n="weekly">Weekly</span> <span class="card-sub" data-i18n="weekly7d">(7-day limit)</span></div>
-            <div class="cv-main"><span id="cv-weekly-pct" class="cv-pct">—</span><span id="cv-weekly-reset" class="cv-reset"></span></div>
-            <div class="bar slim"><div id="cv-weekly-fill" class="fill"></div></div>
-            <div id="cv-weekly-detail" class="cv-detail"></div>
-          </div>
-        </div>
-        <div class="cv-foot">
-          <span id="cv-updated" class="cv-updated">—</span>
-          <span id="cv-today" class="cv-today"></span>
-          <button class="cv-icon" data-act="settings" title="Settings" aria-label="Settings">
-            <svg viewBox="0 0 16 16" width="13" height="13"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-          </button>
-        </div>
-      </div>
-
-      <!-- ===== Modal ===== -->
-      <div id="modal" class="modal hidden">
-        <div class="modal-card">
-          <button class="modal-x" data-act="modal-close" aria-label="Close">✕</button>
-          <h3 id="modal-title"></h3>
-          <div id="modal-body" class="modal-body"></div>
-        </div>
-      </div>
     </div>
-
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -97,7 +97,10 @@ fn draw_text(buf: &mut [u8], text: &str, font: &FontVec) {
     let mut px = 22.0_f32;
     for _ in 0..6 {
         let scaled = font.as_scaled(PxScale::from(px));
-        let total: f32 = text.chars().map(|c| scaled.h_advance(font.glyph_id(c))).sum();
+        let total: f32 = text
+            .chars()
+            .map(|c| scaled.h_advance(font.glyph_id(c)))
+            .sum();
         if total <= max_w {
             break;
         }
@@ -105,7 +108,10 @@ fn draw_text(buf: &mut [u8], text: &str, font: &FontVec) {
     }
 
     let scaled = font.as_scaled(PxScale::from(px));
-    let total_w: f32 = text.chars().map(|c| scaled.h_advance(font.glyph_id(c))).sum();
+    let total_w: f32 = text
+        .chars()
+        .map(|c| scaled.h_advance(font.glyph_id(c)))
+        .sum();
     let ascent = scaled.ascent();
     let descent = scaled.descent();
     let text_h = ascent - descent;
@@ -114,7 +120,8 @@ fn draw_text(buf: &mut [u8], text: &str, font: &FontVec) {
 
     for c in text.chars() {
         let id = font.glyph_id(c);
-        let glyph = id.with_scale_and_position(PxScale::from(px), ab_glyph::point(pen_x, baseline_y));
+        let glyph =
+            id.with_scale_and_position(PxScale::from(px), ab_glyph::point(pen_x, baseline_y));
         if let Some(outline) = font.outline_glyph(glyph) {
             let bb = outline.px_bounds();
             outline.draw(|gx, gy, cov| {

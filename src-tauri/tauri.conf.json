@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Claude Bar",
+  "productName": "IA Usage Bar",
   "version": "0.1.0",
-  "identifier": "com.daybi.claudebar",
+  "identifier": "com.alberth.iausagebar",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -14,24 +14,24 @@
     "windows": [
       {
         "label": "main",
-        "title": "Claude Bar",
-        "width": 900,
-        "height": 700,
-        "minWidth": 620,
-        "minHeight": 620,
+        "title": "IA Usage Bar",
+        "width": 360,
+        "height": 500,
+        "minWidth": 320,
+        "minHeight": 380,
         "resizable": true,
         "decorations": false,
         "transparent": true,
         "shadow": true,
         "alwaysOnTop": true,
-        "skipTaskbar": false,
+        "skipTaskbar": true,
         "visible": true,
         "center": true,
         "windowEffects": {
           "effects": ["acrylic"],
           "state": "active",
-          "radius": 14,
-          "color": [16, 20, 40, 210]
+          "radius": 18,
+          "color": [28, 28, 30, 230]
         }
       }
     ],

@@ -1,0 +1,50 @@
+# NOTICE
+
+IA Usage Bar is a maintained Windows tray app derived from Claude Bar.
+
+This product incorporates ideas, endpoint mappings, and vendor-auth patterns from
+open-source projects licensed under MIT. Portions of the provider clients were
+adapted from those codebases. Their copyright notices are retained here.
+
+## Claude Bar (Daybi)
+
+Copyright (c) 2026 Daybi
+https://github.com/Daybi (original Claude Bar)
+
+## ai-usagebar
+
+Copyright (c) AkitaOnRails and contributors
+https://github.com/akitaonrails/ai-usagebar
+MIT License
+
+Vendor endpoints, OAuth refresh flows, Cursor `state.vscdb` session reading,
+Codex `~/.codex/auth.json` handling, and Windows credential paths.
+
+## OpenUsage
+
+Copyright (c) Robin Ebers and contributors
+https://github.com/robinebers/openusage
+MIT License
+
+Provider snapshot / metric-line contract, pace projection, first-run credential
+detection, and compact tray-popover interaction model.
+
+## CodexBar
+
+Copyright (c) Peter Steinberger
+https://github.com/steipete/CodexBar
+MIT License
+
+OpenAI Admin API cost/usage mapping used by the OpenAI API provider.
+
+## ccusage
+
+Copyright (c) ryoppippi
+https://github.com/ryoppippi/ccusage
+MIT License
+
+Local Claude Code JSONL cost estimation.
+
+Vendor names (Claude, ChatGPT, Codex, Cursor, Antigravity, OpenAI, GitHub
+Copilot, and others) are used nominatively to identify each service. This
+project is not affiliated with, sponsored by, or endorsed by those companies.

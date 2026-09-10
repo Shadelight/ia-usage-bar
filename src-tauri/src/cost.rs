@@ -9,8 +9,8 @@
 //! Los tokens "mostrados" excluyen la lectura de cache (que es enorme y barata)
 //! para que el numero se parezca al de los dashboards oficiales.
 
-use crate::credentials::claude_dir;
-use crate::model::CostReport;
+use crate::paths::claude_dir;
+use serde::Serialize;
 use crate::pricing;
 use chrono::{DateTime, Datelike, Duration, Local, Utc};
 use serde_json::Value;
@@ -20,6 +20,21 @@ use std::collections::HashMap;
 /// / mes-calendario de 31d / 30d rolling). Acelera mucho el escaneo. Margen
 /// extra por desfase de mtime de OneDrive y zonas horarias.
 const WINDOW_DAYS: i64 = 35;
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostReport {
+    pub today_usd: f64,
+    pub today_tokens: u64,
+    pub week_usd: f64,
+    pub week_tokens: u64,
+    pub month_usd: f64,
+    pub month_tokens: u64,
+    pub last30_usd: f64,
+    pub last30_tokens: u64,
+    pub updated_at: String,
+    pub empty: bool,
+}
 
 struct Record {
     ts: DateTime<Utc>,
@@ -68,7 +83,9 @@ fn parse_line(line: &str) -> Option<(String, Record)> {
     let usage = msg.get("usage")?;
 
     let ts_str = v.get("timestamp").and_then(|x| x.as_str())?;
-    let ts = DateTime::parse_from_rfc3339(ts_str).ok()?.with_timezone(&Utc);
+    let ts = DateTime::parse_from_rfc3339(ts_str)
+        .ok()?
+        .with_timezone(&Utc);
 
     let model = msg
         .get("model")
@@ -119,16 +136,15 @@ fn parse_line(line: &str) -> Option<(String, Record)> {
 pub fn compute() -> CostReport {
     let projects = claude_dir().join("projects");
     let cutoff_file = std::time::SystemTime::now()
-        .checked_sub(std::time::Duration::from_secs((WINDOW_DAYS as u64) * 86_400))
+        .checked_sub(std::time::Duration::from_secs(
+            (WINDOW_DAYS as u64) * 86_400,
+        ))
         .unwrap_or(std::time::UNIX_EPOCH);
 
     // requestId -> registro mas completo (mayor cantidad de tokens).
     let mut records: HashMap<String, Record> = HashMap::new();
 
-    for entry in walkdir::WalkDir::new(&projects)
-        .into_iter()
-        .flatten()
-    {
+    for entry in walkdir::WalkDir::new(&projects).into_iter().flatten() {
         if !entry.file_type().is_file() {
             continue;
         }
