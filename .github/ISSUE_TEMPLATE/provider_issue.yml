@@ -1,0 +1,61 @@
+name: Provider integration problem
+description: A specific AI provider isn't connecting or its numbers look wrong
+title: "[Provider]: "
+labels: [provider]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve IA Usage Bar. Never paste tokens, API keys, cookies, or raw session/auth files — sanitized logs only (Settings → Datos y registros → Exportar diagnóstico).
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      placeholder: e.g. Codex / ChatGPT
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: IA Usage Bar version
+      placeholder: 0.2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Windows version
+      options:
+        - Windows 11
+        - Windows 10
+    validations:
+      required: true
+  - type: dropdown
+    id: status
+    attributes:
+      label: Connection status shown in the app
+      options:
+        - Needs login
+        - Needs permission
+        - Application/service not responding
+        - Error
+        - Connected, but numbers look wrong
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized diagnostic export or logs
+      description: Attach the file from Settings → Datos y registros → Exportar diagnóstico, or paste sanitized log lines.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed credentials, tokens, and private account data before submitting.
+          required: true

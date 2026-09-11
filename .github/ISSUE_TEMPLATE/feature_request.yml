@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest an improvement or provider integration
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the user need, not only the proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Provider (if applicable)
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Official source or API documentation
+      description: Link to the provider documentation that exposes the requested data.
