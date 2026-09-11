@@ -48,3 +48,13 @@ Local Claude Code JSONL cost estimation.
 Vendor names (Claude, ChatGPT, Codex, Cursor, Antigravity, OpenAI, GitHub
 Copilot, and others) are used nominatively to identify each service. This
 project is not affiliated with, sponsored by, or endorsed by those companies.
+
+## LobeHub Icons
+
+Copyright (c) LobeHub contributors
+https://github.com/lobehub/lobe-icons
+MIT License
+
+Provider logo SVGs in `src/assets/providers/` were extracted from
+`@lobehub/icons-static-svg`. The vendor marks remain property of their
+respective owners and are used solely for service identification.

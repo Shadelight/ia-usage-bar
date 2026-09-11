@@ -244,3 +244,25 @@ instances of an already-tracked pattern rather than new defects:
 
 No file outside the seven above was touched or re-read for this pass, and no production
 code was changed.
+
+## 8. Implementation follow-up — 2026-09-11
+
+The audit above remains the historical record of the original working tree. The current
+implementation closes the findings as follows:
+
+| Findings | Resolution |
+| --- | --- |
+| F-H1–F-H4 | Atomic/recoverable credential writes, unknown-field preservation, refresh coalescing, panic recovery, and poison-tolerant locks with regression tests. |
+| F-M1–F-M3 | Claude CLI version cached once; structured rate-limit reasons; last valid metrics retained as stale on non-authoritative failures. |
+| F-M4–F-M5 | Tauri command failures reach an accessible toast; initial dashboard failure renders a retry state. |
+| F-M6–F-M11 | Hidden `gh` process, propagated config errors, removed inert provider-line config, empty-provider no-op, serialized detection changes, and cached provider catalog. |
+| F-M12 | Native minimize, taskbar/Alt+Tab presence, close-to-tray, and explicit tray exit behavior implemented. |
+| F-L1–F-L3 | Raw responses are redacted in development logs, UI diagnostics are sanitized, Claude extra-usage aliases restored, and the unused opener plugin removed. |
+| F-L4–F-L12 | Inert config removed; attributes escaped; `%WINDIR%` font discovery; write-time validation; atomic Kiro cache; rlib rationale restored; utilization branch clarified; provider IDs validated; Codex window IDs made unique. |
+| F-L13 | Missing home-directory discovery can no longer redirect reads/writes into the process working directory; it falls back to an isolated temp sentinel and reports the condition. |
+
+Automated verification at this follow-up: 40 Rust unit tests, 7 frontend tests,
+TypeScript/Vite production build, `cargo check`, NSIS packaging, and WiX MSI linking.
+The remaining checks are inherently manual: tray behavior on real light/dark taskbars,
+real-account provider responses, autostart across a Windows login, and a tagged GitHub
+release run.

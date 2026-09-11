@@ -1,66 +1,177 @@
-# IA Usage Bar for Windows
+# IA Usage Bar
 
-> Keep every AI plan you use in the Windows tray — remaining quota, reset time, and spend, one click away.
+![IA Usage Bar](docs/screenshots/panel.png)
 
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+[![Latest release](https://img.shields.io/github/v/release/Shadelight/ia-usage-bar)](https://github.com/Shadelight/ia-usage-bar/releases/latest)
+[![Build](https://github.com/Shadelight/ia-usage-bar/actions/workflows/build.yml/badge.svg)](https://github.com/Shadelight/ia-usage-bar/actions/workflows/build.yml)
 ![Platform: Windows 10/11](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Built with: Rust + Tauri](https://img.shields.io/badge/Built%20with-Rust%20%2B%20Tauri-orange)
 
-A Windows tray app that monitors **Claude Code, Codex/ChatGPT, Cursor, Antigravity, OpenAI API**, GitHub Copilot, OpenRouter, Z.AI, DeepSeek, Grok, Kimi, and the rest of the [ai-usagebar](https://github.com/akitaonrails/ai-usagebar) catalog. Built with **Rust + Tauri 2**.
+**Monitor AI quotas, reset times, and spend across your tools from one Windows tray app.**
 
-This project is a maintained fork of [Claude Bar by Daybi](https://github.com/Daybi), expanded into a multi-provider monitor. MIT. Maintained by Alberth Salazar.
+### [⬇ Download the latest release](https://github.com/Shadelight/ia-usage-bar/releases/latest)
 
-## What it shows
+[Installation](#install) · [Supported providers](#supported-providers) · [Privacy](#privacy--security)
 
-Each enabled provider is a card with:
+## Why IA Usage Bar
 
-- Quota bars (session / weekly / billing cycle, depending on the vendor)
-- Reset countdown (click to flip to the exact time)
-- Used vs remaining (click the % to flip)
-- Pace notes when you are burning faster than the window
-- Local cost estimates for Claude Code (API-equivalent, from `~/.claude` JSONL logs)
+Most people using AI tools today juggle more than one subscription — Claude
+Code, Codex, Cursor, Copilot, a couple of pay-per-token APIs. Checking "how
+much do I have left" means opening a different dashboard for each one. IA
+Usage Bar puts every provider's session/weekly quota, reset countdown, and
+spend in one resident tray window, so you know before you hit a wall.
 
-The tray icon paints the primary provider's usage percentage (green → amber → red).
+## Features
 
-## How it works
+- Multi-provider usage monitoring — enable only the providers you use; the
+  app never turns one off for you.
+- Session, rolling-window, and weekly/monthly quotas per provider, with
+  exact and relative reset times.
+- Used vs. remaining percentages, pace warnings when you're burning faster
+  than the window allows, and stale-data handling when a provider is
+  temporarily unreachable.
+- Structured connection status per provider (needs login, needs permission,
+  service unavailable, rate limited) instead of a single generic error.
+- Tray-resident app: minimize, close-to-tray, single-instance, tray icon
+  paints the primary provider's usage.
+- Pin (always-on-top) and compact window modes, both remembered across
+  restarts and mirrored in the tray menu.
+- Configurable notification thresholds and autostart with Windows.
+- Per-provider connection guide and, where a provider publishes one, direct
+  links to its official usage/status page.
+- Local diagnostics export for bug reports (sanitized — no tokens, no keys).
+- API keys are stored in Windows Credential Manager, never in plain
+  `config.toml`. No telemetry.
 
-Credentials stay on your PC. IA Usage Bar only talks to each vendor's own usage endpoint.
+## Supported providers
 
-| Provider | Auth |
-|---|---|
-| Claude Code | `%USERPROFILE%\.claude\.credentials.json` |
-| Codex / ChatGPT | `%USERPROFILE%\.codex\auth.json` (`codex login`) |
-| Cursor | Cursor IDE `state.vscdb` or `cursor-agent` `auth.json` |
-| Antigravity | Local language server or Google session in Windows Credential Manager (`gemini:antigravity`) |
-| OpenAI API | `OPENAI_ADMIN_KEY` (org costs) |
-| Copilot | `gh auth token` or `GITHUB_COPILOT_TOKEN` |
-| OpenRouter, Z.AI, DeepSeek, Grok, Kimi, … | Environment variable or API key in Settings |
+| Provider | Connection | Notes |
+|---|---|---|
+| Claude Code | OAuth (`claude` CLI login) | Session + weekly quotas, local cost estimate from `~/.claude` logs |
+| Codex / ChatGPT | OAuth (`codex login`) | 5h + weekly quotas |
+| Cursor | Local session (IDE `state.vscdb` or `cursor-agent`) | Plan usage by model group |
+| Antigravity | Local language server / Google session | Per-bucket quotas |
+| GitHub Copilot | `gh auth token` or `GITHUB_COPILOT_TOKEN` | Premium interactions + chat quota |
+| OpenAI API | `OPENAI_ADMIN_KEY` | Org cost/usage, not a personal ChatGPT plan |
+| Anthropic API | `ANTHROPIC_ADMIN_KEY` | Org cost/usage |
+| OpenRouter, Z.AI, DeepSeek, Grok, Kimi, Kilo, Novita, Moonshot, MiniMax, Groq, Kiro, Nous, SuperGrok, Command Code, OpenCode Go, Windsurf | API key (Settings or environment variable) or local session, depending on the vendor | Credit/usage fields vary by API — see the in-app connection guide for each |
 
-On first launch it **detects** which tools are already signed in and enables those providers. It never turns a provider off for you.
+Full auth details and per-provider hints are shown in **Settings → Proveedores**.
 
-Polling defaults to every **5 minutes** (1 / 5 / 10 in Settings) because several usage APIs rate-limit harder than that.
+## Screenshots
+
+<table>
+<tr>
+<td><img src="docs/screenshots/panel.png" width="280" alt="Provider panel"></td>
+<td><img src="docs/screenshots/compact.png" width="280" alt="Compact mode"></td>
+<td><img src="docs/screenshots/settings.png" width="280" alt="Settings"></td>
+</tr>
+</table>
 
 ## Install
 
-**Requirements:** Windows 10/11. For Claude/Codex/Cursor, sign in to those apps once.
+**Requirements:** Windows 10/11. For Claude/Codex/Cursor, sign in to those
+apps once beforehand.
+
+1. Download the installer from [GitHub Releases](https://github.com/Shadelight/ia-usage-bar/releases/latest)
+   — either the NSIS setup `.exe` or the `.msi`.
+2. Run it.
+3. Launch **IA Usage Bar** from the Start menu.
+4. Open Settings and enable the providers you use (or click **Detect the
+   ones I already use**).
+
+> Builds are not code-signed yet, so Windows SmartScreen may warn on first
+> run ("Windows protected your PC"). Click **More info → Run anyway**. This
+> is expected for an unsigned open-source installer, not a sign of tampering
+> — verify the SHA256 checksum published with the release if you want to be
+> sure.
+
+## Development
 
 ```powershell
 npm install
-npm run tauri dev      # development
-npm run tauri build    # NSIS installer
+npm run tauri dev      # development, hot reload
+npm run build           # frontend production build
+npm run test:frontend
+cargo test --manifest-path src-tauri/Cargo.toml
+npm run tauri build     # NSIS + MSI installers
 ```
 
-Config lives at `%APPDATA%\ia-usagebar\config.toml`.
+Config lives at `%APPDATA%\ia-usagebar\config.toml`. Logs and diagnostics
+export to `%APPDATA%\ia-usagebar\logs\`.
 
-## Privacy
+## How provider detection works
 
-Read-only and local-first. No telemetry. Tokens are read from files the official CLIs already maintain, or from keys you paste, and are sent only to that vendor.
+On first launch, IA Usage Bar checks for local logins (CLI session files,
+Windows Credential Manager entries) and enables the providers it finds —
+it never disables one for you afterward. Providers without a local session
+need a manually pasted API key, saved through Settings into Windows
+Credential Manager.
 
-## Credits
+## Privacy & security
 
-See [NOTICE](NOTICE). Original Claude Bar: Daybi. Provider catalog adapted from [akitaonrails/ai-usagebar](https://github.com/akitaonrails/ai-usagebar). UI contract inspired by [OpenUsage](https://github.com/robinebers/openusage). OpenAI Admin mapping from [CodexBar](https://github.com/steipete/CodexBar). Cost math modeled after [ccusage](https://github.com/ryoppippi/ccusage).
+- Read-only and local-first. **No telemetry.**
+- Tokens are read from files the official CLIs already maintain (e.g.
+  `~/.claude`, `~/.codex/auth.json`) or from Windows Credential Manager —
+  never copied anywhere else.
+- Each provider is contacted only for its own usage endpoint, using the
+  credential you already have for it.
+- Manually entered API keys are stored in Windows Credential Manager via the
+  Rust `keyring` crate, not in plaintext config.
+- See [SECURITY.md](SECURITY.md) for the full policy and how to report a
+  vulnerability.
+
+## Notifications
+
+Alerts fire once per threshold per usage window (defaults: 75%, 90%, 95%,
+configurable in Settings → Notificaciones), plus a notice when a window
+resets.
+
+## Compact mode / tray behavior
+
+Compact mode (Settings → Apariencia, the header `⋯` menu, or the tray)
+shrinks the window to the selected provider's primary quota and hides
+secondary detail. Pin keeps the window always-on-top; both states persist
+across restarts. Closing the window sends it to the tray instead of
+quitting — use **Exit** from the tray menu or the footer to actually quit.
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| Provider shows "needs login" | Sign in to that provider's app/CLI, then use **Detect** or **Refresh** |
+| Provider shows "needs permission" | The saved credential can authenticate but can't read usage — check the account's plan/permissions |
+| "Application is not responding" | The provider's local app/service isn't running |
+| Data looks stale / an amber warning appears | The last refresh failed; IA Usage Bar keeps the last good numbers instead of showing nothing |
+| Something is just wrong | Settings → Datos y registros → **Exportar diagnóstico**, attach the file to a bug report |
+
+## Roadmap
+
+Only items with an approved design so far:
+
+- Signed installers (removes the SmartScreen warning).
+- Expanding the provider-links registry (usage/billing/status pages) as
+  more official URLs are verified.
+
+Longer-term ideas (companion apps, sync) exist only as an unbuilt
+architecture sketch in `docs/superpowers/specs/` — not a commitment.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+See [SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT — © 2026 Daybi (original Claude Bar) · © 2026 Alberth Salazar (IA Usage Bar).
-See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
+
+## Third-party notices
+
+IA Usage Bar's provider architecture and connection patterns build on
+several MIT-licensed open-source projects, including the original Claude
+Bar by Daybi that this project started from. Full attribution is in
+[NOTICE](NOTICE).
