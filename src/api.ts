@@ -19,7 +19,9 @@ export type MetricLine =
 
 export type WindowType = "session" | "5h" | "daily" | "weekly" | "monthly" | "credits" | "custom";
 export type ResetStatus = "known" | "not_provided" | "not_applicable" | "fetch_failed";
-export type UsageSource = "cli" | "oauth" | "api" | "local-session" | "web-session";
+export type UsageSource = "auto" | "cli" | "oauth" | "api" | "local-session" | "web-session" | "web" | "local";
+export type DataConfidence = "exact" | "estimated" | "percent_only" | "unknown";
+export type ServiceHealth = "operational" | "degraded" | "outage" | "unknown";
 export type ProviderStatus = "connected" | "needs_auth" | "needs_permission" | "unavailable" | "error";
 export type ProviderStatusReason =
   | "missing_credential"
@@ -48,6 +50,7 @@ export interface UsageQuota {
   source: UsageSource;
   fetchedAt: string;
   stale: boolean;
+  confidence?: DataConfidence;
 }
 
 export interface CreditsSummary {
@@ -65,6 +68,8 @@ export interface UsageCost {
   week: number | null;
   thirtyDays: number | null;
   month: number | null;
+  /** "estimated" = derivado de logs locales, no es factura. */
+  confidence?: DataConfidence;
 }
 
 export interface ProviderUsage {
@@ -74,6 +79,10 @@ export interface ProviderUsage {
   plan: string;
   status: ProviderStatus;
   statusReason: ProviderStatusReason | null;
+  /** Salud del servicio, independiente de la conexión. */
+  service?: ServiceHealth;
+  /** Fuente que produjo el snapshot actual. */
+  activeSource?: UsageSource | null;
   stale: boolean;
   error: string | null;
   hint: string | null;
@@ -92,6 +101,8 @@ export interface VendorLinks {
   usageUrl: string | null;
   billingUrl: string | null;
   statusUrl: string | null;
+  docsUrl?: string | null;
+  appUrl?: string | null;
 }
 
 export interface VendorInfo {
@@ -104,7 +115,13 @@ export interface VendorInfo {
   needsKey: boolean;
   enabled: boolean;
   detected: boolean;
+  /** Credential present (env/keyring/local login). Boolean only, never the secret. */
+  hasCredential: boolean;
   links: VendorLinks;
+  /** Estrategias declaradas en orden de preferencia ("oauth"|"cli"|"api"|"web"|"local"). */
+  strategies: string[];
+  /** Preferencia explícita o null = Automática. */
+  sourcePreference: string | null;
 }
 
 export interface SpendRow {
@@ -118,12 +135,16 @@ export interface Dashboard {
   providers: ProviderSnapshot[];
   catalog: VendorInfo[];
   refreshMinutes: number;
+  refreshAdaptive: boolean;
   primary: string;
   notifications: boolean;
   notifyThresholds: number[];
   autostart: boolean;
   alwaysOnTop: boolean;
   compactMode: boolean;
+  appBootstrapping: boolean;
+  refreshing: boolean;
+  loadingProviders: string[];
   nextUpdateInSecs: number;
   spendMonthUsd: number;
   spend: SpendRow[];

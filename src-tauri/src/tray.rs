@@ -4,12 +4,13 @@
 //! asi que "pintamos" el numero dentro del propio icono.
 
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
+use std::collections::HashMap;
 use std::sync::OnceLock;
 use tauri::image::Image;
 use tauri::menu::CheckMenuItem;
 use tauri::{AppHandle, Manager};
 
-use crate::model::{Dashboard, VendorInfo};
+use crate::model::{Dashboard, ProviderSnapshot, VendorInfo};
 use crate::state::TrayMenuState;
 
 const SIZE: u32 = 32;
@@ -278,10 +279,61 @@ pub(crate) fn tooltip(dash: &Dashboard) -> String {
         })
         .take(4)
         .collect();
-    if bits.is_empty() {
+    let full = if bits.is_empty() {
         "IA Usage Bar".into()
     } else {
         format!("IA Usage Bar — {}", bits.join(" · "))
+    };
+    // Windows truncates long tray tooltips; cut elegantly ourselves.
+    const MAX_TOOLTIP: usize = 128;
+    if full.len() <= MAX_TOOLTIP {
+        return full;
+    }
+    let mut cut = MAX_TOOLTIP - 1;
+    while cut > 0 && !full.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}…", &full[..cut])
+}
+
+/// Short root header. Deliberately terse: every extra word widens the
+/// native menu. Detailed percents live in the tooltip + Proveedor submenu.
+pub(crate) fn header_text(enabled_count: usize) -> String {
+    format!("IA Usage · {enabled_count} activos")
+}
+
+/// One submenu line per ENABLED vendor (activar != conectado): percent
+/// when there is data, otherwise a short actionable state. Pure function
+/// so the wording is unit-tested, not eyeballed.
+pub(crate) fn provider_menu_text(vendor: &VendorInfo, snapshot: Option<&ProviderSnapshot>) -> String {
+    const SEP: &str = "  ·  ";
+    match snapshot {
+        Some(s) if s.is_connected() => match s.primary_utilization {
+            Some(u) => format!("{}{SEP}{:.0}%", vendor.name, u),
+            None => format!("{}{SEP}Conectado", vendor.name),
+        },
+        Some(s) => {
+            let state = match s.status {
+                crate::model::ProviderStatus::NeedsAuth => {
+                    if s.status_reason == Some(crate::model::ProviderStatusReason::InvalidCredential) {
+                        "Sesión no válida"
+                    } else if !vendor.has_credential && vendor.needs_key {
+                        "Falta API key"
+                    } else {
+                        "Falta sesión"
+                    }
+                }
+                crate::model::ProviderStatus::NeedsPermission => "Falta permiso",
+                crate::model::ProviderStatus::Error => "Error",
+                crate::model::ProviderStatus::Unavailable => "No disponible",
+                crate::model::ProviderStatus::Connected => "Conectado",
+            };
+            format!("{}{SEP}{state}", vendor.name)
+        }
+        None if !vendor.has_credential && vendor.needs_key => {
+            format!("{}{SEP}Falta API key", vendor.name)
+        }
+        None => format!("{}{SEP}Sin datos", vendor.name),
     }
 }
 
@@ -300,11 +352,16 @@ pub(crate) fn tray_percent(dash: &Dashboard) -> Option<f64> {
         .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
 }
 
-/// Rebuilds the tray's "Proveedor principal" submenu with one checkbox per
-/// enabled provider, checked iff it is the current primary. Called at
-/// startup and every time the catalog changes (same place
-/// `commands::refresh_catalog` already runs).
-pub(crate) fn rebuild_primary_submenu(app: &AppHandle, catalog: &[VendorInfo], primary: &str) {
+/// Rebuilds the "Proveedor" submenu: one checkbox per ENABLED vendor
+/// (checked iff current primary) with live percent/state text, then
+/// management entries. Called at startup, on every catalog change, and on
+/// every dashboard update so percents never go stale.
+pub(crate) fn rebuild_provider_submenu(
+    app: &AppHandle,
+    catalog: &[VendorInfo],
+    primary: &str,
+    snapshots: &HashMap<String, ProviderSnapshot>,
+) {
     let Some(menu) = app.try_state::<TrayMenuState>() else {
         return;
     };
@@ -316,13 +373,34 @@ pub(crate) fn rebuild_primary_submenu(app: &AppHandle, catalog: &[VendorInfo], p
         if let Ok(item) = CheckMenuItem::with_id(
             app,
             format!("primary_{}", vendor.id),
-            &vendor.name,
+            provider_menu_text(vendor, snapshots.get(&vendor.id)),
             true,
             vendor.id == primary,
             None::<&str>,
         ) {
             let _ = submenu.append(&item);
         }
+    }
+    if let Ok(sep) = tauri::menu::PredefinedMenuItem::separator(app) {
+        let _ = submenu.append(&sep);
+    }
+    if let Ok(item) = tauri::menu::MenuItem::with_id(
+        app,
+        "manage_providers",
+        "Administrar proveedores…",
+        true,
+        None::<&str>,
+    ) {
+        let _ = submenu.append(&item);
+    }
+    if let Ok(item) = tauri::menu::MenuItem::with_id(
+        app,
+        "detect_submenu",
+        "Detectar proveedores",
+        true,
+        None::<&str>,
+    ) {
+        let _ = submenu.append(&item);
     }
 }
 
@@ -332,11 +410,14 @@ pub(crate) fn update_tray_from_dashboard(app: &AppHandle, dash: &Dashboard) {
         let _ = tray.set_tooltip(Some(tooltip(dash)));
     }
     if let Some(menu) = app.try_state::<TrayMenuState>() {
-        let n = dash.providers.iter().filter(|p| p.is_connected()).count();
-        let _ = menu
-            .header
-            .set_text(format!("IA Usage Bar — {n} proveedores"));
-        let _ = menu.status.set_text(tooltip(dash));
+        if let Some(state) = app.try_state::<crate::state::AppState>() {
+            let catalog = crate::state::lock_or_recover(&state.catalog).clone();
+            let snapshots = crate::state::lock_or_recover(&state.snapshots).clone();
+            let config = crate::state::lock_or_recover(&state.config).clone();
+            let n = catalog.iter().filter(|v| v.enabled).count();
+            let _ = menu.header.set_text(header_text(n));
+            rebuild_provider_submenu(app, &catalog, &config.primary, &snapshots);
+        }
     }
 }
 
@@ -395,5 +476,94 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(tray_percent(&dash).map(|n| n.round()), Some(10.0));
+    }
+
+    fn test_vendor(id: VendorId, enabled: bool, has_credential: bool) -> VendorInfo {
+        crate::model::VendorInfo {
+            id: id.slug().to_string(),
+            name: id.display_name().to_string(),
+            short: id.short().to_string(),
+            auth_kind: id.auth_kind(),
+            env_key: id.env_key().map(|s| s.to_string()),
+            hint: String::new(),
+            needs_key: id.needs_api_key_ui(),
+            enabled,
+            detected: false,
+            has_credential,
+            strategies: vec![],
+            source_preference: None,
+            links: crate::model::VendorLinks {
+                usage_url: None,
+                billing_url: None,
+                status_url: None,
+                docs_url: None,
+                app_url: None,
+            },
+        }
+    }
+
+    #[test]
+    fn header_stays_short() {
+        let h = header_text(4);
+        assert_eq!(h, "IA Usage · 4 activos");
+        assert!(h.len() < 40, "root header must not force menu width");
+    }
+
+    #[test]
+    fn submenu_shows_percent_or_actionable_state() {
+        use crate::model::{snapshot_with_status, ProviderStatus, ProviderStatusReason};
+        let claude = test_vendor(VendorId::Anthropic, true, true);
+        let mut connected = snapshot_ok(VendorId::Anthropic, "Max", vec![]);
+        connected.primary_utilization = Some(92.4);
+        assert_eq!(provider_menu_text(&claude, Some(&connected)), "Claude Code  ·  92%");
+
+        let deepseek = test_vendor(VendorId::Deepseek, true, false);
+        let missing = snapshot_with_status(
+            VendorId::Deepseek,
+            ProviderStatus::NeedsAuth,
+            ProviderStatusReason::MissingCredential,
+            "",
+        );
+        assert_eq!(provider_menu_text(&deepseek, Some(&missing)), "DeepSeek  ·  Falta API key");
+
+        let invalid = snapshot_with_status(
+            VendorId::Anthropic,
+            ProviderStatus::NeedsAuth,
+            ProviderStatusReason::InvalidCredential,
+            "",
+        );
+        assert_eq!(
+            provider_menu_text(&claude, Some(&invalid)),
+            "Claude Code  ·  Sesión no válida"
+        );
+
+        // Enabled without data and without credential: actionable, not blank.
+        assert_eq!(provider_menu_text(&deepseek, None), "DeepSeek  ·  Falta API key");
+    }
+
+    #[test]
+    fn tooltip_truncates_elegantly() {
+        let snaps: Vec<_> = [
+            VendorId::Anthropic,
+            VendorId::Openai,
+            VendorId::Cursor,
+            VendorId::Copilot,
+            VendorId::Openrouter,
+            VendorId::Deepseek,
+        ]
+        .iter()
+        .map(|id| {
+            let mut s = snapshot_ok(*id, "Plan", vec![]);
+            s.primary_utilization = Some(99.0);
+            s
+        })
+        .collect();
+        let dash = Dashboard {
+            providers: snaps,
+            primary: "anthropic".into(),
+            ..Default::default()
+        };
+        let tip = tooltip(&dash);
+        assert!(tip.len() <= 128, "tooltip must fit Windows limits: {tip}");
     }
 }

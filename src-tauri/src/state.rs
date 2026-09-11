@@ -23,6 +23,11 @@ pub(crate) struct AppState {
     pub(crate) notifications_enabled: AtomicBool,
     pub(crate) allow_exit: AtomicBool,
     pub(crate) last_refresh: Mutex<Option<Instant>>,
+    /// Última interacción del usuario (dashboard/refresh/tray). Alimenta la
+    /// política de refresh adaptativo (`refresh_policy`).
+    pub(crate) last_activity: Mutex<Instant>,
+    pub(crate) loading_providers: Mutex<HashSet<String>>,
+    pub(crate) app_bootstrapping: AtomicBool,
     /// True while a refresh fan-out is in flight (F-H3 overlap guard).
     pub(crate) refreshing: AtomicBool,
     /// Set when a refresh was requested while `refreshing` was held; consumed
@@ -33,7 +38,6 @@ pub(crate) struct AppState {
 
 pub(crate) struct TrayMenuState {
     pub(crate) header: MenuItem<Wry>,
-    pub(crate) status: MenuItem<Wry>,
     pub(crate) autostart: CheckMenuItem<Wry>,
     pub(crate) always_on_top: CheckMenuItem<Wry>,
     pub(crate) compact_mode: CheckMenuItem<Wry>,

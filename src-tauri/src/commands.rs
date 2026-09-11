@@ -2,6 +2,7 @@
 
 use std::sync::atomic::Ordering;
 
+use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -18,25 +19,80 @@ pub(crate) fn refresh_catalog(state: &AppState, cfg: &AppConfig) {
 pub(crate) fn refresh_catalog_and_tray(app: &AppHandle, state: &AppState, cfg: &AppConfig) {
     refresh_catalog(state, cfg);
     let catalog = lock_or_recover(&state.catalog).clone();
-    crate::tray::rebuild_primary_submenu(app, &catalog, &cfg.primary);
+    let snapshots = lock_or_recover(&state.snapshots).clone();
+    crate::tray::rebuild_provider_submenu(app, &catalog, &cfg.primary, &snapshots);
 }
 
 pub(crate) fn parse_id(s: &str) -> Option<VendorId> {
     VendorId::all().iter().copied().find(|id| id.slug() == s)
 }
 
-#[tauri::command]
-pub(crate) fn get_dashboard(app: AppHandle, state: tauri::State<AppState>) -> Dashboard {
-    build_dashboard(&app, &state)
+/// Marca interacción del usuario para la política de refresh adaptativo.
+fn touch_activity(state: &tauri::State<AppState>) {
+    *lock_or_recover(&state.last_activity) = std::time::Instant::now();
 }
 
 #[tauri::command]
-pub(crate) fn refresh_now(app: AppHandle) {
+pub(crate) fn get_dashboard(app: AppHandle, state: tauri::State<AppState>) -> Dashboard {
+    touch_activity(&state);
+    build_dashboard(&app, &state)
+}
+
+/// Contrato estable para automatización embebida: mismo `DashboardSnapshotV1`
+/// que emite `iausage --json`.
+#[tauri::command]
+pub(crate) fn get_snapshot_v1(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+) -> crate::snapshot_v1::DashboardSnapshotV1 {
+    touch_activity(&state);
+    let snaps = lock_or_recover(&state.snapshots).clone();
+    let catalog = lock_or_recover(&state.catalog).clone();
+    crate::snapshot_v1::build(
+        &snaps,
+        &catalog,
+        crate::model::now_iso(),
+        Some(app.package_info().version.to_string()),
+    )
+}
+
+/// Fija la fuente preferida de un provider (`oauth`/`cli`/`api`/`web`/`local`
+/// o vacía para Automática). Debe pertenecer a sus estrategias declaradas.
+#[tauri::command]
+pub(crate) fn set_source_preference(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+    id: String,
+    source: String,
+) -> Result<(), String> {
+    use crate::descriptor::FetchStrategyKind;
+    let vid = parse_id(&id).ok_or_else(|| format!("Proveedor desconocido: {id}"))?;
+    let preferred = if source.trim().is_empty() || source == "auto" {
+        None
+    } else {
+        Some(
+            FetchStrategyKind::parse(&source)
+                .ok_or_else(|| format!("Fuente desconocida: {source}"))?,
+        )
+    };
+    let mut cfg = lock_or_recover(&state.config).clone();
+    cfg.set_source_preference(vid, preferred);
+    cfg.save()?;
+    *lock_or_recover(&state.config) = cfg.clone();
+    refresh_catalog_and_tray(&app, &state, &cfg);
+    do_refresh(&app, None);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn refresh_now(app: AppHandle, state: tauri::State<AppState>) {
+    touch_activity(&state);
     do_refresh(&app, None);
 }
 
 #[tauri::command]
-pub(crate) fn refresh_provider(app: AppHandle, id: String) {
+pub(crate) fn refresh_provider(app: AppHandle, state: tauri::State<AppState>, id: String) {
+    touch_activity(&state);
     do_refresh(&app, Some(id));
 }
 
@@ -79,6 +135,11 @@ pub(crate) fn set_app_config(
             }
             if entry.region.is_none() {
                 entry.region = existing.region.clone();
+            }
+            // La preferencia de fuente vive en Ajustes del provider; un save
+            // general que no la trae no debe resetearla a Automática.
+            if entry.source.is_none() {
+                entry.source = existing.source;
             }
         }
     }
@@ -126,6 +187,25 @@ pub(crate) fn save_api_key(
     if !key.trim().is_empty() {
         cfg.set_enabled(vid, true);
     }
+    cfg.save()?;
+    *lock_or_recover(&state.config) = cfg.clone();
+    refresh_catalog_and_tray(&app, &state, &cfg);
+    do_refresh(&app, None);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn delete_api_key(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+    id: String,
+) -> Result<(), String> {
+    let vid = parse_id(&id).ok_or_else(|| format!("Proveedor desconocido: {id}"))?;
+    let cfg = lock_or_recover(&state.config).clone();
+    // An empty value deletes the OS keyring entry (see store_api_key).
+    // Enabled is deliberately left untouched: deleting a credential moves
+    // the provider to needs_credential, it must never disable it.
+    config::store_api_key(vid, "")?;
     cfg.save()?;
     *lock_or_recover(&state.config) = cfg.clone();
     refresh_catalog_and_tray(&app, &state, &cfg);
@@ -212,7 +292,7 @@ pub(crate) fn apply_compact_mode(
     if let Some(menu) = app.try_state::<TrayMenuState>() {
         let _ = menu.compact_mode.set_checked(enabled);
     }
-    do_refresh(app, None);
+    crate::dashboard::emit_dashboard(app);
     Ok(())
 }
 
@@ -300,4 +380,66 @@ pub(crate) fn export_diagnostics(
     .map_err(|e| e.to_string())?;
     reveal_in_explorer(&dir);
     Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UpdateCheck {
+    current: String,
+    latest: String,
+    url: String,
+    update_available: bool,
+}
+
+fn version_parts(value: &str) -> Vec<u64> {
+    value
+        .trim_start_matches('v')
+        .split('.')
+        .map(|part| part.split('-').next().unwrap_or("0").parse().unwrap_or(0))
+        .collect()
+}
+
+#[tauri::command]
+pub(crate) fn check_for_updates(app: AppHandle) -> Result<UpdateCheck, String> {
+    let current = app.package_info().version.to_string();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .user_agent("IA-Usage-Bar")
+        .build()
+        .map_err(|_| "No se pudo preparar la búsqueda de actualizaciones".to_string())?;
+    let response: serde_json::Value = client
+        .get("https://api.github.com/repos/Shadelight/ia-usage-bar/releases/latest")
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|_| "No se pudo consultar la última versión".to_string())?
+        .json()
+        .map_err(|_| "La respuesta de actualización no es válida".to_string())?;
+    let latest = response
+        .get("tag_name")
+        .and_then(|value| value.as_str())
+        .unwrap_or(&current)
+        .trim_start_matches('v')
+        .to_string();
+    let url = response
+        .get("html_url")
+        .and_then(|value| value.as_str())
+        .unwrap_or("https://github.com/Shadelight/ia-usage-bar/releases/latest")
+        .to_string();
+    Ok(UpdateCheck {
+        update_available: version_parts(&latest) > version_parts(&current),
+        current,
+        latest,
+        url,
+    })
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::version_parts;
+
+    #[test]
+    fn compares_release_versions_numerically() {
+        assert!(version_parts("v0.10.0") > version_parts("0.2.9"));
+        assert_eq!(version_parts("v0.2.0"), vec![0, 2, 0]);
+    }
 }

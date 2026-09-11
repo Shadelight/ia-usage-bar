@@ -183,15 +183,19 @@ pub fn snapshot_from_json(plan: &str, body: &Value) -> ProviderSnapshot {
             "weekly", "Semanal", util, reset, 604_800, "always",
         ));
     }
-    if let Some(w) = body.get("seven_day_sonnet") {
-        let util = json_f64(w, &["utilization"]).unwrap_or(0.0);
+    if let Some((w, util)) = body
+        .get("seven_day_sonnet")
+        .and_then(|value| json_f64(value, &["utilization"]).map(|util| (value, util)))
+    {
         let reset = json_str(w, &["resets_at"]);
         lines.push(progress_pct(
             "sonnet", "Sonnet", util, reset, 604_800, "demand",
         ));
     }
-    if let Some(w) = body.get("seven_day_opus") {
-        let util = json_f64(w, &["utilization"]).unwrap_or(0.0);
+    if let Some((w, util)) = body
+        .get("seven_day_opus")
+        .and_then(|value| json_f64(value, &["utilization"]).map(|util| (value, util)))
+    {
         let reset = json_str(w, &["resets_at"]);
         lines.push(progress_pct("opus", "Opus", util, reset, 604_800, "demand"));
     }
@@ -294,7 +298,17 @@ fn parse_product_value(value: &Value) -> Vec<ProductUsage> {
     let mut out = Vec::new();
     if let Some(items) = value.as_array() {
         for item in items {
-            let Some(name) = json_str(item, &["name", "product", "product_name", "label"]) else {
+            let Some(name) = json_str(
+                item,
+                &[
+                    "name",
+                    "display_name",
+                    "key",
+                    "product",
+                    "product_name",
+                    "label",
+                ],
+            ) else {
                 continue;
             };
             if let Some(percent) = product_percent(item) {
@@ -325,6 +339,7 @@ fn product_breakdown(body: &Value) -> Vec<ProductUsage> {
         "/seven_day/usage_by_product",
         "/seven_day/by_product",
         "/weekly/product_breakdown",
+        "/seven_day_breakdown/rows",
     ];
     for path in PATHS {
         if let Some(value) = body.pointer(path) {
@@ -410,11 +425,13 @@ fn append_cost(snap: &mut ProviderSnapshot) {
         &format!("${:.2}", report.month_usd),
         "always",
     ));
+    // Estimación desde logs locales: nunca presentarla como factura.
     snap.cost = Some(UsageCost {
         today: Some(report.today_usd),
         week: Some(report.week_usd),
         thirty_days: Some(report.last30_usd),
         month: Some(report.month_usd),
+        confidence: crate::model::DataConfidence::Estimated,
     });
 }
 
@@ -451,5 +468,25 @@ mod tests {
             .find(|item| item.name == "Claude Code")
             .expect("Claude Code breakdown");
         assert_eq!(code.used_percent, 88.0);
+    }
+
+    #[test]
+    fn parses_current_breakdown_rows_and_ignores_null_model_windows() {
+        let body = serde_json::json!({
+            "five_hour": {"utilization": 3.0, "resets_at": "2099-09-11T17:40:00Z"},
+            "seven_day": {"utilization": 22.0, "resets_at": "2099-09-16T09:00:00Z"},
+            "seven_day_sonnet": null,
+            "seven_day_opus": null,
+            "seven_day_breakdown": {"rows": [
+                {"display_name": "Claude Code", "key": "claude_code", "percent": 88},
+                {"display_name": "Cowork", "key": "cowork", "percent": 12}
+            ]}
+        });
+        let snapshot = snapshot_from_json("Pro", &body);
+        assert_eq!(snapshot.product_breakdown.len(), 2);
+        assert!(!snapshot
+            .quotas
+            .iter()
+            .any(|quota| quota.id == "sonnet" || quota.id == "opus"));
     }
 }

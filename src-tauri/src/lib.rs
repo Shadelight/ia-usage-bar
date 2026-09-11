@@ -1,22 +1,23 @@
 //! IA Usage Bar: monitor multi-proveedor para la bandeja de Windows.
 
+//! IA Usage Bar: monitor multi-proveedor para la bandeja de Windows.
+//!
+//! Todo el pipeline de providers vive en `iausage-core` (compartido con el
+//! CLI). Este crate solo conserva ventana/tray/notificaciones/comandos.
+
+pub use iausage_core::{
+    cache, config, cost, descriptor, doctor, guard, health, http, jwt, logfile, model, pace,
+    paths, pricing, providers, refresh_policy, snapshot_v1,
+};
 mod commands;
-mod config;
-mod cost;
 mod dashboard;
-mod http;
-mod jwt;
-mod logfile;
-mod model;
-mod paths;
-mod pricing;
-mod providers;
 mod state;
 mod tray;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -30,6 +31,24 @@ use dashboard::{do_refresh, run_loop, send_notification};
 use state::{lock_or_recover, AppState, TrayMenuState};
 use tray::{on_tray_left_click, show_window};
 
+/// Shared by the tray "Detectar proveedores" submenu entry (the old root
+/// entry was removed to keep the root menu compact).
+fn run_provider_detect(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let mut cfg = lock_or_recover(&state.config);
+    let mut candidate = cfg.clone();
+    match config::run_detect(&mut candidate) {
+        Ok(_) => {
+            *cfg = candidate;
+            let snapshot = cfg.clone();
+            drop(cfg);
+            commands::refresh_catalog_and_tray(app, &state, &snapshot);
+            do_refresh(app, None);
+        }
+        Err(error) => eprintln!("provider detection failed: {error}"),
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -40,45 +59,53 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            #[cfg(debug_assertions)]
+            let boot_started = Instant::now();
             let mut cfg = AppConfig::load();
+            #[cfg(debug_assertions)]
+            eprintln!("config loaded: {} ms", boot_started.elapsed().as_millis());
             if config::migrate_legacy_credentials(&mut cfg) && !cfg.load_recovered {
                 if let Err(error) = cfg.save() {
                     eprintln!("legacy credential migration could not update config: {error}");
                 }
-            }
-            if let Err(error) = config::run_detect(&mut cfg) {
-                eprintln!("provider detection state could not be saved: {error}");
             }
             let notifications = cfg.notifications;
             let always_on_top_on = cfg.always_on_top;
             let compact_mode_on = cfg.compact_mode;
             let primary_id = cfg.primary.clone();
             let catalog = providers::catalog(&cfg);
+            let cached_snapshots = cache::load();
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "cache loaded: {} ms ({} providers)",
+                boot_started.elapsed().as_millis(),
+                cached_snapshots.len()
+            );
             app.manage(AppState {
-                snapshots: Mutex::new(HashMap::new()),
+                snapshots: Mutex::new(cached_snapshots),
                 config: Mutex::new(cfg),
                 catalog: Mutex::new(catalog),
                 notify: Mutex::new(HashMap::new()),
                 notifications_enabled: AtomicBool::new(notifications),
                 allow_exit: AtomicBool::new(false),
                 last_refresh: Mutex::new(None),
+                last_activity: Mutex::new(Instant::now()),
+                loading_providers: Mutex::new(std::collections::HashSet::new()),
+                app_bootstrapping: AtomicBool::new(true),
                 refreshing: AtomicBool::new(false),
                 rerun_requested: AtomicBool::new(false),
                 backoff_until: Mutex::new(HashMap::new()),
             });
 
             let tray_header =
-                MenuItem::with_id(app, "tray_header", "IA Usage Bar", false, None::<&str>)?;
-            let tray_status =
-                MenuItem::with_id(app, "tray_status", "○ Iniciando...", false, None::<&str>)?;
-            let open_i = MenuItem::with_id(app, "open", "Abrir panel", true, None::<&str>)?;
+                MenuItem::with_id(app, "tray_header", "IA Usage", false, None::<&str>)?;
+            let open_i = MenuItem::with_id(app, "open", "Abrir IA Usage", true, None::<&str>)?;
             let refresh_i =
                 MenuItem::with_id(app, "refresh", "Actualizar ahora", true, None::<&str>)?;
-            let detect_i =
-                MenuItem::with_id(app, "detect", "Detectar proveedores", true, None::<&str>)?;
             let primary_submenu =
-                Submenu::with_id(app, "primary_provider", "Proveedor principal", true)?;
+                Submenu::with_id(app, "provider", "Proveedor", true)?;
             let compact_i = CheckMenuItem::with_id(
                 app,
                 "compact",
@@ -107,29 +134,28 @@ pub fn run() {
                 None::<&str>,
             )?;
             let quit_i = MenuItem::with_id(app, "quit", "Salir", true, None::<&str>)?;
+            let about_i = MenuItem::with_id(app, "about", "Acerca de", true, None::<&str>)?;
             let sep1 = PredefinedMenuItem::separator(app)?;
             let sep2 = PredefinedMenuItem::separator(app)?;
             let menu = Menu::with_items(
                 app,
                 &[
                     &tray_header,
-                    &tray_status,
                     &sep1,
                     &open_i,
                     &refresh_i,
-                    &detect_i,
                     &primary_submenu,
                     &compact_i,
                     &pin_i,
                     &autostart_i,
                     &sep2,
                     &settings_i,
+                    &about_i,
                     &quit_i,
                 ],
             )?;
             app.manage(TrayMenuState {
                 header: tray_header,
-                status: tray_status,
                 autostart: autostart_i,
                 always_on_top: pin_i,
                 compact_mode: compact_i,
@@ -138,7 +164,8 @@ pub fn run() {
             {
                 let state = app.state::<AppState>();
                 let catalog = lock_or_recover(&state.catalog).clone();
-                tray::rebuild_primary_submenu(app.handle(), &catalog, &primary_id);
+                let snapshots = lock_or_recover(&state.snapshots).clone();
+                tray::rebuild_provider_submenu(app.handle(), &catalog, &primary_id, &snapshots);
             }
 
             let _tray = TrayIconBuilder::with_id("main")
@@ -152,22 +179,16 @@ pub fn run() {
                         show_window(app, None);
                         let _ = app.emit("tray-cmd", "settings");
                     }
-                    "refresh" => do_refresh(app, None),
-                    "detect" => {
-                        let state = app.state::<AppState>();
-                        let mut cfg = lock_or_recover(&state.config);
-                        let mut candidate = cfg.clone();
-                        match config::run_detect(&mut candidate) {
-                            Ok(_) => {
-                                *cfg = candidate;
-                                let snapshot = cfg.clone();
-                                drop(cfg);
-                                commands::refresh_catalog_and_tray(app, &state, &snapshot);
-                                do_refresh(app, None);
-                            }
-                            Err(error) => eprintln!("provider detection failed: {error}"),
-                        }
+                    "about" => {
+                        show_window(app, None);
+                        let _ = app.emit("tray-cmd", "settings:about");
                     }
+                    "manage_providers" => {
+                        show_window(app, None);
+                        let _ = app.emit("tray-cmd", "settings:providers");
+                    }
+                    "refresh" => do_refresh(app, None),
+                    "detect_submenu" => run_provider_detect(app),
                     "autostart" => {
                         let al = app.autolaunch();
                         if al.is_enabled().unwrap_or(false) {
@@ -242,10 +263,42 @@ pub fn run() {
             let h1 = app.handle().clone();
             std::thread::spawn(move || run_loop(h1));
 
+            let h2 = app.handle().clone();
+            std::thread::spawn(move || {
+                #[cfg(debug_assertions)]
+                let started = Instant::now();
+                let state = h2.state::<AppState>();
+                let mut candidate = lock_or_recover(&state.config).clone();
+                match config::run_detect(&mut candidate) {
+                    Ok(newly) => {
+                        *lock_or_recover(&state.config) = candidate.clone();
+                        commands::refresh_catalog_and_tray(&h2, &state, &candidate);
+                        emit_dashboard_after_detection(&h2);
+                        if !newly.is_empty() {
+                            do_refresh(&h2, None);
+                        }
+                    }
+                    Err(error) => eprintln!("provider detection failed: {error}"),
+                }
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "provider detection completed: {} ms",
+                    started.elapsed().as_millis()
+                );
+            });
+
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "app setup completed: {} ms",
+                boot_started.elapsed().as_millis()
+            );
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_dashboard,
+            commands::get_snapshot_v1,
+            commands::set_source_preference,
             commands::refresh_now,
             commands::refresh_provider,
             commands::detect_providers,
@@ -253,6 +306,7 @@ pub fn run() {
             commands::set_app_config,
             commands::set_provider_enabled,
             commands::save_api_key,
+            commands::delete_api_key,
             commands::quit,
             commands::hide_panel,
             commands::set_notifications,
@@ -262,6 +316,7 @@ pub fn run() {
             commands::open_logs_folder,
             commands::clear_logs,
             commands::export_diagnostics,
+            commands::check_for_updates,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -281,4 +336,8 @@ pub fn run() {
                 }
             }
         });
+}
+
+fn emit_dashboard_after_detection(app: &tauri::AppHandle) {
+    dashboard::emit_dashboard(app);
 }

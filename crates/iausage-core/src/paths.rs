@@ -33,3 +33,7 @@ pub fn config_path() -> PathBuf {
 pub fn detect_path() -> PathBuf {
     app_config_dir().join("detect.json")
 }
+
+pub fn snapshot_cache_path() -> PathBuf {
+    app_config_dir().join("provider-snapshots.json")
+}

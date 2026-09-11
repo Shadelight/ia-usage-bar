@@ -11,9 +11,12 @@ still intentionally outside an automated repository change.
 | --- | --- |
 | `specs/2026-09-11-provider-identity-foundation.md` | Implemented: structured provider status/reasons, Antigravity state split, one frontend visual registry, local provider assets, error normalization/sanitization, recovery transitions, connection checklists, and tests. |
 | `specs/2026-09-11-usage-semantics-notifications-settings.md` | Implemented: canonical quota/reset semantics, stale-data retention, loading/error states, Windows window behavior, secure credential storage, autostart, configurable alerts, and verification gates. |
+| `specs/2026-09-11-quick-controls-window-modes.md` | Implemented: native minimize, close-to-tray, taskbar/Alt+Tab presence, single-window tray restore, compact and always-on-top persistence, and explicit Exit. |
+| `plans/2026-09-11-quick-controls-window-modes.md` | Implemented in the current Tauri window/tray commands and shared persisted toggles; manual Windows installer smoke remains the release gate. |
 | `specs/2026-09-10-ia-usage-bar-stabilization.md` | User-facing and release requirements implemented. The older draft's proposed `ProviderDescriptor`/one-folder-per-provider topology is superseded for this milestone by the later approved identity decision that keeps `VendorId` + serialized `VendorInfo` as backend domain truth. Adapters remain separated by integration type and emit the canonical usage contract. |
 | `plans/2026-09-10-milestone-0-stabilization.md` | Phases 0–1 implemented: audit, rename cleanup, focused Rust/TypeScript modules, current remote path, and Rust tests in CI. Historical commit choreography was not replayed because it would rewrite the user's current working history. |
 | `specs/2026-09-10-ia-usage-hub-architecture.md` | Roadmap only, as stated by the document itself. Android companion, sync protocol, CLI, SQLite event store, and later milestones require their own approved design and plan. |
+| `reports/2026-09-11-responsive-startup-release-blocker.md` | Implemented and evidenced in-browser plus real debug startup timings; release intentionally remains blocked pending NSIS/MSI smoke. |
 
 ## Completed repository work
 
@@ -33,15 +36,25 @@ still intentionally outside an automated repository change.
   an empty provider selection performs no 23-provider refresh fan-out.
 - Main-window minimize/taskbar/Alt+Tab, close-to-tray, tray reopen, and explicit exit
   behavior are implemented.
+- Startup now renders last-known-good snapshots immediately, detects providers in the
+  background, publishes each provider independently, and exposes per-provider loading and
+  timeout states. Measured cached setup is 18 ms on the development machine.
+- Dashboard, provider navigation, Settings, About and Appearance are responsive at the
+  tested 360/390/420/600 px widths. Compact mode is a dedicated quick-glance layout.
+- Current Claude `seven_day_breakdown.rows` data maps to product usage and `null` model
+  windows no longer appear as invented Sonnet/Opus quotas.
 - Contributor, changelog, security, issue/PR templates, build CI, and tag-driven Windows
   release automation are present. Current local NSIS and MSI bundle artifacts were
-  generated; WiX ICE validation is left to the clean GitHub runner because the local
-  Windows Installer service became unavailable to ICE after the first successful pass.
+  regenerated after the responsive/startup blocker work; WiX ICE validation is left to the
+  clean GitHub runner because the local Windows Installer service is unavailable to ICE.
 
 ## Deliberately manual or externally gated
 
 - Verify real provider accounts, tray legibility on light/dark taskbars, autostart across
   a Windows login, and the close/minimize/tray sequence on the user's desktop.
+- Smoke both regenerated installers before restoring release readiness. Until this passes,
+  do not push, tag, or modify GitHub releases. See
+  `reports/2026-09-11-responsive-startup-release-blocker.md`.
 - Push a test `v*` tag and approve the draft GitHub Release.
 - Set GitHub repository description/topics.
 - Any archive tag, orphan branch, squash, or force-push requires a separate explicit user

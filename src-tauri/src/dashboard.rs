@@ -1,6 +1,8 @@
 //! Construccion del dashboard, ciclo de refresh y notificaciones.
 
+use std::collections::HashSet;
 use std::sync::atomic::Ordering;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -27,7 +29,14 @@ pub(crate) fn build_dashboard(app: &AppHandle, state: &AppState) -> Dashboard {
     let elapsed = lock_or_recover(&state.last_refresh)
         .map(|t| t.elapsed().as_secs())
         .unwrap_or(0);
-    let interval = cfg.refresh_minutes.saturating_mul(60);
+    let idle_secs = lock_or_recover(&state.last_activity).elapsed().as_secs();
+    let interval = crate::refresh_policy::next_interval_secs(&crate::refresh_policy::PolicyInput {
+        adaptive: cfg.refresh_adaptive,
+        manual_minutes: cfg.refresh_minutes,
+        secs_since_activity: idle_secs,
+        // TODO(0.3.x): leer el modo de ahorro de batería real de Windows.
+        battery_saver: false,
+    });
     let mut spend = Vec::new();
     let mut spend_month_usd = 0.0;
     for p in &providers {
@@ -49,12 +58,19 @@ pub(crate) fn build_dashboard(app: &AppHandle, state: &AppState) -> Dashboard {
         providers,
         catalog: lock_or_recover(&state.catalog).clone(),
         refresh_minutes: cfg.refresh_minutes,
+        refresh_adaptive: cfg.refresh_adaptive,
         primary: cfg.primary.clone(),
         notifications: cfg.notifications,
         notify_thresholds: cfg.notify_thresholds.clone(),
         autostart: app.autolaunch().is_enabled().unwrap_or(false),
         always_on_top: cfg.always_on_top,
         compact_mode: cfg.compact_mode,
+        app_bootstrapping: state.app_bootstrapping.load(Ordering::Acquire),
+        refreshing: state.refreshing.load(Ordering::Acquire),
+        loading_providers: lock_or_recover(&state.loading_providers)
+            .iter()
+            .cloned()
+            .collect(),
         next_update_in_secs: interval.saturating_sub(elapsed),
         spend_month_usd,
         spend,
@@ -176,14 +192,17 @@ pub(crate) fn refresh_sync(app: &AppHandle, only: Option<&str>) {
         refresh_once(app, only);
     }));
     state.refreshing.store(false, Ordering::Release);
+    state.app_bootstrapping.store(false, Ordering::Release);
 
     if outcome.is_err() {
         eprintln!("refresh_sync: refresh panicked; marking data stale and continuing");
+        lock_or_recover(&state.loading_providers).clear();
         for snap in lock_or_recover(&state.snapshots).values_mut() {
             snap.mark_stale();
         }
         emit_dashboard(app);
     }
+    emit_dashboard(app);
 
     // Coalesced rerun for whatever asked while we were busy.
     if only.is_none() && state.rerun_requested.swap(false, Ordering::AcqRel) {
@@ -201,20 +220,36 @@ fn refresh_once(app: &AppHandle, only: Option<&str>) {
     };
     let now = Instant::now();
     let backoff = lock_or_recover(&state.backoff_until).clone();
-    let mut handles = Vec::new();
-    for id in ids {
-        if let Some(until) = backoff.get(id.slug()) {
-            if now < *until {
-                continue;
-            }
-        }
-        let cfg = cfg.clone();
-        handles.push(std::thread::spawn(move || {
-            (id, providers::refresh(id, &cfg))
-        }));
+    let ids: Vec<VendorId> = ids
+        .into_iter()
+        .filter(|id| backoff.get(id.slug()).is_none_or(|until| now >= *until))
+        .collect();
+    {
+        let mut loading = lock_or_recover(&state.loading_providers);
+        loading.extend(ids.iter().map(|id| id.slug().to_string()));
     }
-    for h in handles {
-        if let Ok((id, snap)) = h.join() {
+    emit_dashboard(app);
+
+    let (sender, receiver) = mpsc::channel();
+    for id in &ids {
+        let id = *id;
+        let cfg = cfg.clone();
+        let sender = sender.clone();
+        std::thread::spawn(move || {
+            let _ = sender.send((id, providers::refresh(id, &cfg)));
+        });
+    }
+    drop(sender);
+
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(12);
+    let mut pending: HashSet<String> = ids.iter().map(|id| id.slug().to_string()).collect();
+    while !pending.is_empty() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let Ok((id, snap)) = receiver.recv_timeout(remaining) else {
+            break;
+        };
+        if pending.remove(id.slug()) {
             let rate_limited = snap.status_reason == Some(ProviderStatusReason::RateLimited);
             if rate_limited {
                 lock_or_recover(&state.backoff_until).insert(
@@ -228,6 +263,15 @@ fn refresh_once(app: &AppHandle, only: Option<&str>) {
                 snaps.insert(id.slug().to_string(), merged.clone());
                 merged
             };
+            lock_or_recover(&state.loading_providers).remove(id.slug());
+            if stored.is_connected() {
+                if let Err(error) = crate::cache::save_valid(&stored) {
+                    eprintln!(
+                        "snapshot cache could not be updated for {}: {error}",
+                        stored.id
+                    );
+                }
+            }
             if !stored.is_connected() {
                 crate::logfile::append(&format!(
                     "{} status={:?} reason={:?}",
@@ -235,9 +279,33 @@ fn refresh_once(app: &AppHandle, only: Option<&str>) {
                 ));
             }
             check_notifications(app, &stored);
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "provider {} completed: {} ms",
+                id.slug(),
+                started.elapsed().as_millis()
+            );
+            emit_dashboard(app);
+        }
+    }
+
+    if !pending.is_empty() {
+        for id in pending {
+            lock_or_recover(&state.loading_providers).remove(&id);
+            if let Some(vendor_id) = parse_id(&id) {
+                let timeout = providers::map_fetch_err(
+                    vendor_id,
+                    crate::http::FetchError::Network("timeout after 12s".into()),
+                );
+                let mut snapshots = lock_or_recover(&state.snapshots);
+                let merged = merge_snapshot(snapshots.get(&id), timeout);
+                snapshots.insert(id.clone(), merged);
+            }
+            crate::logfile::append(&format!("{id} status=timeout after 12s"));
         }
     }
     *lock_or_recover(&state.last_refresh) = Some(Instant::now());
+    state.app_bootstrapping.store(false, Ordering::Release);
     emit_dashboard(app);
 }
 
@@ -257,7 +325,6 @@ fn merge_snapshot(
         retained.mark_stale();
         retained.status_reason = incoming.status_reason;
         retained.error = incoming.error.take();
-        retained.updated_at = incoming.updated_at;
         if !rate_limited {
             retained.status = incoming.status;
             retained.hint = incoming.hint;
@@ -276,10 +343,23 @@ fn merge_snapshot(
 pub(crate) fn run_loop(app: AppHandle) {
     loop {
         refresh_sync(&app, None);
-        let mins = lock_or_recover(&app.state::<AppState>().config)
-            .refresh_minutes
-            .max(1);
-        std::thread::sleep(Duration::from_secs(mins * 60));
+        let state = app.state::<AppState>();
+        let (adaptive, manual, idle) = {
+            let cfg = lock_or_recover(&state.config);
+            let idle = lock_or_recover(&state.last_activity).elapsed().as_secs();
+            (cfg.refresh_adaptive, cfg.refresh_minutes, idle)
+        };
+        let wait = crate::refresh_policy::next_interval_secs(
+            &crate::refresh_policy::PolicyInput {
+                adaptive,
+                manual_minutes: manual,
+                secs_since_activity: idle,
+                // TODO(0.3.x): leer el modo de ahorro de batería real de Windows.
+                battery_saver: false,
+            },
+        )
+        .max(60);
+        std::thread::sleep(Duration::from_secs(wait));
     }
 }
 

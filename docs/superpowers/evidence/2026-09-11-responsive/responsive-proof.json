@@ -1,0 +1,65 @@
+{
+  "viewports": {
+    "360": {
+      "innerWidth": 360,
+      "horizontalOverflow": false,
+      "detailScrollHeight": 515,
+      "detailClientHeight": 505
+    },
+    "390": {
+      "innerWidth": 390,
+      "horizontalOverflow": false,
+      "detailScrollHeight": 515,
+      "detailClientHeight": 505
+    },
+    "420": {
+      "innerWidth": 420,
+      "horizontalOverflow": false,
+      "detailScrollHeight": 521,
+      "detailClientHeight": 505
+    },
+    "600": {
+      "innerWidth": 600,
+      "horizontalOverflow": false,
+      "detailScrollHeight": 521,
+      "detailClientHeight": 505
+    }
+  },
+  "interactions": {
+    "vertical": {
+      "scrollTop": 10,
+      "max": 10,
+      "reachedEnd": true
+    },
+    "providers": {
+      "scrollLeft": 104,
+      "max": 104,
+      "reachedEnd": true
+    },
+    "settingsTabs": {
+      "scrollLeft": 149,
+      "max": 149,
+      "reachedEnd": true
+    },
+    "appearance": {
+      "theme": "light",
+      "storedTheme": "light",
+      "compactToggle": true,
+      "languageChoices": 2
+    },
+    "about": {
+      "urlActions": [
+        "https://github.com/Shadelight/ia-usage-bar",
+        "https://github.com/Shadelight/ia-usage-bar/blob/main/LICENSE",
+        "https://github.com/Shadelight/ia-usage-bar/blob/main/NOTICE"
+      ],
+      "hasUpdateAction": true
+    },
+    "compact": {
+      "quotaRows": 2,
+      "hasRecommendation": true,
+      "footerHidden": true,
+      "horizontalOverflow": false
+    }
+  }
+}

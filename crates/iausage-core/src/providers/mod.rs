@@ -11,6 +11,7 @@ mod local;
 mod openai_admin;
 
 use crate::config::AppConfig;
+use crate::descriptor::descriptor;
 use crate::http::FetchError;
 use crate::model::{
     snapshot_needs_auth, snapshot_with_status, ProviderSnapshot, ProviderStatus,
@@ -40,20 +41,29 @@ pub fn refresh(id: VendorId, cfg: &AppConfig) -> ProviderSnapshot {
 }
 
 pub fn catalog(cfg: &AppConfig) -> Vec<VendorInfo> {
+    // Startup must not synchronously probe every CLI/account. `run_detect`
+    // refreshes this small persisted set in the background.
+    let detected = crate::config::detected_ids();
     VendorId::all()
         .iter()
         .copied()
-        .map(|id| VendorInfo {
-            id: id.slug().to_string(),
-            name: id.display_name().to_string(),
-            short: id.short().to_string(),
-            auth_kind: id.auth_kind(),
-            env_key: id.env_key().map(|s| s.to_string()),
-            hint: id.login_hint().to_string(),
-            needs_key: id.needs_api_key_ui(),
-            enabled: cfg.is_enabled(id),
-            detected: has_local_credentials(id, cfg),
-            links: id.links(),
+        .map(|id| {
+            let desc = descriptor(id);
+            VendorInfo {
+                id: id.slug().to_string(),
+                name: id.display_name().to_string(),
+                short: id.short().to_string(),
+                auth_kind: id.auth_kind(),
+                env_key: id.env_key().map(|s| s.to_string()),
+                hint: id.login_hint().to_string(),
+                needs_key: id.needs_api_key_ui(),
+                enabled: cfg.is_enabled(id),
+                detected: detected.contains(id.slug()),
+                has_credential: cfg.api_key(id).is_some() || detected.contains(id.slug()),
+                links: id.links(),
+                strategies: desc.strategies.iter().map(|s| s.slug().to_string()).collect(),
+                source_preference: cfg.source_preference(id).map(|s| s.slug().to_string()),
+            }
         })
         .collect()
 }
@@ -296,5 +306,22 @@ mod tests {
         );
         assert_eq!(server.status, ProviderStatus::Error);
         assert_eq!(server.status_reason, Some(ProviderStatusReason::Unknown));
+    }
+
+    #[test]
+    fn catalog_exposes_credential_presence_without_leaking_secrets() {
+        // DEEPSEEK_API_KEY is unique to this test; no other test reads it.
+        std::env::set_var("DEEPSEEK_API_KEY", "sk-test-must-never-serialize");
+        let cat = catalog(&AppConfig::default());
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        let deepseek = cat.iter().find(|v| v.id == "deepseek").expect("deepseek in catalog");
+        assert!(deepseek.has_credential, "env credential must surface as a boolean");
+        let grok = cat.iter().find(|v| v.id == "grok").expect("grok in catalog");
+        assert!(!grok.has_credential, "unset credential must surface as false");
+        let serialized = serde_json::to_string(&cat).unwrap();
+        assert!(
+            !serialized.contains("sk-test-must-never-serialize"),
+            "the secret itself must never reach the frontend"
+        );
     }
 }

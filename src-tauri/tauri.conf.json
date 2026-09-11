@@ -15,10 +15,10 @@
       {
         "label": "main",
         "title": "IA Usage Bar",
-        "width": 360,
-        "height": 500,
+        "width": 410,
+        "height": 640,
         "minWidth": 320,
-        "minHeight": 380,
+        "minHeight": 180,
         "resizable": true,
         "decorations": false,
         "transparent": true,
@@ -26,13 +26,7 @@
         "alwaysOnTop": true,
         "skipTaskbar": false,
         "visible": true,
-        "center": true,
-        "windowEffects": {
-          "effects": ["acrylic"],
-          "state": "active",
-          "radius": 18,
-          "color": [28, 28, 30, 230]
-        }
+        "center": true
       }
     ],
     "security": {
@@ -47,6 +41,19 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "headerImage": "windows/header.bmp",
+        "uninstallerHeaderImage": "windows/header.bmp",
+        "installerHooks": "./windows/hooks.nsh",
+        "languages": ["English"],
+        "customLanguageFiles": {
+          "English": "./windows/English.nsh"
+        }
+      }
+    }
   }
 }

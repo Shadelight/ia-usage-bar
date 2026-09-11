@@ -1,0 +1,12 @@
+[workspace]
+members = ["src-tauri", "crates/iausage-core", "crates/iausage-cli"]
+resolver = "2"
+
+# Preserva la optimización del binario Windows (antes en src-tauri/Cargo.toml;
+# los profiles solo surten efecto desde la raíz del workspace).
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

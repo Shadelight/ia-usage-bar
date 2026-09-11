@@ -6,12 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:frontend": "node --test tests/reset-format.test.ts tests/provider-errors.test.ts",
+    "test:frontend": "node --test tests/reset-format.test.ts tests/provider-errors.test.ts tests/layout.test.ts tests/provider-actions.test.ts tests/providers-state.test.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2"
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

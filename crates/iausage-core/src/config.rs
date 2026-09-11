@@ -6,6 +6,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::descriptor::FetchStrategyKind;
 use crate::model::VendorId;
 use crate::paths::{app_config_dir, config_path, detect_path};
 
@@ -15,6 +16,10 @@ const CREDENTIAL_SERVICE: &str = "com.alberth.iausagebar";
 pub struct AppConfig {
     #[serde(default = "default_refresh")]
     pub refresh_minutes: u64,
+    /// `true` = intervalos adaptativos por actividad (2/5/15/30 min);
+    /// `false` = `refresh_minutes` fijo.
+    #[serde(default = "default_adaptive")]
+    pub refresh_adaptive: bool,
     #[serde(default = "default_primary")]
     pub primary: String,
     #[serde(default = "default_true")]
@@ -40,6 +45,9 @@ pub struct AppConfig {
 fn default_refresh() -> u64 {
     5
 }
+fn default_adaptive() -> bool {
+    true
+}
 fn default_primary() -> String {
     "anthropic".into()
 }
@@ -54,6 +62,10 @@ fn default_notify_thresholds() -> Vec<u8> {
 pub struct ProviderConfig {
     #[serde(default)]
     pub enabled: bool,
+    /// Fuente preferida (`None` = Automática). Debe pertenecer a
+    /// `descriptor(id).strategies`; si no, se ignora y se usa el default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<FetchStrategyKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -66,6 +78,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             refresh_minutes: 5,
+            refresh_adaptive: true,
             primary: "anthropic".into(),
             notifications: true,
             notify_thresholds: default_notify_thresholds(),
@@ -104,10 +117,12 @@ impl AppConfig {
 
     pub fn normalize(&mut self) {
         self.refresh_minutes = match self.refresh_minutes {
-            1 | 5 | 10 => self.refresh_minutes,
-            n if n < 3 => 1,
-            n if n < 8 => 5,
-            _ => 10,
+            1 | 2 | 5 | 15 | 30 => self.refresh_minutes,
+            n if n < 2 => 1,
+            n if n < 4 => 2,
+            n if n < 10 => 5,
+            n if n < 22 => 15,
+            _ => 30,
         };
         self.notify_thresholds.retain(|n| (1..=99).contains(n));
         self.notify_thresholds.sort_unstable();
@@ -150,6 +165,17 @@ impl AppConfig {
             .enabled = enabled;
     }
 
+    pub fn source_preference(&self, id: VendorId) -> Option<FetchStrategyKind> {
+        self.providers.get(id.slug()).and_then(|p| p.source)
+    }
+
+    pub fn set_source_preference(&mut self, id: VendorId, source: Option<FetchStrategyKind>) {
+        self.providers
+            .entry(id.slug().to_string())
+            .or_default()
+            .source = source;
+    }
+
     pub fn api_key(&self, id: VendorId) -> Option<String> {
         if let Some(env) = id.env_key() {
             if let Ok(v) = std::env::var(env) {
@@ -177,7 +203,7 @@ impl AppConfig {
     }
 }
 
-pub(crate) fn store_api_key(id: VendorId, value: &str) -> Result<(), String> {
+pub fn store_api_key(id: VendorId, value: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(CREDENTIAL_SERVICE, id.slug()).map_err(|e| e.to_string())?;
     if value.trim().is_empty() {
         if entry.get_password().is_ok() {
@@ -193,7 +219,7 @@ pub(crate) fn store_api_key(id: VendorId, value: &str) -> Result<(), String> {
 
 /// Move credentials written by pre-0.1 builds out of config.toml. A value is
 /// removed from the config only after Windows Credential Manager accepts it.
-pub(crate) fn migrate_legacy_credentials(cfg: &mut AppConfig) -> bool {
+pub fn migrate_legacy_credentials(cfg: &mut AppConfig) -> bool {
     let mut changed = false;
     for id in VendorId::all().iter().copied() {
         let legacy = cfg
@@ -216,6 +242,14 @@ pub(crate) fn migrate_legacy_credentials(cfg: &mut AppConfig) -> bool {
 struct DetectState {
     #[serde(default)]
     known: HashSet<String>,
+}
+
+pub fn detected_ids() -> HashSet<String> {
+    fs::read_to_string(detect_path())
+        .ok()
+        .and_then(|body| serde_json::from_str::<DetectState>(&body).ok())
+        .map(|state| state.known)
+        .unwrap_or_default()
 }
 
 pub fn run_detect(cfg: &mut AppConfig) -> Result<Vec<String>, String> {
@@ -266,7 +300,7 @@ fn save_detect(path: &Path, state: &DetectState) -> Result<(), String> {
     )
 }
 
-pub(crate) fn atomic_write(path: &Path, body: &[u8]) -> Result<(), String> {
+pub fn atomic_write(path: &Path, body: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }

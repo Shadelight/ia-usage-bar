@@ -1,0 +1,34 @@
+# IA Usage Bar
+
+Windows desktop app and CLI for monitoring AI usage limits, quota resets,
+credits and provider health.
+
+- App: Tauri 2 tray app (`src-tauri/`, GUI in `src/`)
+- Core: shared provider pipeline (`crates/iausage-core/`)
+- CLI: `iausage` (`crates/iausage-cli/`)
+- Stable contract: DashboardSnapshotV1 (`schemaVersion: 1`)
+
+## CLI
+
+```powershell
+iausage usage [provider] [--json] [--refresh]
+iausage providers [--json]
+iausage best [--json]
+iausage doctor [provider] [--json]
+iausage refresh [--provider ID]
+iausage guard --provider claude --window session --min-remaining 15
+iausage config validate
+iausage version
+```
+
+Guard exit codes: 0 enough, 1 below limit, 64 bad args, 69 unavailable.
+
+## Docs
+
+- Roadmap: docs/roadmap-v03.md
+- Providers: docs/providers/claude.md, docs/providers/codex.md
+- Contributing: CONTRIBUTING.md · Security: SECURITY.md
+
+## GitHub
+
+https://github.com/Shadelight/ia-usage-bar

@@ -65,7 +65,7 @@ impl VendorId {
             VendorId::Anthropic => "Claude Code",
             VendorId::AnthropicApi => "Anthropic API",
             VendorId::Openai => "Codex / ChatGPT",
-            VendorId::OpenaiAdmin => "OpenAI API",
+            VendorId::OpenaiAdmin => "OpenAI API · Admin",
             VendorId::Copilot => "GitHub Copilot",
             VendorId::Zai => "Z.AI / GLM",
             VendorId::Openrouter => "OpenRouter",
@@ -186,6 +186,7 @@ impl VendorId {
             VendorId::Cursor => "Abre Cursor e inicia sesión.",
             VendorId::Antigravity => "Abre Antigravity e inicia sesión.",
             VendorId::Copilot => "Ejecuta `gh auth login --web` o define GITHUB_COPILOT_TOKEN.",
+            VendorId::OpenaiAdmin => "Pega una Admin API key de platform.openai.com (mide gasto de la organización).",
             VendorId::Kiro => "Ejecuta `kiro-cli login`.",
             VendorId::Supergrok => "Ejecuta `grok login`.",
             VendorId::CommandCode => "Inicia sesión con `commandcode` o pi.",
@@ -202,49 +203,122 @@ impl VendorId {
     }
 
     /// Only well-known, verifiable official URLs. Every provider not listed
-    /// here gets `None` for all three fields — never a guessed link.
+    /// here gets `None` for all fields — never a guessed link.
     pub fn links(self) -> VendorLinks {
         match self {
-            VendorId::Anthropic | VendorId::AnthropicApi => VendorLinks {
-                usage_url: Some("https://console.anthropic.com/settings/usage".into()),
-                billing_url: None,
+            VendorId::Anthropic => VendorLinks {
+                usage_url: Some("https://claude.ai/settings/usage".into()),
+                billing_url: Some("https://claude.ai/settings/billing".into()),
                 status_url: Some("https://status.anthropic.com".into()),
+                docs_url: Some("https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview".into()),
+                app_url: Some("https://claude.ai".into()),
             },
-            VendorId::Openai | VendorId::OpenaiAdmin => VendorLinks {
-                usage_url: Some("https://platform.openai.com/usage".into()),
-                billing_url: None,
+            VendorId::AnthropicApi => VendorLinks {
+                usage_url: Some("https://console.anthropic.com/settings/usage".into()),
+                billing_url: Some("https://console.anthropic.com/settings/plans".into()),
+                status_url: Some("https://status.anthropic.com".into()),
+                docs_url: Some("https://docs.anthropic.com".into()),
+                app_url: Some("https://console.anthropic.com".into()),
+            },
+            VendorId::Openai => VendorLinks {
+                usage_url: Some("https://chatgpt.com/#settings".into()),
+                billing_url: Some("https://chatgpt.com/#settings".into()),
                 status_url: Some("https://status.openai.com".into()),
+                docs_url: Some("https://help.openai.com".into()),
+                app_url: Some("https://chatgpt.com".into()),
+            },
+            VendorId::OpenaiAdmin => VendorLinks {
+                usage_url: Some("https://platform.openai.com/usage".into()),
+                billing_url: Some("https://platform.openai.com/settings/organization/billing".into()),
+                status_url: Some("https://status.openai.com".into()),
+                docs_url: Some("https://platform.openai.com/docs".into()),
+                app_url: Some("https://platform.openai.com".into()),
             },
             VendorId::Copilot => VendorLinks {
-                usage_url: None,
+                usage_url: Some("https://github.com/settings/copilot".into()),
                 billing_url: Some("https://github.com/settings/billing".into()),
                 status_url: Some("https://www.githubstatus.com".into()),
+                docs_url: Some("https://docs.github.com/copilot".into()),
+                app_url: Some("https://github.com/copilot".into()),
             },
             VendorId::Cursor => VendorLinks {
                 usage_url: Some("https://cursor.com/dashboard".into()),
-                billing_url: None,
+                billing_url: Some("https://cursor.com/settings".into()),
                 status_url: None,
+                docs_url: Some("https://docs.cursor.com".into()),
+                app_url: Some("https://cursor.com".into()),
             },
             VendorId::Openrouter => VendorLinks {
                 usage_url: Some("https://openrouter.ai/activity".into()),
-                billing_url: None,
+                billing_url: Some("https://openrouter.ai/credits".into()),
                 status_url: None,
+                docs_url: Some("https://openrouter.ai/docs".into()),
+                app_url: Some("https://openrouter.ai".into()),
             },
             VendorId::Deepseek => VendorLinks {
                 usage_url: Some("https://platform.deepseek.com/usage".into()),
-                billing_url: None,
+                billing_url: Some("https://platform.deepseek.com/top_up".into()),
                 status_url: None,
+                docs_url: Some("https://api-docs.deepseek.com".into()),
+                app_url: Some("https://chat.deepseek.com".into()),
             },
             VendorId::Groq => VendorLinks {
                 usage_url: Some("https://console.groq.com/dashboard/usage".into()),
+                billing_url: Some("https://console.groq.com/settings/billing".into()),
+                status_url: Some("https://status.groq.com".into()),
+                docs_url: Some("https://console.groq.com/docs".into()),
+                app_url: Some("https://console.groq.com".into()),
+            },
+            VendorId::Windsurf => VendorLinks {
+                usage_url: Some("https://codeium.com/profile".into()),
+                billing_url: Some("https://codeium.com/subscription".into()),
+                status_url: Some("https://status.codeium.com".into()),
+                docs_url: Some("https://docs.codeium.com/windsurf".into()),
+                app_url: Some("https://codeium.com/windsurf".into()),
+            },
+            VendorId::Zai => VendorLinks {
+                usage_url: Some("https://open.bigmodel.cn/usercenter/apikeys".into()),
+                billing_url: Some("https://open.bigmodel.cn/usercenter/billing".into()),
+                status_url: None,
+                docs_url: Some("https://open.bigmodel.cn/dev/api".into()),
+                app_url: None,
+            },
+            VendorId::Minimax => VendorLinks {
+                usage_url: Some("https://platform.minimaxi.com/user-center/basic-information".into()),
                 billing_url: None,
                 status_url: None,
+                docs_url: Some("https://platform.minimaxi.com/document/guides".into()),
+                app_url: None,
             },
-            _ => VendorLinks {
-                usage_url: None,
-                billing_url: None,
+            VendorId::Kimi => VendorLinks {
+                usage_url: Some("https://platform.moonshot.cn/console/info".into()),
+                billing_url: Some("https://platform.moonshot.cn/console/pay".into()),
                 status_url: None,
+                docs_url: Some("https://platform.moonshot.cn/docs".into()),
+                app_url: Some("https://kimi.moonshot.cn".into()),
             },
+            VendorId::Moonshot => VendorLinks {
+                usage_url: Some("https://platform.moonshot.cn/console/info".into()),
+                billing_url: Some("https://platform.moonshot.cn/console/pay".into()),
+                status_url: None,
+                docs_url: Some("https://platform.moonshot.cn/docs".into()),
+                app_url: None,
+            },
+            VendorId::Novita => VendorLinks {
+                usage_url: Some("https://novita.ai/dashboard".into()),
+                billing_url: Some("https://novita.ai/dashboard/billing".into()),
+                status_url: None,
+                docs_url: Some("https://novita.ai/docs".into()),
+                app_url: None,
+            },
+            VendorId::Grok | VendorId::Supergrok => VendorLinks {
+                usage_url: Some("https://console.x.ai/".into()),
+                billing_url: Some("https://console.x.ai/billing".into()),
+                status_url: None,
+                docs_url: Some("https://docs.x.ai/".into()),
+                app_url: Some("https://x.ai/grok".into()),
+            },
+            _ => VendorLinks::default(),
         }
     }
 }
@@ -255,6 +329,8 @@ pub struct VendorLinks {
     pub usage_url: Option<String>,
     pub billing_url: Option<String>,
     pub status_url: Option<String>,
+    pub docs_url: Option<String>,
+    pub app_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -324,11 +400,40 @@ pub enum ProviderStatusReason {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum UsageSource {
+    /// Preferencia de selección, nunca una fuente activa observada.
+    Auto,
     Cli,
     Oauth,
     Api,
     LocalSession,
     WebSession,
+    Web,
+    Local,
+}
+
+/// De dónde sale el número y cuánto fiarse de él. Un porcentaje OAuth es
+/// `Exact`; un coste derivado de logs locales es `Estimated` y la UI debe
+/// etiquetarlo como tal, nunca como factura.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DataConfidence {
+    Exact,
+    Estimated,
+    PercentOnly,
+    #[default]
+    Unknown,
+}
+
+/// Salud del servicio del proveedor (Statuspage/feeds), independiente de
+/// `ProviderStatus`, que describe nuestra conexión con la fuente.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceHealth {
+    Operational,
+    Degraded,
+    Outage,
+    #[default]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -350,6 +455,9 @@ pub struct UsageQuota {
     pub source: UsageSource,
     pub fetched_at: String,
     pub stale: bool,
+    /// `#[serde(default)]` mantiene legibles los cachés escritos por 0.2.0.
+    #[serde(default)]
+    pub confidence: DataConfidence,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -373,6 +481,9 @@ pub struct UsageCost {
     pub week: Option<f64>,
     pub thirty_days: Option<f64>,
     pub month: Option<f64>,
+    /// `Estimated` cuando el número sale de logs locales (no es factura).
+    #[serde(default)]
+    pub confidence: DataConfidence,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -435,6 +546,12 @@ pub struct ProviderUsage {
     pub plan: String,
     pub status: ProviderStatus,
     pub status_reason: Option<ProviderStatusReason>,
+    /// Salud del servicio del proveedor. Nunca mezclar con `status`.
+    #[serde(default)]
+    pub service: ServiceHealth,
+    /// Fuente que produjo el snapshot actual (`None` = sin datos).
+    #[serde(default)]
+    pub active_source: Option<UsageSource>,
     pub stale: bool,
     pub error: Option<String>,
     pub hint: Option<String>,
@@ -474,7 +591,18 @@ pub struct VendorInfo {
     pub needs_key: bool,
     pub enabled: bool,
     pub detected: bool,
+    /// True when the app holds a usable credential for this vendor right
+    /// now (env var, OS keyring entry, or detected local login). This is a
+    /// boolean only — the secret itself is never exposed. The UI derives
+    /// "configured" from this; `enabled` stays fully independent.
+    pub has_credential: bool,
     pub links: VendorLinks,
+    /// Estrategias declaradas en orden de preferencia (`descriptor`).
+    #[serde(default)]
+    pub strategies: Vec<String>,
+    /// Preferencia explícita (`None` = Automática).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_preference: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -483,12 +611,17 @@ pub struct Dashboard {
     pub providers: Vec<ProviderSnapshot>,
     pub catalog: Vec<VendorInfo>,
     pub refresh_minutes: u64,
+    #[serde(default = "default_adaptive")]
+    pub refresh_adaptive: bool,
     pub primary: String,
     pub notifications: bool,
     pub notify_thresholds: Vec<u8>,
     pub autostart: bool,
     pub always_on_top: bool,
     pub compact_mode: bool,
+    pub app_bootstrapping: bool,
+    pub refreshing: bool,
+    pub loading_providers: Vec<String>,
     pub next_update_in_secs: u64,
     pub spend_month_usd: f64,
     pub spend: Vec<SpendRow>,
@@ -561,6 +694,10 @@ pub fn most_headroom(providers: &[ProviderSnapshot]) -> Option<(String, String, 
 
 pub fn now_iso() -> String {
     chrono::Local::now().to_rfc3339()
+}
+
+fn default_adaptive() -> bool {
+    true
 }
 
 fn source_for(id: VendorId) -> UsageSource {
@@ -637,6 +774,7 @@ fn quota_from_line(line: &MetricLine, source: UsageSource, fetched_at: &str) -> 
         source,
         fetched_at: fetched_at.to_string(),
         stale: false,
+        confidence: DataConfidence::Exact,
     })
 }
 
@@ -680,11 +818,19 @@ fn cost_from_lines(lines: &[MetricLine]) -> Option<UsageCost> {
             _ => {}
         }
     }
-    (cost.today.is_some()
+    if cost.today.is_some()
         || cost.week.is_some()
         || cost.thirty_days.is_some()
-        || cost.month.is_some())
-    .then_some(cost)
+        || cost.month.is_some()
+    {
+        // Los costes que llegan por líneas de la API del proveedor se toman
+        // como exactos; `claude.rs::append_cost` los rebaja a `Estimated`
+        // porque salen de logs locales.
+        cost.confidence = DataConfidence::Exact;
+        Some(cost)
+    } else {
+        None
+    }
 }
 
 pub fn resets_in_label(iso: &str) -> String {
@@ -787,6 +933,8 @@ pub fn snapshot_ok(id: VendorId, plan: &str, lines: Vec<MetricLine>) -> Provider
         },
         status: ProviderStatus::Connected,
         status_reason: None,
+        service: ServiceHealth::Unknown,
+        active_source: Some(source),
         stale: false,
         error: None,
         hint: None,
@@ -813,6 +961,8 @@ pub fn snapshot_with_status(
         plan: String::new(),
         status,
         status_reason: Some(status_reason),
+        service: ServiceHealth::Unknown,
+        active_source: None,
         stale: false,
         error: Some(error.to_string()),
         hint: Some(id.login_hint().to_string()),
@@ -863,25 +1013,46 @@ mod tests {
 
     #[test]
     fn vendor_links_never_guessed_for_unlisted_providers() {
-        assert!(VendorId::Kiro.links().usage_url.is_none());
-        assert!(VendorId::Nous.links().status_url.is_none());
-        assert!(VendorId::CommandCode.links().billing_url.is_none());
+        let kiro = VendorId::Kiro.links();
+        assert!(kiro.usage_url.is_none());
+        assert!(kiro.docs_url.is_none());
+        let nous = VendorId::Nous.links();
+        assert!(nous.status_url.is_none());
+        assert!(nous.app_url.is_none());
+        let cmd = VendorId::CommandCode.links();
+        assert!(cmd.billing_url.is_none());
     }
 
     #[test]
     fn known_vendor_links_are_https() {
         let known = [
             VendorId::Anthropic,
+            VendorId::AnthropicApi,
             VendorId::Openai,
+            VendorId::OpenaiAdmin,
             VendorId::Copilot,
             VendorId::Cursor,
             VendorId::Openrouter,
             VendorId::Deepseek,
             VendorId::Groq,
+            VendorId::Windsurf,
+            VendorId::Zai,
+            VendorId::Minimax,
+            VendorId::Kimi,
+            VendorId::Moonshot,
+            VendorId::Novita,
+            VendorId::Grok,
+            VendorId::Supergrok,
         ];
         for id in known {
             let links = id.links();
-            let urls = [links.usage_url, links.billing_url, links.status_url];
+            let urls = [
+                links.usage_url,
+                links.billing_url,
+                links.status_url,
+                links.docs_url,
+                links.app_url,
+            ];
             assert!(
                 urls.iter().any(Option::is_some),
                 "{} should have at least one link",
