@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:frontend": "node --test tests/reset-format.test.ts tests/provider-errors.test.ts tests/layout.test.ts tests/provider-actions.test.ts tests/providers-state.test.ts",
+    "test:frontend": "node scripts/run-frontend-tests.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },
