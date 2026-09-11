@@ -1,137 +1,189 @@
 // Main dashboard view: provider tabs + the selected provider's detail.
 
-import { $, accent, escapeHtml, glyph, tabName } from "../api";
-import type { Dashboard, MetricLine, ProviderSnapshot } from "../api";
+import { $, escapeHtml } from "../api";
+import type { Dashboard, MetricLine, ProviderSnapshot, UsageQuota, VendorInfo } from "../api";
+import { normalizeProviderError } from "../errors";
 import { lang, t } from "../i18n";
+import { providerVisual } from "../providers";
+import { formatResetAbsolute, formatResetRelative } from "../reset-format";
 
-function pctOf(line: Extract<MetricLine, { kind: "progress" }>): number {
-  if (line.format === "percent") return Math.max(0, Math.min(150, line.used));
-  if (line.limit > 0) return (line.used / line.limit) * 100;
-  return 0;
-}
-
-function windowLabel(secs: number): string {
-  if (secs > 0 && secs <= 6 * 3600) {
-    const h = Math.max(1, Math.round(secs / 3600));
-    return lang === "es" ? `ventana ${h}h` : `${h}h ${t("window")}`;
+function pctOf(quota: UsageQuota): number | null {
+  if (quota.usedPercent != null) return Math.max(0, Math.min(100, quota.usedPercent));
+  if (quota.usedAmount != null && quota.limitAmount != null && quota.limitAmount > 0) {
+    return Math.max(0, Math.min(100, (quota.usedAmount / quota.limitAmount) * 100));
   }
-  if (secs > 0 && secs <= 36 * 3600) return t("daily");
-  if (secs >= 20 * 86400) return t("monthly");
-  return t("weekly");
+  return null;
 }
 
-function resetCountdown(line: Extract<MetricLine, { kind: "progress" }>): string {
-  if (!line.resetsAt) return line.resetsInLabel || "—";
-  const end = new Date(line.resetsAt).getTime();
-  if (isNaN(end)) return line.resetsInLabel || "—";
-  const secs = Math.max(0, Math.round((end - Date.now()) / 1000));
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
-
-function exactReset(iso?: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString(lang === "es" ? "es-ES" : "en-US", {
-    month: "numeric",
-    day: "numeric",
-    year: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function paceNote(line: Extract<MetricLine, { kind: "progress" }>): string {
-  if (!line.resetsAt || line.windowSecs <= 0) return "";
-  const end = new Date(line.resetsAt).getTime();
-  if (isNaN(end)) return "";
-  const frac = Math.max(
-    0,
-    Math.min(1, (line.windowSecs * 1000 - (end - Date.now())) / (line.windowSecs * 1000)),
-  );
-  if (frac < 0.05) return "";
-  const util = pctOf(line);
-  if (util < 8) return "";
-  const projected = util / frac;
-  if (projected < 100) return "";
-  const remainMs = ((100 - util) / Math.max(util / (frac * line.windowSecs), 1e-9)) * 1000;
-  const h = Math.floor(remainMs / 3600000);
-  const m = Math.round((remainMs % 3600000) / 60000);
-  return `${t("pace")} ${h}h ${m}m`;
-}
-
-function counts(line: Extract<MetricLine, { kind: "progress" }>): string {
-  if (line.format === "percent") {
-    const used = Math.round(line.used);
-    return `${used} / 100`;
+function windowSeconds(quota: UsageQuota): number {
+  switch (quota.windowType) {
+    case "session":
+    case "5h": return 5 * 3_600;
+    case "daily": return 86_400;
+    case "weekly": return 7 * 86_400;
+    case "monthly": return 30 * 86_400;
+    default: return 0;
   }
-  return `${Math.round(line.used)} / ${Math.round(line.limit)}`;
 }
 
-function addedProviders(dash: Dashboard): ProviderSnapshot[] {
-  return dash.providers.filter((p) => dash.catalog.find((c) => c.id === p.id)?.enabled);
+function paceNote(quota: UsageQuota): string {
+  if (!quota.resetAt) return "";
+  const duration = windowSeconds(quota);
+  if (duration <= 0) return "";
+  const end = new Date(quota.resetAt).getTime();
+  if (!Number.isFinite(end)) return "";
+  const fraction = Math.max(0, Math.min(1, (duration * 1_000 - (end - Date.now())) / (duration * 1_000)));
+  const utilization = pctOf(quota);
+  if (fraction < 0.05 || utilization == null || utilization < 8 || utilization / fraction < 100) return "";
+  const remainingMs = ((100 - utilization) / Math.max(utilization / (fraction * duration), 1e-9)) * 1_000;
+  const hours = Math.floor(remainingMs / 3_600_000);
+  const minutes = Math.round((remainingMs % 3_600_000) / 60_000);
+  return `${t("pace")} ${hours}h ${minutes}m`;
 }
 
-function progressBlock(line: Extract<MetricLine, { kind: "progress" }>): string {
-  const pct = Math.min(100, pctOf(line));
-  const left = Math.max(0, Math.round(100 - pct));
-  const pace = paceNote(line);
+function resetState(quota: UsageQuota): string {
+  switch (quota.resetStatus) {
+    case "not_provided": return t("resetNotProvided");
+    case "not_applicable": return t("resetNotApplicable");
+    case "fetch_failed": return t("resetFetchFailed");
+    case "known": return quota.resetAt ? "" : t("resetFetchFailed");
+  }
+}
+
+function temporaryLimit(quota: UsageQuota): string {
+  if (quota.temporaryMultiplier == null || quota.temporaryMultiplier <= 1) return "";
+  const increase = Math.round((quota.temporaryMultiplier - 1) * 100);
+  const expires = formatResetAbsolute(quota.temporaryExpiresAt, lang);
+  const suffix = expires ? ` ${t("until")} ${expires}` : "";
+  return `<div class="temporary-limit"><strong>${t("temporaryLimit")}</strong> +${increase}%${escapeHtml(suffix)}</div>`;
+}
+
+function progressBlock(quota: UsageQuota): string {
+  const percent = pctOf(quota);
+  const remaining = quota.remainingPercent == null ? null : Math.max(0, Math.min(100, quota.remainingPercent));
+  const pace = paceNote(quota);
+  const resetAt = quota.resetAt ? escapeHtml(quota.resetAt) : "";
+  const knownReset = quota.resetStatus === "known" && !!quota.resetAt;
+  if (import.meta.env.DEV) console.debug(`[usage rendered ${quota.id}]`, quota);
   return `<article class="block">
     <div class="block-top">
       <div>
-        <div class="kicker">${escapeHtml(line.label)}</div>
+        <div class="kicker">${escapeHtml(quota.label)}</div>
         <div class="pct-row">
-          <span class="pct">${Math.round(pct)}%</span>
-          <span class="remain">${left}% ${t("remaining")}</span>
+          <span class="pct">${percent == null ? "—" : `${Math.round(percent)}%`}</span>
+          <span class="used-word">${t("used")}</span>
         </div>
+        <div class="remain">${remaining == null ? t("notAvailable") : `${Math.round(remaining)}% ${t("available")}`}</div>
       </div>
-      <div class="reset-col">
-        <div class="reset-kicker">${t("resetsIn")}</div>
-        <div class="reset-val">${escapeHtml(resetCountdown(line))}</div>
+      <div class="reset-col ${knownReset ? "" : "reset-unknown"}">
+        ${knownReset
+          ? `<div class="reset-kicker">${t("resetsIn")}</div>
+             <div class="reset-val" data-reset-relative data-reset-at="${resetAt}">${escapeHtml(formatResetRelative(quota.resetAt, Date.now(), lang))}</div>
+             <div class="reset-abs" data-reset-absolute data-reset-at="${resetAt}">${escapeHtml(formatResetAbsolute(quota.resetAt, lang))}</div>`
+          : `<div class="reset-state">${escapeHtml(resetState(quota))}</div>`}
       </div>
     </div>
-    <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
-    <div class="meta">
-      <span>${escapeHtml(counts(line))}</span>
-      <span>${escapeHtml(windowLabel(line.windowSecs))}</span>
-    </div>
+    <div class="bar"><div class="fill" style="width:${percent ?? 0}%"></div></div>
+    ${temporaryLimit(quota)}
     ${pace ? `<div class="pace">⚠ ${escapeHtml(pace)}</div>` : ""}
   </article>`;
 }
 
-function detailHtml(p: ProviderSnapshot): string {
-  const progress = p.lines.filter((l): l is Extract<MetricLine, { kind: "progress" }> => l.kind === "progress");
-  const preferred = progress.filter((l) => l.visible !== "demand");
-  const main = (preferred.length ? preferred : progress).slice(0, 2);
-  const mainIds = new Set(main.map((l) => l.id));
-  const weekly = [...progress].reverse().find((l) => l.windowSecs >= 6 * 86400) || progress[progress.length - 1];
-  const cap = p.plan || p.lines.find((l) => l.kind !== "progress")?.text || "—";
-  const resetIso = weekly?.resetsAt;
+function addedProviders(dash: Dashboard): ProviderSnapshot[] {
+  return dash.providers.filter((provider) => dash.catalog.find((item) => item.id === provider.id)?.enabled);
+}
+
+function loadingHtml(name: string): string {
+  return `<section class="provider-loading" aria-live="polite" aria-label="${escapeHtml(t("loadingProvider").replace("{name}", name))}">
+    <span class="skeleton skeleton-title"></span>
+    <span class="skeleton skeleton-value"></span>
+    <span class="skeleton skeleton-bar"></span>
+    <span class="skeleton skeleton-copy"></span>
+  </section>`;
+}
+
+function providerLogo(id: string, name: string): string {
+  const visual = providerVisual(id, name);
+  return `<span class="provider-logo-wrap"><img class="provider-logo" src="${visual.icon}" alt="" />${visual.badge ? `<span class="provider-badge">${visual.badge}</span>` : ""}</span>`;
+}
+
+function errorCard(provider: ProviderSnapshot, vendor: VendorInfo): string {
+  const normalized = normalizeProviderError(provider, vendor);
+  if (!normalized) return "";
+  const action = normalized.action === "retry" ? "refresh" : "settings";
+  const details = normalized.technicalDetails
+    ? `<details class="technical-details"><summary>${t("showDetails")}</summary><pre>${escapeHtml(normalized.technicalDetails)}</pre></details>`
+    : "";
+  return `<section class="provider-error severity-${normalized.severity}">
+    <h3>${escapeHtml(normalized.title)}</h3>
+    <p>${escapeHtml(normalized.message)}</p>
+    ${normalized.actionLabel ? `<button class="btn error-action" data-act="${action}">${escapeHtml(normalized.actionLabel)}</button>` : ""}
+    ${details}
+  </section>`;
+}
+
+function detailHtml(provider: ProviderSnapshot, vendor: VendorInfo): string {
+  const main = provider.quotas.slice(0, 2);
   let body = "";
-  if (!p.connected) {
-    body = `${p.error ? `<p class="err-msg">${escapeHtml(p.error)}</p>` : ""}
-      ${p.hint ? `<p class="hint">${escapeHtml(p.hint)}</p>` : ""}`;
+  if (provider.status !== "connected") {
+    body = errorCard(provider, vendor);
+    if (provider.stale && main.length) {
+      body += main.map(progressBlock).join("");
+      body += `<p class="hint">${t("stale")}</p>`;
+    }
   } else {
     body = main.map(progressBlock).join("");
-    if (p.stale) body += `<p class="hint">${t("stale")}</p>`;
+    if (provider.stale) body += `<p class="hint">${t("stale")}</p>`;
   }
-  const extraRows = p.lines
-    .filter((l) => l.kind !== "progress" || !mainIds.has(l.id))
-    .map((l) => {
-      const value = l.kind === "progress" ? `${Math.round(Math.min(100, pctOf(l)))}%` : l.text;
-      return `<div class="kv"><span>${escapeHtml(l.label)}</span><span>${escapeHtml(value)}</span></div>`;
-    })
+
+  const additionalQuotas = provider.quotas.slice(2).map((quota) => {
+    const value = pctOf(quota);
+    return `<div class="kv"><span>${escapeHtml(quota.label)}</span><span>${value == null ? "—" : `${Math.round(value)}% ${t("used")}`}</span></div>`;
+  }).join("");
+  const legacyRows = provider.lines
+    .filter((line): line is Exclude<MetricLine, { kind: "progress" }> =>
+      line.kind !== "progress" && !["credits", "resets"].includes(line.id))
+    .map((line) => `<div class="kv"><span>${escapeHtml(line.label)}</span><span>${escapeHtml(line.text)}</span></div>`)
     .join("");
+  const creditRows = provider.credits
+    ? `<div class="kv"><span>${t("credits")}</span><span>${provider.credits.remaining.toLocaleString(lang === "es" ? "es-ES" : "en-US", { maximumFractionDigits: 0 })}</span></div>
+       ${provider.credits.resetsAvailable == null ? "" : `<div class="kv"><span>${t("resetsAvailable")}</span><span>${provider.credits.resetsAvailable}</span></div>`}`
+    : "";
+  const breakdown = provider.productBreakdown.length
+    ? `<section class="details breakdown">
+        <h3>${t("productUsage")}</h3>
+        ${provider.productBreakdown.map((item) => `<div class="kv"><span>${escapeHtml(item.name)}</span><span>${Math.round(item.usedPercent)}%</span></div>`).join("")}
+       </section>`
+    : "";
+
   return `${body}
     <section class="details">
       <h3>${t("details")}</h3>
-      <div class="kv"><span>${t("cap")}</span><span>${escapeHtml(String(cap))}</span></div>
-      <div class="kv"><span>${t("resets")}</span><span>${escapeHtml(exactReset(resetIso))}</span></div>
-      ${extraRows}
-    </section>`;
+      <div class="kv"><span>${t("plan")}</span><span>${escapeHtml(provider.plan || "—")}</span></div>
+      ${creditRows}
+      ${additionalQuotas}
+      ${legacyRows}
+    </section>
+    ${breakdown}`;
+}
+
+export function updateResetClocks(root: ParentNode = document): void {
+  root.querySelectorAll<HTMLElement>("[data-reset-relative]").forEach((element) => {
+    element.textContent = formatResetRelative(element.dataset.resetAt, Date.now(), lang);
+  });
+  root.querySelectorAll<HTMLElement>("[data-reset-absolute]").forEach((element) => {
+    element.textContent = formatResetAbsolute(element.dataset.resetAt, lang);
+  });
+}
+
+function updateTabEdges(): void {
+  const tabs = $("tabs");
+  const viewport = $("tabs-scroll");
+  viewport.classList.toggle("can-scroll-left", tabs.scrollLeft > 1);
+  viewport.classList.toggle(
+    "can-scroll-right",
+    tabs.scrollLeft + tabs.clientWidth < tabs.scrollWidth - 1,
+  );
 }
 
 /// Renders the dashboard view. Returns the effective selected provider id
@@ -139,57 +191,64 @@ function detailHtml(p: ProviderSnapshot): string {
 export function renderDash(dash: Dashboard | null, selectedId: string): string {
   if (!dash) return selectedId;
   const added = addedProviders(dash);
-  $("empty").classList.toggle("hidden", added.length > 0);
+  const enabled = dash.catalog.filter((vendor) => vendor.enabled);
+  $("empty").classList.toggle("hidden", enabled.length > 0);
   $("empty-text").textContent = t("empty");
   $("empty-detect").textContent = t("detect");
   $("empty-add").textContent = t("addManual");
   $("btn-quit").textContent = t("quit");
-  document.documentElement.style.setProperty("--accent", accent(selectedId || added[0]?.id || "anthropic"));
-
-  if (!added.find((p) => p.id === selectedId) && added.length) {
-    selectedId = dash.primary && added.some((p) => p.id === dash.primary) ? dash.primary : added[0].id;
+  if (!enabled.find((vendor) => vendor.id === selectedId) && enabled.length) {
+    selectedId = dash.primary && enabled.some((vendor) => vendor.id === dash.primary) ? dash.primary : enabled[0].id;
     localStorage.setItem("selected", selectedId);
   }
 
-  $("tabs").innerHTML =
-    added
-      .map((p) => {
-        const on = p.id === selectedId;
-        return `<button class="tab ${on ? "active" : ""}" data-select="${p.id}" style="--accent:${accent(p.id)}">
-          <span class="glyph">${glyph(p.id)}</span>
-          <span class="label">${escapeHtml(tabName(p.id, p.name))}</span>
-        </button>`;
-      })
-      .join("") +
-    `<button class="tab add" data-act="settings" title="${t("add")}">
-      <span class="glyph"><svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
-    </button>`;
+  const selected = enabled.find((vendor) => vendor.id === selectedId) ?? enabled[0];
+  document.documentElement.style.setProperty(
+    "--accent",
+    providerVisual(selected?.id || "unknown", selected?.name || "AI").accent,
+  );
 
-  const current = added.find((p) => p.id === selectedId);
-  $("detail").innerHTML = current ? detailHtml(current) : "";
-  $("detail").classList.toggle("hidden", !current);
+  $("tabs").innerHTML = enabled.map((vendor) => {
+    const active = vendor.id === selectedId;
+    const snapshot = added.find((provider) => provider.id === vendor.id);
+    const status = snapshot?.status || "loading";
+    const visual = providerVisual(vendor.id, vendor.name);
+    return `<button class="tab ${active ? "active" : ""}" data-select="${escapeHtml(vendor.id)}" style="--provider-accent:${visual.accent}">
+      ${providerLogo(vendor.id, vendor.name)}
+      <span class="label">${escapeHtml(vendor.name)}</span>
+      <span class="provider-status-dot status-${status}" title="${status}"></span>
+    </button>`;
+  }).join("");
+  $("add-provider").setAttribute("title", t("add"));
+  $("add-provider").setAttribute("aria-label", t("add"));
+  const tabs = $("tabs");
+  tabs.onscroll = updateTabEdges;
+  requestAnimationFrame(() => {
+    tabs.querySelector<HTMLElement>(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    updateTabEdges();
+  });
+
+  const current = added.find((provider) => provider.id === selectedId);
+  const currentVendor = enabled.find((vendor) => vendor.id === selectedId);
+  $("detail").innerHTML = current && currentVendor
+    ? detailHtml(current, currentVendor)
+    : currentVendor ? loadingHtml(currentVendor.name) : "";
+  $("detail").classList.toggle("hidden", !currentVendor);
 
   const stamp = current?.updatedAt ? new Date(current.updatedAt) : null;
-  if (stamp && !isNaN(stamp.getTime())) {
-    $("updated").textContent = `${t("updated")} ${stamp.toLocaleTimeString(lang === "es" ? "es-ES" : "en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-    })}`;
+  if (stamp && !Number.isNaN(stamp.getTime())) {
+    $("updated").textContent = `${t("updated")} ${stamp.toLocaleTimeString(lang === "es" ? "es-ES" : "en-US", { hour: "numeric", minute: "2-digit" })}`;
   }
+  if (!stamp || Number.isNaN(stamp.getTime())) $("updated").textContent = "";
 
-  document.querySelectorAll<HTMLElement>(".seg").forEach((el) => {
-    el.classList.toggle(
-      "active",
-      (el.dataset.act === "lang-en" && lang === "en") || (el.dataset.act === "lang-es" && lang === "es"),
-    );
+  document.querySelectorAll<HTMLElement>(".seg").forEach((element) => {
+    element.classList.toggle("active", (element.dataset.act === "lang-en" && lang === "en") || (element.dataset.act === "lang-es" && lang === "es"));
   });
 
   const stall = $("stall");
-  const recName = dash.recommendName;
-  const recLeft = dash.recommendLeft;
-  if (added.length >= 2 && recName && recLeft != null) {
-    const tpl = dash.recommendId === selectedId ? t("stallHere") : t("stall");
-    stall.textContent = tpl.replace("{name}", recName).replace("{left}", String(Math.round(recLeft)));
+  if (added.length >= 2 && dash.recommendName && dash.recommendLeft != null) {
+    const template = dash.recommendId === selectedId ? t("stallHere") : t("stall");
+    stall.textContent = template.replace("{name}", dash.recommendName).replace("{left}", String(Math.round(dash.recommendLeft)));
     stall.classList.remove("hidden");
     stall.dataset.select = dash.recommendId || "";
   } else {

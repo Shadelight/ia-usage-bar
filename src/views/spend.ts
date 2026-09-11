@@ -1,7 +1,7 @@
 // Spend view + the browser-preview dashboard used when not running in Tauri.
 
-import { $, escapeHtml, tabName } from "../api";
-import type { Dashboard, MetricLine, ProviderSnapshot, VendorInfo } from "../api";
+import { $, escapeHtml } from "../api";
+import type { Dashboard, MetricLine, ProviderSnapshot, UsageQuota, VendorInfo, VendorLinks } from "../api";
 import { I18N, lang, t } from "../i18n";
 
 export function renderSpend(dash: Dashboard | null): void {
@@ -20,7 +20,7 @@ export function renderSpend(dash: Dashboard | null): void {
     ${rows
       .map(
         (r) => `<div class="spend-row">
-          <div><div class="name">${escapeHtml(tabName(r.id, r.name))}</div><div class="sub">${escapeHtml(r.label)}</div></div>
+          <div><div class="name">${escapeHtml(r.name)}</div><div class="sub">${escapeHtml(r.label)}</div></div>
           <div>$${r.usd.toFixed(2)}</div>
         </div>`,
       )
@@ -42,12 +42,37 @@ export function previewDashboard(): Dashboard {
     id,
     label,
     used,
+    remaining: 100 - used,
     limit: 100,
     format: "percent",
     resetsAt,
     resetsInLabel: "",
     windowSecs,
     visible: "always",
+  });
+  const quota = (
+    id: string,
+    label: string,
+    usedPercent: number,
+    resetAt: string,
+    windowType: UsageQuota["windowType"],
+  ): UsageQuota => ({
+    id,
+    label,
+    windowType,
+    usedPercent,
+    remainingPercent: 100 - usedPercent,
+    usedAmount: null,
+    limitAmount: null,
+    unit: "percent",
+    resetAt,
+    resetInSeconds: Math.max(0, Math.floor((new Date(resetAt).getTime() - Date.now()) / 1_000)),
+    resetStatus: "known",
+    temporaryMultiplier: null,
+    temporaryExpiresAt: null,
+    source: "oauth",
+    fetchedAt: new Date().toISOString(),
+    stale: false,
   });
   const snap = (
     id: string,
@@ -61,11 +86,30 @@ export function previewDashboard(): Dashboard {
     name,
     short,
     plan,
-    connected: true,
+    status: "connected",
+    statusReason: null,
     stale: false,
     error: null,
     hint: null,
     updatedAt: new Date().toISOString(),
+    quotas: [
+      quota(
+        id === "openai" ? "5h" : "session",
+        id === "openai" ? (lang === "es" ? "5 horas" : "5 hours") : I18N[lang].session,
+        a,
+        reset,
+        id === "openai" ? "5h" : "session",
+      ),
+      quota("weekly", I18N[lang].weekly, b, week, "weekly"),
+      ...(id === "cursor"
+        ? [quota("other", lang === "es" ? "Otros modelos" : "Other models", 10, week, "weekly")]
+        : []),
+    ],
+    credits: id === "openai" ? { remaining: 478, resetsAvailable: 1 } : null,
+    productBreakdown: id === "anthropic"
+      ? [{ name: "Claude Code", usedPercent: 88 }, { name: "Cowork", usedPercent: 12 }]
+      : [],
+    cost: null,
     lines: [
       line("session", I18N[lang].session, a, reset, 18000),
       line("weekly", I18N[lang].weekly, b, week, 604800),
@@ -75,6 +119,12 @@ export function previewDashboard(): Dashboard {
     ],
     primaryUtilization: a,
   });
+  const noLinks: VendorLinks = { usageUrl: null, billingUrl: null, statusUrl: null };
+  const previewLinks: Record<string, VendorLinks> = {
+    anthropic: { usageUrl: "https://console.anthropic.com/settings/usage", billingUrl: null, statusUrl: "https://status.anthropic.com" },
+    openai: { usageUrl: "https://platform.openai.com/usage", billingUrl: null, statusUrl: "https://status.openai.com" },
+    cursor: { usageUrl: "https://cursor.com/dashboard", billingUrl: null, statusUrl: null },
+  };
   const catalog = (id: string, name: string, enabled: boolean): VendorInfo => ({
     id,
     name,
@@ -85,6 +135,7 @@ export function previewDashboard(): Dashboard {
     needsKey: false,
     enabled,
     detected: enabled,
+    links: previewLinks[id] ?? noLinks,
   });
   const claude = snap("anthropic", "Claude Code", "CLD", "Max", 88, 12);
   claude.lines.push({ kind: "values", id: "cost_month", label: "Mes", text: "$42.10", visible: "always" });
@@ -108,8 +159,10 @@ export function previewDashboard(): Dashboard {
     refreshMinutes: 5,
     primary: "anthropic",
     notifications: true,
-    showUsageAs: "used",
-    resetTimes: "countdown",
+    notifyThresholds: [75, 90, 95],
+    autostart: true,
+    alwaysOnTop: true,
+    compactMode: false,
     nextUpdateInSecs: 120,
     spendMonthUsd: 42.1,
     spend: [{ id: "anthropic", name: "Claude Code", label: "Mes", usd: 42.1 }],
