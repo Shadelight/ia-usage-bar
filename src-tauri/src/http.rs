@@ -39,8 +39,45 @@ pub fn client() -> Result<Client, FetchError> {
         .map_err(|e| FetchError::Network(format!("cliente HTTP: {e}")))
 }
 
+pub(crate) fn redact_json(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, item) in map {
+                let key = key.to_ascii_lowercase();
+                if [
+                    "token",
+                    "secret",
+                    "password",
+                    "cookie",
+                    "authorization",
+                    "api_key",
+                    "email",
+                ]
+                .iter()
+                .any(|needle| key.contains(needle))
+                {
+                    *item = Value::String("[redacted]".into());
+                } else {
+                    redact_json(item);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(redact_json),
+        _ => {}
+    }
+}
+
 pub fn send_json(builder: RequestBuilder) -> Result<Value, FetchError> {
-    let resp = builder.send().map_err(|e| FetchError::Network(format!("red: {e}")))?;
+    let resp = builder
+        .send()
+        .map_err(|e| FetchError::Network(format!("red: {e}")))?;
+    #[cfg(debug_assertions)]
+    let endpoint = format!(
+        "{}://{}{}",
+        resp.url().scheme(),
+        resp.url().host_str().unwrap_or("unknown"),
+        resp.url().path()
+    );
     let status = resp.status();
     let code = status.as_u16();
     if code == 429 {
@@ -50,13 +87,27 @@ pub fn send_json(builder: RequestBuilder) -> Result<Value, FetchError> {
         .text()
         .map_err(|e| FetchError::Network(format!("cuerpo: {e}")))?;
     if !status.is_success() {
-        let clip: String = text.chars().take(180).collect();
+        let safe_text = serde_json::from_str::<Value>(&text)
+            .map(|mut value| {
+                redact_json(&mut value);
+                value.to_string()
+            })
+            .unwrap_or(text);
+        let clip: String = safe_text.chars().take(180).collect();
         return Err(FetchError::Http(code, clip));
     }
     if text.trim().is_empty() {
         return Ok(Value::Null);
     }
-    serde_json::from_str(&text).map_err(|e| FetchError::Parse(format!("json: {e}")))
+    let value: Value =
+        serde_json::from_str(&text).map_err(|e| FetchError::Parse(format!("json: {e}")))?;
+    #[cfg(debug_assertions)]
+    {
+        let mut safe = value.clone();
+        redact_json(&mut safe);
+        eprintln!("[usage raw {endpoint}] {safe}");
+    }
+    Ok(value)
 }
 
 pub fn get_json(url: &str, headers: &[(&str, &str)]) -> Result<Value, FetchError> {

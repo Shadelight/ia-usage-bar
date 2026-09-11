@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::model::VendorId;
 use crate::paths::{app_config_dir, config_path, detect_path};
 
+const CREDENTIAL_SERVICE: &str = "com.alberth.iausagebar";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default = "default_refresh")]
@@ -17,12 +19,17 @@ pub struct AppConfig {
     pub primary: String,
     #[serde(default = "default_true")]
     pub notifications: bool,
-    #[serde(default = "default_used")]
-    pub show_usage_as: String,
-    #[serde(default = "default_countdown")]
-    pub reset_times: String,
+    #[serde(default = "default_notify_thresholds")]
+    pub notify_thresholds: Vec<u8>,
     #[serde(default)]
     pub providers: HashMap<String, ProviderConfig>,
+    /// Default `true`: the window has always opened always-on-top, so a
+    /// `config.toml` written before this field existed must keep behaving
+    /// that way once it gains the field.
+    #[serde(default = "default_true")]
+    pub always_on_top: bool,
+    #[serde(default)]
+    pub compact_mode: bool,
     /// True when `load()` could not parse `config.toml` and fell back to
     /// defaults after backing the bad file aside. Never persisted; callers
     /// must not overwrite `config.toml` while this is set.
@@ -39,11 +46,8 @@ fn default_primary() -> String {
 fn default_true() -> bool {
     true
 }
-fn default_used() -> String {
-    "used".into()
-}
-fn default_countdown() -> String {
-    "countdown".into()
+fn default_notify_thresholds() -> Vec<u8> {
+    vec![75, 90, 95]
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -56,8 +60,6 @@ pub struct ProviderConfig {
     pub team_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hidden_lines: Option<Vec<String>>,
 }
 
 impl Default for AppConfig {
@@ -66,9 +68,10 @@ impl Default for AppConfig {
             refresh_minutes: 5,
             primary: "anthropic".into(),
             notifications: true,
-            show_usage_as: "used".into(),
-            reset_times: "countdown".into(),
+            notify_thresholds: default_notify_thresholds(),
             providers: HashMap::new(),
+            always_on_top: true,
+            compact_mode: false,
             load_recovered: false,
         }
     }
@@ -95,16 +98,23 @@ impl AppConfig {
                 }
             }
         };
-        if cfg.refresh_minutes == 0 {
-            cfg.refresh_minutes = 5;
-        }
-        cfg.refresh_minutes = match cfg.refresh_minutes {
-            1 | 5 | 10 => cfg.refresh_minutes,
+        cfg.normalize();
+        cfg
+    }
+
+    pub fn normalize(&mut self) {
+        self.refresh_minutes = match self.refresh_minutes {
+            1 | 5 | 10 => self.refresh_minutes,
             n if n < 3 => 1,
             n if n < 8 => 5,
             _ => 10,
         };
-        cfg
+        self.notify_thresholds.retain(|n| (1..=99).contains(n));
+        self.notify_thresholds.sort_unstable();
+        self.notify_thresholds.dedup();
+        if self.notify_thresholds.is_empty() {
+            self.notify_thresholds = default_notify_thresholds();
+        }
     }
 
     /// `Ok(None)` = file absent (a normal first run). `Ok(Some)` = parsed.
@@ -122,7 +132,7 @@ impl AppConfig {
         let dir = app_config_dir();
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let body = toml::to_string_pretty(self).map_err(|e| e.to_string())?;
-        fs::write(config_path(), body).map_err(|e| e.to_string())
+        atomic_write(&config_path(), body.as_bytes())
     }
 
     pub fn provider(&self, id: VendorId) -> ProviderConfig {
@@ -134,7 +144,10 @@ impl AppConfig {
     }
 
     pub fn set_enabled(&mut self, id: VendorId, enabled: bool) {
-        self.providers.entry(id.slug().to_string()).or_default().enabled = enabled;
+        self.providers
+            .entry(id.slug().to_string())
+            .or_default()
+            .enabled = enabled;
     }
 
     pub fn api_key(&self, id: VendorId) -> Option<String> {
@@ -145,9 +158,14 @@ impl AppConfig {
                 }
             }
         }
-        self.provider(id)
-            .api_key
-            .filter(|s| !s.trim().is_empty())
+        if let Ok(entry) = keyring::Entry::new(CREDENTIAL_SERVICE, id.slug()) {
+            if let Ok(value) = entry.get_password() {
+                if !value.trim().is_empty() {
+                    return Some(value);
+                }
+            }
+        }
+        self.provider(id).api_key.filter(|s| !s.trim().is_empty())
     }
 
     pub fn enabled_ids(&self) -> Vec<VendorId> {
@@ -159,13 +177,48 @@ impl AppConfig {
     }
 }
 
+pub(crate) fn store_api_key(id: VendorId, value: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new(CREDENTIAL_SERVICE, id.slug()).map_err(|e| e.to_string())?;
+    if value.trim().is_empty() {
+        if entry.get_password().is_ok() {
+            entry.delete_credential().map_err(|e| e.to_string())?;
+        }
+    } else {
+        entry
+            .set_password(value.trim())
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Move credentials written by pre-0.1 builds out of config.toml. A value is
+/// removed from the config only after Windows Credential Manager accepts it.
+pub(crate) fn migrate_legacy_credentials(cfg: &mut AppConfig) -> bool {
+    let mut changed = false;
+    for id in VendorId::all().iter().copied() {
+        let legacy = cfg
+            .providers
+            .get(id.slug())
+            .and_then(|provider| provider.api_key.clone());
+        if let Some(value) = legacy {
+            if store_api_key(id, &value).is_ok() {
+                if let Some(provider) = cfg.providers.get_mut(id.slug()) {
+                    provider.api_key = None;
+                    changed = true;
+                }
+            }
+        }
+    }
+    changed
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct DetectState {
     #[serde(default)]
     known: HashSet<String>,
 }
 
-pub fn run_detect(cfg: &mut AppConfig) -> Vec<String> {
+pub fn run_detect(cfg: &mut AppConfig) -> Result<Vec<String>, String> {
     let path = detect_path();
     let mut state: DetectState = fs::read_to_string(&path)
         .ok()
@@ -174,20 +227,22 @@ pub fn run_detect(cfg: &mut AppConfig) -> Vec<String> {
     let mut newly = Vec::new();
     for id in VendorId::all() {
         let slug = id.slug().to_string();
-        if state.known.contains(&slug) {
-            continue;
-        }
-        state.known.insert(slug.clone());
-        if crate::providers::has_local_credentials(*id, cfg) {
+        let detected = crate::providers::has_local_credentials(*id, cfg);
+        if detected && !state.known.contains(&slug) {
+            state.known.insert(slug.clone());
             cfg.set_enabled(*id, true);
             newly.push(slug);
+        } else if !detected {
+            // A later manual detection must be able to discover a login that
+            // did not exist during the first run.
+            state.known.remove(&slug);
         }
     }
-    let _ = save_detect(&path, &state);
     if !cfg.load_recovered {
-        let _ = cfg.save();
+        cfg.save()?;
     }
-    newly
+    save_detect(&path, &state)?;
+    Ok(newly)
 }
 
 /// Rename an unparseable `config.toml` to `config.toml.bak-<unix-ts>` so its
@@ -205,8 +260,34 @@ fn save_detect(path: &Path, state: &DetectState) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(path, serde_json::to_vec_pretty(state).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
+    atomic_write(
+        path,
+        &serde_json::to_vec_pretty(state).map_err(|e| e.to_string())?,
+    )
+}
+
+pub(crate) fn atomic_write(path: &Path, body: &[u8]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    fs::write(&tmp, body).map_err(|e| e.to_string())?;
+    match fs::rename(&tmp, path) {
+        Ok(()) => return Ok(()),
+        Err(error) if !path.exists() => return Err(error.to_string()),
+        Err(_) => {}
+    }
+    // Windows does not replace an existing destination with rename(). Keep a
+    // recoverable backup until the replacement has landed.
+    let backup = path.with_extension(format!("replace-bak-{}", std::process::id()));
+    let _ = fs::remove_file(&backup);
+    fs::rename(path, &backup).map_err(|e| e.to_string())?;
+    if let Err(error) = fs::rename(&tmp, path) {
+        let _ = fs::rename(&backup, path);
+        return Err(error.to_string());
+    }
+    let _ = fs::remove_file(backup);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -255,5 +336,35 @@ mod tests {
         let cfg = AppConfig::load_from(&path);
         assert!(!cfg.load_recovered);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn defaults_match_current_window_behavior() {
+        let cfg = AppConfig::default();
+        assert!(cfg.always_on_top, "window has always opened always-on-top");
+        assert!(!cfg.compact_mode);
+    }
+
+    #[test]
+    fn normalize_clamps_refresh_and_notification_thresholds() {
+        let mut cfg = AppConfig {
+            refresh_minutes: 7,
+            notify_thresholds: vec![95, 0, 75, 75, 101],
+            ..AppConfig::default()
+        };
+        cfg.normalize();
+        assert_eq!(cfg.refresh_minutes, 5);
+        assert_eq!(cfg.notify_thresholds, vec![75, 95]);
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_file_without_partial_content() {
+        let dir = scratch_dir("atomic");
+        let path = dir.join("state.json");
+        fs::write(&path, b"old").unwrap();
+        atomic_write(&path, b"new complete value").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new complete value");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = fs::remove_dir_all(dir);
     }
 }

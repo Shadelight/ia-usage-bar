@@ -5,8 +5,8 @@ use serde_json::{json, Value};
 use crate::config::AppConfig;
 use crate::http::{self, FetchError};
 use crate::model::{
-    json_f64, json_str, progress_pct, snapshot_err, snapshot_ok, values_line, ProviderSnapshot,
-    VendorId,
+    json_f64, json_str, progress_pct, snapshot_needs_auth, snapshot_ok, snapshot_with_status,
+    values_line, ProviderSnapshot, ProviderStatus, ProviderStatusReason, VendorId,
 };
 
 use super::Provider;
@@ -32,33 +32,41 @@ impl Provider for Antigravity {
     }
 
     fn refresh(&self, _cfg: &AppConfig) -> ProviderSnapshot {
-        for base in discover_local_bases() {
-            if let Ok(snap) = fetch_local(&base) {
+        let local_bases = discover_local_bases();
+        for base in &local_bases {
+            if let Ok(snap) = fetch_local(base) {
                 return snap;
             }
         }
+        if !local_bases.is_empty() {
+            return local_service_unavailable();
+        }
         let Some(token) = read_keyring_token() else {
-            return snapshot_err(
+            return snapshot_needs_auth(
                 VendorId::Antigravity,
-                "Antigravity no está en ejecución y no hay sesión Google guardada",
+                "No hay una sesión Google guardada para Antigravity",
             );
         };
         match fetch_cloud(&token) {
             Ok(mut snap) => {
                 snap.lines.insert(
                     0,
-                    values_line(
-                        "source",
-                        "Fuente",
-                        "Google API (app cerrada)",
-                        "always",
-                    ),
+                    values_line("source", "Fuente", "Google API (app cerrada)", "always"),
                 );
                 snap
             }
             Err(e) => super::map_fetch_err(VendorId::Antigravity, e),
         }
     }
+}
+
+fn local_service_unavailable() -> ProviderSnapshot {
+    snapshot_with_status(
+        VendorId::Antigravity,
+        ProviderStatus::Unavailable,
+        ProviderStatusReason::LocalServiceUnavailable,
+        "El servicio local de Antigravity no está disponible",
+    )
 }
 
 fn read_keyring_token() -> Option<String> {
@@ -70,7 +78,8 @@ fn read_keyring_token() -> Option<String> {
 fn parse_blob(raw: &str) -> Option<String> {
     let raw = raw.trim();
     let json = if let Some(enc) = raw.strip_prefix("go-keyring-base64:") {
-        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, enc.trim()).ok()?;
+        let bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, enc.trim()).ok()?;
         String::from_utf8(bytes).ok()?
     } else {
         raw.to_string()
@@ -130,7 +139,10 @@ fn fetch_plan(token: &str) -> Option<String> {
             if let Some(s) = json_str(&body, &["currentTier", "tierId", "plan", "planName"]) {
                 return Some(s);
             }
-            if let Some(s) = body.pointer("/cloudaicompanionTier").and_then(|v| v.as_str()) {
+            if let Some(s) = body
+                .pointer("/cloudaicompanionTier")
+                .and_then(|v| v.as_str())
+            {
                 return Some(s.to_string());
             }
         }
@@ -150,7 +162,8 @@ fn fetch_local(addr: &str) -> Result<ProviderSnapshot, FetchError> {
         headers.push(("x-codeium-csrf-token", token));
     }
     let refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let url = format!("{base}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary");
+    let url =
+        format!("{base}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary");
     let body = http::post_json(&url, &refs, &json!({}))?;
     let plan = fetch_local_plan(&base, &refs).unwrap_or_else(|| "Antigravity".into());
     Ok(snapshot_from_quota(&body, &plan))
@@ -168,8 +181,11 @@ fn fetch_csrf(base: &str) -> Option<String> {
 fn fetch_local_plan(base: &str, headers: &[(&str, &str)]) -> Option<String> {
     let url = format!("{base}/exa.language_server_pb.LanguageServerService/GetUserStatus");
     let body = http::post_json(&url, headers, &json!({})).ok()?;
-    json_str(&body, &["currentTier", "tierId", "plan", "planName"])
-        .or_else(|| body.pointer("/userStatus/plan").and_then(|v| v.as_str()).map(|s| s.to_string()))
+    json_str(&body, &["currentTier", "tierId", "plan", "planName"]).or_else(|| {
+        body.pointer("/userStatus/plan")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    })
 }
 
 fn discover_local_bases() -> Vec<String> {
@@ -225,7 +241,8 @@ fn discover_windows_ports() -> Vec<u16> {
         let Some(netstat) = run_hidden("netstat", &["-ano", "-p", "tcp"]) else {
             return Vec::new();
         };
-        let mut per_pid: std::collections::BTreeMap<u32, Vec<u16>> = std::collections::BTreeMap::new();
+        let mut per_pid: std::collections::BTreeMap<u32, Vec<u16>> =
+            std::collections::BTreeMap::new();
         for line in netstat.lines() {
             let cols: Vec<&str> = line.split_whitespace().collect();
             if cols.len() < 5 || !cols[0].eq_ignore_ascii_case("TCP") {
@@ -305,12 +322,14 @@ pub(crate) fn snapshot_from_quota(body: &Value, plan: &str) -> ProviderSnapshot 
         .unwrap_or(Value::Array(vec![inner.clone()]));
     if let Some(arr) = groups.as_array() {
         for group in arr {
-            let name = json_str(group, &["displayName", "name", "modelFamily"]).unwrap_or_else(|| "Pool".into());
+            let name = json_str(group, &["displayName", "name", "modelFamily"])
+                .unwrap_or_else(|| "Pool".into());
             push_bucket(&mut lines, group, &name, "fiveHour", "5h", 18_000, "always");
             push_bucket(&mut lines, group, &name, "weekly", "7d", 604_800, "always");
             if let Some(buckets) = group.get("buckets").and_then(|v| v.as_array()) {
                 for b in buckets {
-                    let label = json_str(b, &["displayName", "name", "bucketId"]).unwrap_or(name.clone());
+                    let label =
+                        json_str(b, &["displayName", "name", "bucketId"]).unwrap_or(name.clone());
                     let window = json_str(b, &["window"]).unwrap_or_default();
                     let secs = if window.contains("week") || window.contains("7") {
                         604_800
@@ -343,11 +362,19 @@ pub(crate) fn snapshot_from_quota(body: &Value, plan: &str) -> ProviderSnapshot 
 
 fn bucket_pct(b: &Value) -> f64 {
     if let Some(rem) = json_f64(b, &["remainingFraction", "remaining_fraction"]) {
-        let used = if rem <= 1.0 { (1.0 - rem) * 100.0 } else { 100.0 - rem };
+        let used = if rem <= 1.0 {
+            (1.0 - rem) * 100.0
+        } else {
+            100.0 - rem
+        };
         return used.clamp(0.0, 100.0);
     }
     let used = json_f64(b, &["usedFraction", "utilization", "usedPercent"]).unwrap_or(0.0);
-    if used <= 1.0 { used * 100.0 } else { used }
+    if used <= 1.0 {
+        used * 100.0
+    } else {
+        used
+    }
 }
 
 fn push_bucket(
@@ -370,4 +397,29 @@ fn push_bucket(
         window,
         visible,
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_rpc_failure_is_not_reported_as_missing_google_auth() {
+        let snapshot = local_service_unavailable();
+        assert_eq!(snapshot.status, ProviderStatus::Unavailable);
+        assert_eq!(
+            snapshot.status_reason,
+            Some(ProviderStatusReason::LocalServiceUnavailable)
+        );
+    }
+
+    #[test]
+    fn absent_google_session_is_needs_auth() {
+        let snapshot = snapshot_needs_auth(VendorId::Antigravity, "missing session");
+        assert_eq!(snapshot.status, ProviderStatus::NeedsAuth);
+        assert_eq!(
+            snapshot.status_reason,
+            Some(ProviderStatusReason::MissingCredential)
+        );
+    }
 }

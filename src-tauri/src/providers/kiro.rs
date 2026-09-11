@@ -8,8 +8,8 @@ use serde_json::Value;
 use crate::config::AppConfig;
 use crate::http::{self, FetchError};
 use crate::model::{
-    progress_pct, resets_from_unix, snapshot_ok, values_line, ProviderSnapshot,
-    VendorId,
+    progress_pct, resets_from_unix, snapshot_needs_auth, snapshot_ok, values_line,
+    ProviderSnapshot, VendorId,
 };
 use crate::paths::{app_config_dir, home_dir};
 
@@ -33,6 +33,9 @@ impl Provider for Kiro {
     }
 
     fn refresh(&self, _cfg: &AppConfig) -> ProviderSnapshot {
+        if db_path().is_none() {
+            return snapshot_needs_auth(VendorId::Kiro, VendorId::Kiro.login_hint());
+        }
         match load_and_fetch() {
             Ok(snap) => snap,
             Err(e) => super::map_fetch_err(VendorId::Kiro, e),
@@ -74,7 +77,13 @@ fn db_path() -> Option<std::path::PathBuf> {
     let candidates = [
         dirs::data_local_dir().map(|p| p.join("kiro-cli").join("data.sqlite3")),
         dirs::data_dir().map(|p| p.join("kiro-cli").join("data.sqlite3")),
-        Some(home_dir().join(".local").join("share").join("kiro-cli").join("data.sqlite3")),
+        Some(
+            home_dir()
+                .join(".local")
+                .join("share")
+                .join("kiro-cli")
+                .join("data.sqlite3"),
+        ),
     ];
     candidates.into_iter().flatten().find(|p| p.exists())
 }
@@ -125,9 +134,9 @@ fn read_kv<T: for<'de> Deserialize<'de>>(
     key: &str,
 ) -> Result<T, FetchError> {
     let sql = format!("SELECT value FROM {table} WHERE key = ?1");
-    let raw: String = conn
-        .query_row(&sql, [key], |row| row.get(0))
-        .map_err(|_| FetchError::Parse(format!("Kiro: falta `{key}`. Ejecuta `kiro-cli login`.")))?;
+    let raw: String = conn.query_row(&sql, [key], |row| row.get(0)).map_err(|_| {
+        FetchError::Parse(format!("Kiro: falta `{key}`. Ejecuta `kiro-cli login`."))
+    })?;
     serde_json::from_str(&raw)
         .map_err(|e| FetchError::Parse(format!("Kiro: `{key}` malformado ({e})")))
 }
@@ -149,9 +158,11 @@ fn valid_region(region: &str) -> bool {
         && region.len() <= 32
         && parts[0].chars().all(|c| c.is_ascii_lowercase())
         && parts[parts.len() - 1].chars().all(|c| c.is_ascii_digit())
-        && parts
-            .iter()
-            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()))
+        && parts.iter().all(|p| {
+            !p.is_empty()
+                && p.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        })
 }
 
 fn needs_refresh(creds: &Creds) -> bool {
@@ -224,15 +235,13 @@ fn refresh_oauth(creds: &mut Creds) -> Result<(), FetchError> {
         creds.expires_at = dt;
     }
     let _ = std::fs::create_dir_all(app_config_dir());
-    let _ = std::fs::write(
-        oauth_cache_path(),
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "access_token": creds.access_token,
-            "refresh_token": creds.refresh_token,
-            "expires_at": creds.expires_at.to_rfc3339(),
-        }))
-        .unwrap_or_default(),
-    );
+    let cache = serde_json::to_vec_pretty(&serde_json::json!({
+        "access_token": creds.access_token,
+        "refresh_token": creds.refresh_token,
+        "expires_at": creds.expires_at.to_rfc3339(),
+    }))
+    .unwrap_or_default();
+    crate::config::atomic_write(&oauth_cache_path(), &cache).map_err(FetchError::Network)?;
     Ok(())
 }
 

@@ -17,7 +17,6 @@
     "core:window:allow-set-always-on-top",
     "core:window:allow-center",
     "core:app:allow-version",
-    "opener:default",
     "notification:default"
   ]
 }

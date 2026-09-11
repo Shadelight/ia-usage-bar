@@ -200,6 +200,61 @@ impl VendorId {
     pub fn needs_api_key_ui(self) -> bool {
         matches!(self.auth_kind(), AuthKind::ApiKey | AuthKind::Mixed) && self.env_key().is_some()
     }
+
+    /// Only well-known, verifiable official URLs. Every provider not listed
+    /// here gets `None` for all three fields — never a guessed link.
+    pub fn links(self) -> VendorLinks {
+        match self {
+            VendorId::Anthropic | VendorId::AnthropicApi => VendorLinks {
+                usage_url: Some("https://console.anthropic.com/settings/usage".into()),
+                billing_url: None,
+                status_url: Some("https://status.anthropic.com".into()),
+            },
+            VendorId::Openai | VendorId::OpenaiAdmin => VendorLinks {
+                usage_url: Some("https://platform.openai.com/usage".into()),
+                billing_url: None,
+                status_url: Some("https://status.openai.com".into()),
+            },
+            VendorId::Copilot => VendorLinks {
+                usage_url: None,
+                billing_url: Some("https://github.com/settings/billing".into()),
+                status_url: Some("https://www.githubstatus.com".into()),
+            },
+            VendorId::Cursor => VendorLinks {
+                usage_url: Some("https://cursor.com/dashboard".into()),
+                billing_url: None,
+                status_url: None,
+            },
+            VendorId::Openrouter => VendorLinks {
+                usage_url: Some("https://openrouter.ai/activity".into()),
+                billing_url: None,
+                status_url: None,
+            },
+            VendorId::Deepseek => VendorLinks {
+                usage_url: Some("https://platform.deepseek.com/usage".into()),
+                billing_url: None,
+                status_url: None,
+            },
+            VendorId::Groq => VendorLinks {
+                usage_url: Some("https://console.groq.com/dashboard/usage".into()),
+                billing_url: None,
+                status_url: None,
+            },
+            _ => VendorLinks {
+                usage_url: None,
+                billing_url: None,
+                status_url: None,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct VendorLinks {
+    pub usage_url: Option<String>,
+    pub billing_url: Option<String>,
+    pub status_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -211,6 +266,115 @@ pub enum AuthKind {
     Mixed,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowType {
+    Session,
+    #[serde(rename = "5h")]
+    FiveHour,
+    Daily,
+    Weekly,
+    Monthly,
+    Credits,
+    Custom,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum UsageUnit {
+    Percent,
+    Credits,
+    Usd,
+    Requests,
+    Tokens,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResetStatus {
+    Known,
+    NotProvided,
+    NotApplicable,
+    FetchFailed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderStatus {
+    Connected,
+    NeedsAuth,
+    NeedsPermission,
+    Unavailable,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderStatusReason {
+    MissingCredential,
+    InvalidCredential,
+    MissingPermission,
+    LocalServiceUnavailable,
+    NetworkUnavailable,
+    RateLimited,
+    ParseFailed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum UsageSource {
+    Cli,
+    Oauth,
+    Api,
+    LocalSession,
+    WebSession,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageQuota {
+    pub id: String,
+    pub label: String,
+    pub window_type: WindowType,
+    pub used_percent: Option<f64>,
+    pub remaining_percent: Option<f64>,
+    pub used_amount: Option<f64>,
+    pub limit_amount: Option<f64>,
+    pub unit: Option<UsageUnit>,
+    pub reset_at: Option<String>,
+    pub reset_in_seconds: Option<i64>,
+    pub reset_status: ResetStatus,
+    pub temporary_multiplier: Option<f64>,
+    pub temporary_expires_at: Option<String>,
+    pub source: UsageSource,
+    pub fetched_at: String,
+    pub stale: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CreditsSummary {
+    pub remaining: f64,
+    pub resets_available: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductUsage {
+    pub name: String,
+    pub used_percent: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageCost {
+    pub today: Option<f64>,
+    pub week: Option<f64>,
+    pub thirty_days: Option<f64>,
+    pub month: Option<f64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum MetricLine {
@@ -218,6 +382,7 @@ pub enum MetricLine {
         id: String,
         label: String,
         used: f64,
+        remaining: f64,
         limit: f64,
         format: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -252,17 +417,10 @@ impl MetricLine {
 
     pub fn utilization(&self) -> Option<f64> {
         match self {
+            MetricLine::Progress { used, format, .. } if format == "percent" => Some(*used),
             MetricLine::Progress { used, limit, .. } if *limit > 0.0 => {
                 Some((*used / *limit) * 100.0)
             }
-            MetricLine::Progress { used, format, .. } if format == "percent" => Some(*used),
-            _ => None,
-        }
-    }
-
-    pub fn resets_at(&self) -> Option<&str> {
-        match self {
-            MetricLine::Progress { resets_at, .. } => resets_at.as_deref(),
             _ => None,
         }
     }
@@ -270,19 +428,39 @@ impl MetricLine {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProviderSnapshot {
+pub struct ProviderUsage {
     pub id: String,
     pub name: String,
     pub short: String,
     pub plan: String,
-    pub connected: bool,
+    pub status: ProviderStatus,
+    pub status_reason: Option<ProviderStatusReason>,
     pub stale: bool,
     pub error: Option<String>,
     pub hint: Option<String>,
     pub updated_at: String,
+    pub quotas: Vec<UsageQuota>,
+    pub credits: Option<CreditsSummary>,
+    pub product_breakdown: Vec<ProductUsage>,
+    pub cost: Option<UsageCost>,
     pub lines: Vec<MetricLine>,
     pub primary_utilization: Option<f64>,
 }
+
+impl ProviderUsage {
+    pub fn is_connected(&self) -> bool {
+        self.status == ProviderStatus::Connected
+    }
+
+    pub fn mark_stale(&mut self) {
+        self.stale = true;
+        for quota in &mut self.quotas {
+            quota.stale = true;
+        }
+    }
+}
+
+pub type ProviderSnapshot = ProviderUsage;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -296,6 +474,7 @@ pub struct VendorInfo {
     pub needs_key: bool,
     pub enabled: bool,
     pub detected: bool,
+    pub links: VendorLinks,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -306,8 +485,10 @@ pub struct Dashboard {
     pub refresh_minutes: u64,
     pub primary: String,
     pub notifications: bool,
-    pub show_usage_as: String,
-    pub reset_times: String,
+    pub notify_thresholds: Vec<u8>,
+    pub autostart: bool,
+    pub always_on_top: bool,
+    pub compact_mode: bool,
     pub next_update_in_secs: u64,
     pub spend_month_usd: f64,
     pub spend: Vec<SpendRow>,
@@ -333,9 +514,24 @@ pub fn parse_usd(text: &str) -> Option<f64> {
 }
 
 pub fn monthly_spend(p: &ProviderSnapshot) -> Option<(String, f64)> {
+    if let Some(cost) = &p.cost {
+        if let Some(value) = cost.month.or(cost.thirty_days).or(cost.week) {
+            let label = if cost.month.is_some() {
+                "Mes"
+            } else if cost.thirty_days.is_some() {
+                "30 días"
+            } else {
+                "Semana"
+            };
+            return Some((label.into(), value));
+        }
+    }
     let mut best: Option<(u8, String, f64)> = None;
     for line in &p.lines {
-        let MetricLine::Values { id, label, text, .. } = line else {
+        let MetricLine::Values {
+            id, label, text, ..
+        } = line
+        else {
             continue;
         };
         let rank = match id.as_str() {
@@ -355,7 +551,7 @@ pub fn monthly_spend(p: &ProviderSnapshot) -> Option<(String, f64)> {
 pub fn most_headroom(providers: &[ProviderSnapshot]) -> Option<(String, String, f64)> {
     providers
         .iter()
-        .filter(|p| p.connected)
+        .filter(|p| p.is_connected())
         .filter_map(|p| {
             p.primary_utilization
                 .map(|u| (p.id.clone(), p.name.clone(), (100.0 - u).max(0.0)))
@@ -365,6 +561,130 @@ pub fn most_headroom(providers: &[ProviderSnapshot]) -> Option<(String, String, 
 
 pub fn now_iso() -> String {
     chrono::Local::now().to_rfc3339()
+}
+
+fn source_for(id: VendorId) -> UsageSource {
+    match id {
+        VendorId::Anthropic | VendorId::Openai | VendorId::Nous => UsageSource::Oauth,
+        VendorId::Cursor
+        | VendorId::Antigravity
+        | VendorId::Kiro
+        | VendorId::Supergrok
+        | VendorId::CommandCode
+        | VendorId::Windsurf => UsageSource::LocalSession,
+        VendorId::Copilot => UsageSource::Cli,
+        _ => UsageSource::Api,
+    }
+}
+
+fn window_type(id: &str, window_secs: i64) -> WindowType {
+    match id.to_ascii_lowercase().as_str() {
+        "session" => WindowType::Session,
+        "5h" | "five_hour" => WindowType::FiveHour,
+        "daily" => WindowType::Daily,
+        "weekly" => WindowType::Weekly,
+        "monthly" => WindowType::Monthly,
+        "credits" => WindowType::Credits,
+        _ if window_secs > 0 && window_secs <= 6 * 3_600 => WindowType::FiveHour,
+        _ if window_secs > 0 && window_secs <= 36 * 3_600 => WindowType::Daily,
+        _ if window_secs >= 20 * 86_400 => WindowType::Monthly,
+        _ if window_secs >= 6 * 86_400 => WindowType::Weekly,
+        _ => WindowType::Custom,
+    }
+}
+
+fn seconds_until(iso: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(iso).ok().map(|dt| {
+        (dt.with_timezone(&chrono::Utc) - chrono::Utc::now())
+            .num_seconds()
+            .max(0)
+    })
+}
+
+fn quota_from_line(line: &MetricLine, source: UsageSource, fetched_at: &str) -> Option<UsageQuota> {
+    let MetricLine::Progress {
+        id,
+        label,
+        used,
+        remaining,
+        resets_at,
+        window_secs,
+        ..
+    } = line
+    else {
+        return None;
+    };
+    let reset_in_seconds = resets_at.as_deref().and_then(seconds_until);
+    let reset_status = match (resets_at.is_some(), reset_in_seconds.is_some()) {
+        (true, true) => ResetStatus::Known,
+        (true, false) => ResetStatus::FetchFailed,
+        (false, _) => ResetStatus::NotProvided,
+    };
+    Some(UsageQuota {
+        id: id.clone(),
+        label: label.clone(),
+        window_type: window_type(id, *window_secs),
+        used_percent: Some(*used),
+        remaining_percent: Some(*remaining),
+        used_amount: None,
+        limit_amount: None,
+        unit: Some(UsageUnit::Percent),
+        reset_at: resets_at.clone(),
+        reset_in_seconds,
+        reset_status,
+        temporary_multiplier: None,
+        temporary_expires_at: None,
+        source,
+        fetched_at: fetched_at.to_string(),
+        stale: false,
+    })
+}
+
+fn number_from_text(text: &str) -> Option<f64> {
+    let normalized: String = text
+        .chars()
+        .filter(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+'))
+        .collect();
+    normalized.parse::<f64>().ok().filter(|n| n.is_finite())
+}
+
+fn credits_from_lines(lines: &[MetricLine]) -> Option<CreditsSummary> {
+    let remaining = lines.iter().find_map(|line| match line {
+        MetricLine::Values { id, text, .. } if id == "credits" => number_from_text(text),
+        _ => None,
+    })?;
+    let resets_available = lines.iter().find_map(|line| match line {
+        MetricLine::Values { id, text, .. } if id == "resets" => {
+            number_from_text(text).map(|n| n.max(0.0).floor() as u64)
+        }
+        _ => None,
+    });
+    Some(CreditsSummary {
+        remaining: remaining.max(0.0).floor(),
+        resets_available,
+    })
+}
+
+fn cost_from_lines(lines: &[MetricLine]) -> Option<UsageCost> {
+    let mut cost = UsageCost::default();
+    for line in lines {
+        let MetricLine::Values { id, text, .. } = line else {
+            continue;
+        };
+        let value = parse_usd(text);
+        match id.as_str() {
+            "cost_today" => cost.today = value,
+            "cost_week" => cost.week = value,
+            "cost_30" => cost.thirty_days = value,
+            "cost_month" | "mtd" => cost.month = value,
+            _ => {}
+        }
+    }
+    (cost.today.is_some()
+        || cost.week.is_some()
+        || cost.thirty_days.is_some()
+        || cost.month.is_some())
+    .then_some(cost)
 }
 
 pub fn resets_in_label(iso: &str) -> String {
@@ -395,7 +715,11 @@ pub fn resets_from_unix(ts: i64) -> (Option<String>, String, i64) {
     };
     let iso = dt.to_rfc3339();
     let label = resets_in_label(&iso);
-    (Some(iso), label, (dt - chrono::Utc::now()).num_seconds().max(0))
+    (
+        Some(iso),
+        label,
+        (dt - chrono::Utc::now()).num_seconds().max(0),
+    )
 }
 
 pub fn progress_pct(
@@ -414,6 +738,7 @@ pub fn progress_pct(
         id: id.to_string(),
         label: label.to_string(),
         used: pct.clamp(0.0, 100.0),
+        remaining: (100.0 - pct).clamp(0.0, 100.0),
         limit: 100.0,
         format: "percent".into(),
         resets_at,
@@ -443,6 +768,14 @@ pub fn badge_line(id: &str, label: &str, text: &str) -> MetricLine {
 
 pub fn snapshot_ok(id: VendorId, plan: &str, lines: Vec<MetricLine>) -> ProviderSnapshot {
     let primary_utilization = lines.iter().find_map(|l| l.utilization());
+    let updated_at = now_iso();
+    let source = source_for(id);
+    let quotas = lines
+        .iter()
+        .filter_map(|line| quota_from_line(line, source, &updated_at))
+        .collect();
+    let credits = credits_from_lines(&lines);
+    let cost = cost_from_lines(&lines);
     ProviderSnapshot {
         id: id.slug().to_string(),
         name: id.display_name().to_string(),
@@ -452,27 +785,42 @@ pub fn snapshot_ok(id: VendorId, plan: &str, lines: Vec<MetricLine>) -> Provider
         } else {
             plan.to_string()
         },
-        connected: true,
+        status: ProviderStatus::Connected,
+        status_reason: None,
         stale: false,
         error: None,
         hint: None,
-        updated_at: now_iso(),
+        updated_at,
+        quotas,
+        credits,
+        product_breakdown: Vec::new(),
+        cost,
         lines,
         primary_utilization,
     }
 }
 
-pub fn snapshot_err(id: VendorId, error: &str) -> ProviderSnapshot {
+pub fn snapshot_with_status(
+    id: VendorId,
+    status: ProviderStatus,
+    status_reason: ProviderStatusReason,
+    error: &str,
+) -> ProviderSnapshot {
     ProviderSnapshot {
         id: id.slug().to_string(),
         name: id.display_name().to_string(),
         short: id.short().to_string(),
         plan: String::new(),
-        connected: false,
+        status,
+        status_reason: Some(status_reason),
         stale: false,
         error: Some(error.to_string()),
         hint: Some(id.login_hint().to_string()),
         updated_at: now_iso(),
+        quotas: vec![],
+        credits: None,
+        product_breakdown: vec![],
+        cost: None,
         lines: vec![],
         primary_utilization: None,
     }
@@ -511,6 +859,38 @@ mod tests {
     fn progress_percent_maps_utilization() {
         let line = progress_pct("session", "Sesión", 42.4, None, 18_000, "always");
         assert_eq!(line.utilization().unwrap().round(), 42.0);
+    }
+
+    #[test]
+    fn vendor_links_never_guessed_for_unlisted_providers() {
+        assert!(VendorId::Kiro.links().usage_url.is_none());
+        assert!(VendorId::Nous.links().status_url.is_none());
+        assert!(VendorId::CommandCode.links().billing_url.is_none());
+    }
+
+    #[test]
+    fn known_vendor_links_are_https() {
+        let known = [
+            VendorId::Anthropic,
+            VendorId::Openai,
+            VendorId::Copilot,
+            VendorId::Cursor,
+            VendorId::Openrouter,
+            VendorId::Deepseek,
+            VendorId::Groq,
+        ];
+        for id in known {
+            let links = id.links();
+            let urls = [links.usage_url, links.billing_url, links.status_url];
+            assert!(
+                urls.iter().any(Option::is_some),
+                "{} should have at least one link",
+                id.slug()
+            );
+            for url in urls.into_iter().flatten() {
+                assert!(url.starts_with("https://"), "{} -> {url}", id.slug());
+            }
+        }
     }
 
     #[test]
@@ -566,4 +946,38 @@ mod tests {
         assert_eq!(pick.0, "cursor");
         assert!((pick.2 - 74.0).abs() < 0.01);
     }
+
+    #[test]
+    fn unknown_reset_has_explicit_status() {
+        let snapshot = snapshot_ok(
+            VendorId::Anthropic,
+            "Pro",
+            vec![progress_pct(
+                "session", "Sesión", 3.0, None, 18_000, "always",
+            )],
+        );
+        assert_eq!(snapshot.quotas[0].reset_status, ResetStatus::NotProvided);
+        assert_eq!(snapshot.quotas[0].reset_at, None);
+    }
+
+    #[test]
+    fn stale_snapshot_marks_every_quota_stale() {
+        let mut snapshot = snapshot_ok(
+            VendorId::Openai,
+            "Plus",
+            vec![progress_pct("5h", "5 horas", 0.0, None, 18_000, "always")],
+        );
+        snapshot.mark_stale();
+        assert!(snapshot.stale);
+        assert!(snapshot.quotas.iter().all(|quota| quota.stale));
+    }
+}
+
+pub fn snapshot_needs_auth(id: VendorId, error: &str) -> ProviderSnapshot {
+    snapshot_with_status(
+        id,
+        ProviderStatus::NeedsAuth,
+        ProviderStatusReason::MissingCredential,
+        error,
+    )
 }

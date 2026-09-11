@@ -5,7 +5,9 @@ use serde_json::Value;
 
 use crate::config::AppConfig;
 use crate::http::{self, FetchError};
-use crate::model::{json_f64, snapshot_err, snapshot_ok, values_line, ProviderSnapshot, VendorId};
+use crate::model::{
+    json_f64, snapshot_needs_auth, snapshot_ok, values_line, ProviderSnapshot, VendorId,
+};
 
 use super::Provider;
 
@@ -29,7 +31,12 @@ impl Provider for OpenaiAdmin {
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
         {
             Some(k) if !k.trim().is_empty() => k,
-            _ => return snapshot_err(VendorId::OpenaiAdmin, VendorId::OpenaiAdmin.login_hint()),
+            _ => {
+                return snapshot_needs_auth(
+                    VendorId::OpenaiAdmin,
+                    VendorId::OpenaiAdmin.login_hint(),
+                )
+            }
         };
         match fetch_costs(&key) {
             Ok(snap) => snap,
@@ -47,9 +54,8 @@ fn fetch_costs(key: &str) -> Result<ProviderSnapshot, FetchError> {
         .and_then(|d| d.and_hms_opt(0, 0, 0))
         .map(|d| d.and_utc().timestamp())
         .unwrap_or(0);
-    let url = format!(
-        "https://api.openai.com/v1/organization/costs?start_time={start}&bucket_width=1d"
-    );
+    let url =
+        format!("https://api.openai.com/v1/organization/costs?start_time={start}&bucket_width=1d");
     let body = http::get_json(
         &url,
         &[
@@ -93,7 +99,12 @@ fn fetch_legacy_grants(key: &str) -> Result<ProviderSnapshot, FetchError> {
     let used = pick_money(&body, &["total_used", "totalUsed"]);
     let mut lines = Vec::new();
     if let Some(r) = remaining {
-        lines.push(values_line("available", "Disponible", &format!("${r:.2}"), "always"));
+        lines.push(values_line(
+            "available",
+            "Disponible",
+            &format!("${r:.2}"),
+            "always",
+        ));
     }
     if let Some(u) = used {
         lines.push(values_line("used", "Usado", &format!("${u:.2}"), "always"));

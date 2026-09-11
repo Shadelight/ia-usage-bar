@@ -6,6 +6,7 @@ mod cost;
 mod dashboard;
 mod http;
 mod jwt;
+mod logfile;
 mod model;
 mod paths;
 mod pricing;
@@ -18,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WindowEvent,
 };
@@ -34,7 +35,6 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_window(app, None);
         }))
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -42,11 +42,23 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let mut cfg = AppConfig::load();
-            let _ = config::run_detect(&mut cfg);
+            if config::migrate_legacy_credentials(&mut cfg) && !cfg.load_recovered {
+                if let Err(error) = cfg.save() {
+                    eprintln!("legacy credential migration could not update config: {error}");
+                }
+            }
+            if let Err(error) = config::run_detect(&mut cfg) {
+                eprintln!("provider detection state could not be saved: {error}");
+            }
             let notifications = cfg.notifications;
+            let always_on_top_on = cfg.always_on_top;
+            let compact_mode_on = cfg.compact_mode;
+            let primary_id = cfg.primary.clone();
+            let catalog = providers::catalog(&cfg);
             app.manage(AppState {
                 snapshots: Mutex::new(HashMap::new()),
                 config: Mutex::new(cfg),
+                catalog: Mutex::new(catalog),
                 notify: Mutex::new(HashMap::new()),
                 notifications_enabled: AtomicBool::new(notifications),
                 allow_exit: AtomicBool::new(false),
@@ -65,7 +77,26 @@ pub fn run() {
                 MenuItem::with_id(app, "refresh", "Actualizar ahora", true, None::<&str>)?;
             let detect_i =
                 MenuItem::with_id(app, "detect", "Detectar proveedores", true, None::<&str>)?;
-            let settings_i = MenuItem::with_id(app, "settings", "Ajustes", true, None::<&str>)?;
+            let primary_submenu =
+                Submenu::with_id(app, "primary_provider", "Proveedor principal", true)?;
+            let compact_i = CheckMenuItem::with_id(
+                app,
+                "compact",
+                "Modo compacto",
+                true,
+                compact_mode_on,
+                None::<&str>,
+            )?;
+            let pin_i = CheckMenuItem::with_id(
+                app,
+                "pin",
+                "Siempre visible",
+                true,
+                always_on_top_on,
+                None::<&str>,
+            )?;
+            let settings_i =
+                MenuItem::with_id(app, "settings", "Configuración", true, None::<&str>)?;
             let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
             let autostart_i = CheckMenuItem::with_id(
                 app,
@@ -87,16 +118,28 @@ pub fn run() {
                     &open_i,
                     &refresh_i,
                     &detect_i,
-                    &settings_i,
-                    &sep2,
+                    &primary_submenu,
+                    &compact_i,
+                    &pin_i,
                     &autostart_i,
+                    &sep2,
+                    &settings_i,
                     &quit_i,
                 ],
             )?;
             app.manage(TrayMenuState {
                 header: tray_header,
                 status: tray_status,
+                autostart: autostart_i,
+                always_on_top: pin_i,
+                compact_mode: compact_i,
+                primary_submenu,
             });
+            {
+                let state = app.state::<AppState>();
+                let catalog = lock_or_recover(&state.catalog).clone();
+                tray::rebuild_primary_submenu(app.handle(), &catalog, &primary_id);
+            }
 
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(tray::render(None))
@@ -112,10 +155,18 @@ pub fn run() {
                     "refresh" => do_refresh(app, None),
                     "detect" => {
                         let state = app.state::<AppState>();
-                        let mut cfg = lock_or_recover(&state.config).clone();
-                        let _ = config::run_detect(&mut cfg);
-                        *lock_or_recover(&state.config) = cfg;
-                        do_refresh(app, None);
+                        let mut cfg = lock_or_recover(&state.config);
+                        let mut candidate = cfg.clone();
+                        match config::run_detect(&mut candidate) {
+                            Ok(_) => {
+                                *cfg = candidate;
+                                let snapshot = cfg.clone();
+                                drop(cfg);
+                                commands::refresh_catalog_and_tray(app, &state, &snapshot);
+                                do_refresh(app, None);
+                            }
+                            Err(error) => eprintln!("provider detection failed: {error}"),
+                        }
                     }
                     "autostart" => {
                         let al = app.autolaunch();
@@ -125,13 +176,34 @@ pub fn run() {
                             let _ = al.enable();
                         }
                     }
+                    "compact" => {
+                        let state = app.state::<AppState>();
+                        let checked = app
+                            .try_state::<TrayMenuState>()
+                            .map(|m| !m.compact_mode.is_checked().unwrap_or(false))
+                            .unwrap_or(false);
+                        let _ = commands::apply_compact_mode(app, &state, checked);
+                    }
+                    "pin" => {
+                        let state = app.state::<AppState>();
+                        let checked = app
+                            .try_state::<TrayMenuState>()
+                            .map(|m| !m.always_on_top.is_checked().unwrap_or(false))
+                            .unwrap_or(false);
+                        let _ = commands::apply_always_on_top(app, &state, checked);
+                    }
                     "quit" => {
                         app.state::<AppState>()
                             .allow_exit
                             .store(true, Ordering::SeqCst);
                         app.exit(0);
                     }
-                    _ => {}
+                    other => {
+                        if let Some(id) = other.strip_prefix("primary_") {
+                            let state = app.state::<AppState>();
+                            let _ = commands::set_primary(app, &state, id);
+                        }
+                    }
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
@@ -147,6 +219,7 @@ pub fn run() {
                 .build(app)?;
 
             if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_always_on_top(always_on_top_on);
                 let _ = win.center();
                 let _ = win.show();
                 let _ = win.set_focus();
@@ -183,6 +256,12 @@ pub fn run() {
             commands::quit,
             commands::hide_panel,
             commands::set_notifications,
+            commands::set_autostart_enabled,
+            commands::set_always_on_top,
+            commands::set_compact_mode,
+            commands::open_logs_folder,
+            commands::clear_logs,
+            commands::export_diagnostics,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

@@ -1,13 +1,14 @@
 //! Claude Code — OAuth local + endpoint de uso de Anthropic.
 
 use serde_json::Value;
+use std::sync::OnceLock;
 
 use crate::config::AppConfig;
 use crate::cost;
 use crate::http::{self, FetchError};
 use crate::model::{
-    json_f64, json_str, progress_pct, snapshot_err, snapshot_ok, values_line, ProviderSnapshot,
-    VendorId,
+    json_f64, json_str, progress_pct, snapshot_needs_auth, snapshot_ok, values_line, ProductUsage,
+    ProviderSnapshot, UsageCost, VendorId,
 };
 use crate::paths::claude_dir;
 
@@ -16,6 +17,7 @@ use super::Provider;
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const ANTHROPIC_BETA: &str = "oauth-2025-04-20";
 const FALLBACK_VERSION: &str = "2.1.139";
+static CLI_VERSION: OnceLock<String> = OnceLock::new();
 
 pub struct Claude;
 
@@ -30,7 +32,7 @@ impl Provider for Claude {
 
     fn refresh(&self, _cfg: &AppConfig) -> ProviderSnapshot {
         let Some((token, plan)) = read_token() else {
-            return snapshot_err(VendorId::Anthropic, "Claude Code no conectado");
+            return snapshot_needs_auth(VendorId::Anthropic, "Claude Code no conectado");
         };
         match fetch_usage(&token) {
             Ok(body) => {
@@ -118,7 +120,11 @@ fn detect_cli_version() -> String {
         .flatten()
     {
         if entry.file_type().is_file()
-            && entry.path().extension().map(|e| e == "jsonl").unwrap_or(false)
+            && entry
+                .path()
+                .extension()
+                .map(|e| e == "jsonl")
+                .unwrap_or(false)
         {
             if let Ok(meta) = entry.metadata() {
                 if let Ok(modified) = meta.modified() {
@@ -146,7 +152,10 @@ fn detect_cli_version() -> String {
 }
 
 fn fetch_usage(token: &str) -> Result<Value, FetchError> {
-    let ua = format!("claude-code/{}", detect_cli_version());
+    let ua = format!(
+        "claude-code/{}",
+        CLI_VERSION.get_or_init(detect_cli_version)
+    );
     http::get_json(
         USAGE_URL,
         &[
@@ -163,17 +172,23 @@ pub fn snapshot_from_json(plan: &str, body: &Value) -> ProviderSnapshot {
     if let Some(w) = body.get("five_hour") {
         let util = json_f64(w, &["utilization"]).unwrap_or(0.0);
         let reset = json_str(w, &["resets_at"]);
-        lines.push(progress_pct("session", "Sesión", util, reset, 18_000, "always"));
+        lines.push(progress_pct(
+            "session", "Sesión", util, reset, 18_000, "always",
+        ));
     }
     if let Some(w) = body.get("seven_day") {
         let util = json_f64(w, &["utilization"]).unwrap_or(0.0);
         let reset = json_str(w, &["resets_at"]);
-        lines.push(progress_pct("weekly", "Semanal", util, reset, 604_800, "always"));
+        lines.push(progress_pct(
+            "weekly", "Semanal", util, reset, 604_800, "always",
+        ));
     }
     if let Some(w) = body.get("seven_day_sonnet") {
         let util = json_f64(w, &["utilization"]).unwrap_or(0.0);
         let reset = json_str(w, &["resets_at"]);
-        lines.push(progress_pct("sonnet", "Sonnet", util, reset, 604_800, "demand"));
+        lines.push(progress_pct(
+            "sonnet", "Sonnet", util, reset, 604_800, "demand",
+        ));
     }
     if let Some(w) = body.get("seven_day_opus") {
         let util = json_f64(w, &["utilization"]).unwrap_or(0.0);
@@ -202,8 +217,30 @@ pub fn snapshot_from_json(plan: &str, body: &Value) -> ProviderSnapshot {
         }
     }
     if let Some(ex) = body.get("extra_usage") {
-        let used = json_f64(ex, &["used_credits", "used_usd", "used"]).unwrap_or(0.0);
-        let limit = json_f64(ex, &["monthly_limit", "limit_usd", "limit"]).unwrap_or(0.0);
+        let used = json_f64(
+            ex,
+            &[
+                "used_credits",
+                "used_usd",
+                "used",
+                "spent",
+                "amount",
+                "current",
+            ],
+        )
+        .unwrap_or(0.0);
+        let limit = json_f64(
+            ex,
+            &[
+                "monthly_limit",
+                "limit_usd",
+                "limit",
+                "cap",
+                "max",
+                "budget",
+            ],
+        )
+        .unwrap_or(0.0);
         if limit > 0.0 {
             let pct = json_f64(ex, &["utilization"]).unwrap_or((used / limit) * 100.0);
             lines.push(progress_pct(
@@ -222,7 +259,126 @@ pub fn snapshot_from_json(plan: &str, body: &Value) -> ProviderSnapshot {
             ));
         }
     }
-    snapshot_ok(VendorId::Anthropic, plan, lines)
+    let mut snapshot = snapshot_ok(VendorId::Anthropic, plan, lines);
+    snapshot.product_breakdown = product_breakdown(body);
+    apply_temporary_limit(&mut snapshot, body);
+    snapshot
+}
+
+fn product_name(raw: &str) -> String {
+    match raw.to_ascii_lowercase().replace(['-', ' '], "_").as_str() {
+        "claude_code" | "code" => "Claude Code".into(),
+        "chat" | "chats" | "claude_ai" => "Chats".into(),
+        "cowork" => "Cowork".into(),
+        "other" | "otros" => "Otro".into(),
+        _ => raw.replace('_', " "),
+    }
+}
+
+fn product_percent(value: &Value) -> Option<f64> {
+    value.as_f64().or_else(|| {
+        json_f64(
+            value,
+            &[
+                "used_percent",
+                "usedPercent",
+                "utilization",
+                "percent",
+                "usage_percent",
+            ],
+        )
+    })
+}
+
+fn parse_product_value(value: &Value) -> Vec<ProductUsage> {
+    let mut out = Vec::new();
+    if let Some(items) = value.as_array() {
+        for item in items {
+            let Some(name) = json_str(item, &["name", "product", "product_name", "label"]) else {
+                continue;
+            };
+            if let Some(percent) = product_percent(item) {
+                out.push(ProductUsage {
+                    name: product_name(&name),
+                    used_percent: percent.clamp(0.0, 100.0),
+                });
+            }
+        }
+    } else if let Some(items) = value.as_object() {
+        for (name, item) in items {
+            if let Some(percent) = product_percent(item) {
+                out.push(ProductUsage {
+                    name: product_name(name),
+                    used_percent: percent.clamp(0.0, 100.0),
+                });
+            }
+        }
+    }
+    out
+}
+
+fn product_breakdown(body: &Value) -> Vec<ProductUsage> {
+    const PATHS: &[&str] = &[
+        "/product_breakdown",
+        "/usage_by_product",
+        "/seven_day/product_breakdown",
+        "/seven_day/usage_by_product",
+        "/seven_day/by_product",
+        "/weekly/product_breakdown",
+    ];
+    for path in PATHS {
+        if let Some(value) = body.pointer(path) {
+            let parsed = parse_product_value(value);
+            if !parsed.is_empty() {
+                return parsed;
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn multiplier(value: &Value) -> Option<f64> {
+    let raw = value.as_f64().or_else(|| {
+        json_f64(
+            value,
+            &["multiplier", "temporary_multiplier", "limit_multiplier"],
+        )
+    })?;
+    let normalized = if raw >= 10.0 { 1.0 + raw / 100.0 } else { raw };
+    (normalized > 1.0).then_some(normalized)
+}
+
+fn apply_temporary_limit(snapshot: &mut ProviderSnapshot, body: &Value) {
+    const MULTIPLIER_PATHS: &[&str] = &[
+        "/seven_day/temporary_multiplier",
+        "/seven_day/limit_multiplier",
+        "/seven_day/temporary_limit",
+        "/temporary_limit",
+        "/promotion",
+    ];
+    let found = MULTIPLIER_PATHS
+        .iter()
+        .find_map(|path| body.pointer(path).and_then(multiplier));
+    let expires_at = [
+        "/seven_day/temporary_limit/expires_at",
+        "/seven_day/temporary_limit_ends_at",
+        "/temporary_limit/expires_at",
+        "/temporary_limit_ends_at",
+        "/promotion/expires_at",
+    ]
+    .iter()
+    .find_map(|path| {
+        body.pointer(path)
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    });
+    if found.is_none() && expires_at.is_none() {
+        return;
+    }
+    if let Some(quota) = snapshot.quotas.iter_mut().find(|q| q.id == "weekly") {
+        quota.temporary_multiplier = found;
+        quota.temporary_expires_at = expires_at;
+    }
 }
 
 fn append_cost(snap: &mut ProviderSnapshot) {
@@ -254,4 +410,46 @@ fn append_cost(snap: &mut ProviderSnapshot) {
         &format!("${:.2}", report.month_usd),
         "always",
     ));
+    snap.cost = Some(UsageCost {
+        today: Some(report.today_usd),
+        week: Some(report.week_usd),
+        thirty_days: Some(report.last30_usd),
+        month: Some(report.month_usd),
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_resets_product_breakdown_and_temporary_limit() {
+        let body = serde_json::json!({
+            "five_hour": {"utilization": 3.0, "resets_at": "2099-09-11T17:40:00Z"},
+            "seven_day": {
+                "utilization": 22.0,
+                "resets_at": "2099-09-16T09:00:00Z",
+                "temporary_limit": {"multiplier": 1.5, "expires_at": "2099-09-13T00:00:00Z"},
+                "product_breakdown": {
+                    "claude_code": 88.0,
+                    "chats": 0.0,
+                    "cowork": 12.0,
+                    "other": 0.0
+                }
+            }
+        });
+        let snapshot = snapshot_from_json("Pro", &body);
+        assert_eq!(
+            snapshot.quotas[0].reset_status,
+            crate::model::ResetStatus::Known
+        );
+        assert_eq!(snapshot.quotas[1].temporary_multiplier, Some(1.5));
+        assert_eq!(snapshot.product_breakdown.len(), 4);
+        let code = snapshot
+            .product_breakdown
+            .iter()
+            .find(|item| item.name == "Claude Code")
+            .expect("Claude Code breakdown");
+        assert_eq!(code.used_percent, 88.0);
+    }
 }

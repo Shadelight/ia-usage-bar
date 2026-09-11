@@ -1,5 +1,7 @@
 //! GitHub Copilot — `gh auth token` o GITHUB_COPILOT_TOKEN.
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::process::Command;
 
 use serde_json::Value;
@@ -7,7 +9,8 @@ use serde_json::Value;
 use crate::config::AppConfig;
 use crate::http::{self, FetchError};
 use crate::model::{
-    json_f64, json_str, progress_pct, snapshot_err, snapshot_ok, badge_line, ProviderSnapshot, VendorId,
+    badge_line, json_f64, json_str, progress_pct, snapshot_needs_auth, snapshot_ok,
+    ProviderSnapshot, VendorId,
 };
 use crate::paths::home_dir;
 
@@ -28,7 +31,7 @@ impl Provider for Copilot {
 
     fn refresh(&self, cfg: &AppConfig) -> ProviderSnapshot {
         let Some(token) = resolve_token(cfg) else {
-            return snapshot_err(VendorId::Copilot, VendorId::Copilot.login_hint());
+            return snapshot_needs_auth(VendorId::Copilot, VendorId::Copilot.login_hint());
         };
         match fetch_user(&token) {
             Ok(body) => snapshot_from_json(&body),
@@ -57,10 +60,11 @@ fn resolve_token(cfg: &AppConfig) -> Option<String> {
     if let Some(k) = cfg.api_key(VendorId::Copilot) {
         return Some(k);
     }
-    let out = Command::new("gh")
-        .args(["auth", "token"])
-        .output()
-        .ok()?;
+    let mut command = Command::new("gh");
+    command.args(["auth", "token"]);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    let out = command.output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -91,9 +95,23 @@ pub(crate) fn snapshot_from_json(body: &Value) -> ProviderSnapshot {
     let reset = json_str(body, &["quota_reset_date_utc", "quota_reset_date"]);
     let snaps = body.get("quota_snapshots").cloned().unwrap_or(Value::Null);
     let mut lines = Vec::new();
-    push_quota(&mut lines, &snaps, "premium_interactions", "Premium", &reset, "always");
+    push_quota(
+        &mut lines,
+        &snaps,
+        "premium_interactions",
+        "Premium",
+        &reset,
+        "always",
+    );
     push_quota(&mut lines, &snaps, "chat", "Chat", &reset, "always");
-    push_quota(&mut lines, &snaps, "completions", "Completions", &reset, "demand");
+    push_quota(
+        &mut lines,
+        &snaps,
+        "completions",
+        "Completions",
+        &reset,
+        "demand",
+    );
     snapshot_ok(VendorId::Copilot, &plan, lines)
 }
 
@@ -112,5 +130,12 @@ fn push_quota(
     }
     let remaining = json_f64(q, &["percent_remaining"]).unwrap_or(100.0);
     let used = (100.0 - remaining).clamp(0.0, 100.0);
-    lines.push(progress_pct(key, label, used, reset.clone(), 2_592_000, visible));
+    lines.push(progress_pct(
+        key,
+        label,
+        used,
+        reset.clone(),
+        2_592_000,
+        visible,
+    ));
 }

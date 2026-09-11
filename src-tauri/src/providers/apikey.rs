@@ -71,7 +71,12 @@ fn money(id: VendorId, plan: &str, label: &str, amount: f64) -> ProviderSnapshot
     snapshot_ok(
         id,
         plan,
-        vec![values_line("balance", label, &format!("${amount:.2}"), "always")],
+        vec![values_line(
+            "balance",
+            label,
+            &format!("${amount:.2}"),
+            "always",
+        )],
     )
 }
 
@@ -96,7 +101,12 @@ fn fetch_openrouter(key: &str) -> Result<ProviderSnapshot, FetchError> {
         "always",
     )];
     if used > 0.0 {
-        lines.push(values_line("used", "Usado", &format!("${used:.2}"), "demand"));
+        lines.push(values_line(
+            "used",
+            "Usado",
+            &format!("${used:.2}"),
+            "demand",
+        ));
     }
     if let Some(limit) = info
         .as_ref()
@@ -104,7 +114,12 @@ fn fetch_openrouter(key: &str) -> Result<ProviderSnapshot, FetchError> {
         .and_then(|v| v.as_f64())
     {
         if limit > 0.0 {
-            lines.push(values_line("limit", "Límite", &format!("${limit:.2}"), "demand"));
+            lines.push(values_line(
+                "limit",
+                "Límite",
+                &format!("${limit:.2}"),
+                "demand",
+            ));
         }
     }
     Ok(snapshot_ok(VendorId::Openrouter, "OpenRouter", lines))
@@ -117,8 +132,12 @@ fn fetch_zai(key: &str) -> Result<ProviderSnapshot, FetchError> {
     )?;
     let data = body.get("data").unwrap_or(&body);
     let mut lines = Vec::new();
-    push_zai_window(&mut lines, data, "fiveHour", "session", "Sesión", 18_000, "always");
-    push_zai_window(&mut lines, data, "weekly", "weekly", "Semanal", 604_800, "always");
+    push_zai_window(
+        &mut lines, data, "fiveHour", "session", "Sesión", 18_000, "always",
+    );
+    push_zai_window(
+        &mut lines, data, "weekly", "weekly", "Semanal", 604_800, "always",
+    );
     if let Some(mcp) = data.get("mcp") {
         let pct = json_f64(mcp, &["utilization", "usedPercent", "percent"]).unwrap_or(0.0);
         lines.push(progress_pct("mcp", "MCP", pct, None, 2_592_000, "demand"));
@@ -136,7 +155,9 @@ fn push_zai_window(
     window: i64,
     visible: &str,
 ) {
-    let Some(w) = data.get(key).or_else(|| data.get(id)) else { return };
+    let Some(w) = data.get(key).or_else(|| data.get(id)) else {
+        return;
+    };
     let pct = json_f64(w, &["utilization", "usedPercent", "percent"]).unwrap_or(0.0);
     let reset = json_str(w, &["resets_at", "resetAt", "reset_at"]);
     lines.push(progress_pct(id, label, pct, reset, window, visible));
@@ -176,7 +197,12 @@ fn fetch_grok(key: &str, cfg: &AppConfig) -> Result<ProviderSnapshot, FetchError
     let url = format!("https://management-api.x.ai/v1/billing/teams/{team}/prepaid/balance");
     let body = http::get_json(&url, &[("Authorization", &format!("Bearer {key}"))])?;
     let bal = json_f64(&body, &["balance", "amount", "prepaid_balance"]).unwrap_or(0.0);
-    Ok(money(VendorId::Grok, "xAI", "Saldo prepago", bal / if bal > 1000.0 { 100.0 } else { 1.0 }))
+    Ok(money(
+        VendorId::Grok,
+        "xAI",
+        "Saldo prepago",
+        bal / if bal > 1000.0 { 100.0 } else { 1.0 },
+    ))
 }
 
 fn resolve_grok_team(key: &str) -> Result<String, FetchError> {
@@ -260,16 +286,32 @@ fn fetch_minimax(key: &str, cfg: &AppConfig) -> Result<ProviderSnapshot, FetchEr
     if let Some(interval) = data.get("interval").or_else(|| data.get("rolling")) {
         let pct = used_pct(interval);
         let reset = json_str(interval, &["resets_at", "resetAt"]);
-        lines.push(progress_pct("interval", "Intervalo", pct, reset, 18_000, "always"));
+        lines.push(progress_pct(
+            "interval",
+            "Intervalo",
+            pct,
+            reset,
+            18_000,
+            "always",
+        ));
     }
     if let Some(weekly) = data.get("weekly") {
         let pct = used_pct(weekly);
         let reset = json_str(weekly, &["resets_at", "resetAt"]);
-        lines.push(progress_pct("weekly", "Semanal", pct, reset, 604_800, "always"));
+        lines.push(progress_pct(
+            "weekly", "Semanal", pct, reset, 604_800, "always",
+        ));
     }
     if lines.is_empty() {
         let pct = json_f64(data, &["usedPercent", "utilization"]).unwrap_or(0.0);
-        lines.push(progress_pct("plan", "Token Plan", pct, None, 604_800, "always"));
+        lines.push(progress_pct(
+            "plan",
+            "Token Plan",
+            pct,
+            None,
+            604_800,
+            "always",
+        ));
     }
     Ok(snapshot_ok(VendorId::Minimax, "MiniMax Token Plan", lines))
 }
@@ -290,10 +332,7 @@ fn fetch_anthropic_api(key: &str) -> Result<ProviderSnapshot, FetchError> {
     );
     let body = http::get_json(
         &url,
-        &[
-            ("x-api-key", key),
-            ("anthropic-version", "2023-06-01"),
-        ],
+        &[("x-api-key", key), ("anthropic-version", "2023-06-01")],
     )?;
     let mut total = 0.0;
     if let Some(arr) = body.get("data").and_then(|v| v.as_array()) {

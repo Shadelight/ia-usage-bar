@@ -6,9 +6,10 @@
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
 use std::sync::OnceLock;
 use tauri::image::Image;
+use tauri::menu::CheckMenuItem;
 use tauri::{AppHandle, Manager};
 
-use crate::model::Dashboard;
+use crate::model::{Dashboard, VendorInfo};
 use crate::state::TrayMenuState;
 
 const SIZE: u32 = 32;
@@ -18,14 +19,18 @@ static FONT: OnceLock<Option<FontVec>> = OnceLock::new();
 fn font() -> Option<&'static FontVec> {
     FONT.get_or_init(|| {
         // Fuentes del sistema de Windows (negrita para legibilidad pequena).
+        let font_dir = std::env::var_os("WINDIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
+            .join("Fonts");
         let candidates = [
-            r"C:\Windows\Fonts\segoeuib.ttf",
-            r"C:\Windows\Fonts\arialbd.ttf",
-            r"C:\Windows\Fonts\seguisb.ttf",
-            r"C:\Windows\Fonts\segoeui.ttf",
-            r"C:\Windows\Fonts\arial.ttf",
+            "segoeuib.ttf",
+            "arialbd.ttf",
+            "seguisb.ttf",
+            "segoeui.ttf",
+            "arial.ttf",
         ];
-        for c in candidates {
+        for c in candidates.map(|name| font_dir.join(name)) {
             if let Ok(bytes) = std::fs::read(c) {
                 if let Ok(f) = FontVec::try_from_vec(bytes) {
                     return Some(f);
@@ -80,6 +85,41 @@ fn stroke_ring(buf: &mut [u8], color: [u8; 3], r: f32, width: f32) {
             let cov = (half - (dist - r).abs() + 0.5).clamp(0.0, 1.0);
             blend(buf, x as i32, y as i32, color, cov);
         }
+    }
+}
+
+/// Rectangulo redondeado relleno (SDF con antialias de ~1px), usado para el
+/// glifo de "sin datos" (3 barras — icono de marca, sin numero que mostrar).
+fn fill_rounded_rect(buf: &mut [u8], color: [u8; 3], x: f32, y: f32, w: f32, h: f32, r: f32) {
+    let cx = x + w / 2.0;
+    let cy = y + h / 2.0;
+    let hw = w / 2.0 - r;
+    let hh = h / 2.0 - r;
+    for py in 0..SIZE {
+        for px in 0..SIZE {
+            let dx = (px as f32 + 0.5 - cx).abs() - hw;
+            let dy = (py as f32 + 0.5 - cy).abs() - hh;
+            let qx = dx.max(0.0);
+            let qy = dy.max(0.0);
+            let dist = (qx * qx + qy * qy).sqrt() - r;
+            let cov = (0.5 - dist).clamp(0.0, 1.0);
+            blend(buf, px as i32, py as i32, color, cov);
+        }
+    }
+}
+
+/// Glifo de marca: 3 barras de cuota (alturas media/alta/media-baja), sin
+/// fondo, en blanco puro para contraste — usado cuando aun no hay datos.
+fn draw_bars_glyph(buf: &mut [u8]) {
+    let s = SIZE as f32 / 100.0;
+    let bars: [(f32, f32, f32); 3] = [
+        // (x, y, h) en el espacio de diseno 0..100; ancho fijo 14, rx 4.
+        (19.0, 46.0, 30.0),
+        (43.0, 34.0, 42.0),
+        (67.0, 54.0, 22.0),
+    ];
+    for (x, y, h) in bars {
+        fill_rounded_rect(buf, [255, 255, 255], x * s, y * s, 14.0 * s, h * s, 4.0 * s);
     }
 }
 
@@ -144,13 +184,15 @@ fn draw_text(buf: &mut [u8], text: &str, font: &FontVec) {
 pub fn render(percent: Option<f64>) -> Image<'static> {
     let mut buf = vec![0u8; (SIZE * SIZE * 4) as usize];
 
-    let (ring, txt) = match percent {
-        Some(p) => {
-            let p = p.clamp(0.0, 100.0);
-            (severity_color(p), format!("{}", p.round() as i64))
-        }
-        None => ([130, 130, 140], "–".to_string()),
+    let Some(p) = percent else {
+        // Sin datos todavia (ningun proveedor activo/respondido): el glifo de
+        // marca (3 barras), sin fondo ni numero que mostrar.
+        draw_bars_glyph(&mut buf);
+        return Image::new_owned(buf, SIZE, SIZE);
     };
+    let p = p.clamp(0.0, 100.0);
+    let ring = severity_color(p);
+    let txt = format!("{}", p.round() as i64);
 
     // Centro oscuro translucido + anillo de color + numero en blanco.
     fill_circle(&mut buf, [20, 24, 38], 0.92, 15.0);
@@ -203,6 +245,7 @@ pub(crate) fn position_window(win: &tauri::WebviewWindow, anchor_x: f64, anchor_
 
 pub(crate) fn show_window(app: &AppHandle, anchor: Option<(f64, f64)>) {
     if let Some(win) = app.get_webview_window("main") {
+        let _ = win.set_skip_taskbar(false);
         if let Some((x, y)) = anchor {
             position_window(&win, x, y);
         }
@@ -228,7 +271,7 @@ pub(crate) fn tooltip(dash: &Dashboard) -> String {
     let bits: Vec<String> = dash
         .providers
         .iter()
-        .filter(|p| p.connected)
+        .filter(|p| p.is_connected())
         .filter_map(|p| {
             p.primary_utilization
                 .map(|u| format!("{} {:.0}%", p.short, u))
@@ -257,13 +300,39 @@ pub(crate) fn tray_percent(dash: &Dashboard) -> Option<f64> {
         .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
 }
 
+/// Rebuilds the tray's "Proveedor principal" submenu with one checkbox per
+/// enabled provider, checked iff it is the current primary. Called at
+/// startup and every time the catalog changes (same place
+/// `commands::refresh_catalog` already runs).
+pub(crate) fn rebuild_primary_submenu(app: &AppHandle, catalog: &[VendorInfo], primary: &str) {
+    let Some(menu) = app.try_state::<TrayMenuState>() else {
+        return;
+    };
+    let submenu = &menu.primary_submenu;
+    for item in submenu.items().unwrap_or_default() {
+        let _ = submenu.remove(&item);
+    }
+    for vendor in catalog.iter().filter(|v| v.enabled) {
+        if let Ok(item) = CheckMenuItem::with_id(
+            app,
+            format!("primary_{}", vendor.id),
+            &vendor.name,
+            true,
+            vendor.id == primary,
+            None::<&str>,
+        ) {
+            let _ = submenu.append(&item);
+        }
+    }
+}
+
 pub(crate) fn update_tray_from_dashboard(app: &AppHandle, dash: &Dashboard) {
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_icon(Some(render(tray_percent(dash))));
         let _ = tray.set_tooltip(Some(tooltip(dash)));
     }
     if let Some(menu) = app.try_state::<TrayMenuState>() {
-        let n = dash.providers.iter().filter(|p| p.connected).count();
+        let n = dash.providers.iter().filter(|p| p.is_connected()).count();
         let _ = menu
             .header
             .set_text(format!("IA Usage Bar — {n} proveedores"));
@@ -281,12 +350,16 @@ mod tests {
         let claude = snapshot_ok(
             VendorId::Anthropic,
             "Max",
-            vec![progress_pct("session", "Sesión", 42.0, None, 18_000, "always")],
+            vec![progress_pct(
+                "session", "Sesión", 42.0, None, 18_000, "always",
+            )],
         );
         let cursor = snapshot_ok(
             VendorId::Cursor,
             "Ultra",
-            vec![progress_pct("total", "Uso", 71.0, None, 2_592_000, "always")],
+            vec![progress_pct(
+                "total", "Uso", 71.0, None, 2_592_000, "always",
+            )],
         );
         let dash = Dashboard {
             providers: vec![claude, cursor],
@@ -305,12 +378,16 @@ mod tests {
         let claude = snapshot_ok(
             VendorId::Anthropic,
             "Max",
-            vec![progress_pct("session", "Sesión", 10.0, None, 18_000, "always")],
+            vec![progress_pct(
+                "session", "Sesión", 10.0, None, 18_000, "always",
+            )],
         );
         let cursor = snapshot_ok(
             VendorId::Cursor,
             "Ultra",
-            vec![progress_pct("total", "Uso", 90.0, None, 2_592_000, "always")],
+            vec![progress_pct(
+                "total", "Uso", 90.0, None, 2_592_000, "always",
+            )],
         );
         let dash = Dashboard {
             providers: vec![claude, cursor],

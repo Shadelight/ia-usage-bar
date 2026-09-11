@@ -7,8 +7,8 @@ use crate::config::AppConfig;
 use crate::http::{self, FetchError};
 use crate::jwt;
 use crate::model::{
-    json_f64, json_str, progress_pct, snapshot_err, snapshot_ok, values_line, ProviderSnapshot,
-    VendorId,
+    json_f64, json_str, progress_pct, snapshot_needs_auth, snapshot_ok, snapshot_with_status,
+    values_line, ProviderSnapshot, ProviderStatus, ProviderStatusReason, VendorId,
 };
 
 use super::Provider;
@@ -30,16 +30,25 @@ impl Provider for Cursor {
 
     fn refresh(&self, _cfg: &AppConfig) -> ProviderSnapshot {
         let Some(token) = read_token() else {
-            return snapshot_err(VendorId::Cursor, "Cursor no conectado");
+            return snapshot_needs_auth(VendorId::Cursor, "Cursor no conectado");
         };
         let Some(cookie) = cookie_value(&token) else {
-            return snapshot_err(
+            return snapshot_with_status(
                 VendorId::Cursor,
+                ProviderStatus::NeedsAuth,
+                ProviderStatusReason::InvalidCredential,
                 "Token de Cursor ilegible. Vuelve a iniciar sesión en el IDE.",
             );
         };
         match fetch_summary(&cookie) {
-            Ok(body) => snapshot_from_json(&body).unwrap_or_else(|e| snapshot_err(VendorId::Cursor, &e)),
+            Ok(body) => snapshot_from_json(&body).unwrap_or_else(|e| {
+                snapshot_with_status(
+                    VendorId::Cursor,
+                    ProviderStatus::Error,
+                    ProviderStatusReason::ParseFailed,
+                    &e,
+                )
+            }),
             Err(e) => super::map_fetch_err(VendorId::Cursor, e),
         }
     }

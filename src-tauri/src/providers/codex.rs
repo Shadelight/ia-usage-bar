@@ -10,8 +10,8 @@ use crate::jwt;
 use std::path::Path;
 
 use crate::model::{
-    progress_pct, resets_from_unix, snapshot_err, snapshot_ok, values_line, ProviderSnapshot,
-    VendorId,
+    progress_pct, resets_from_unix, snapshot_needs_auth, snapshot_ok, values_line,
+    ProviderSnapshot, VendorId,
 };
 use crate::paths::home_dir;
 
@@ -36,7 +36,7 @@ impl Provider for Codex {
 
     fn refresh(&self, _cfg: &AppConfig) -> ProviderSnapshot {
         let Some(mut auth) = read_auth() else {
-            return snapshot_err(VendorId::Openai, "Codex no conectado");
+            return snapshot_needs_auth(VendorId::Openai, "Codex no conectado");
         };
         if needs_refresh(&auth) {
             if let Err(e) = refresh_tokens(&mut auth) {
@@ -180,7 +180,8 @@ fn refresh_tokens(auth: &mut Auth) -> Result<(), FetchError> {
         }
     }
     if let Some(secs) = body.get("expires_in").and_then(|v| v.as_u64()) {
-        if let Some(dt) = chrono::DateTime::from_timestamp(Utc::now().timestamp() + secs as i64, 0) {
+        if let Some(dt) = chrono::DateTime::from_timestamp(Utc::now().timestamp() + secs as i64, 0)
+        {
             auth.expires_at = Some(dt.to_rfc3339());
         }
     }
@@ -236,9 +237,27 @@ fn fetch_usage(auth: &Auth) -> Result<Value, FetchError> {
     http::get_json(USAGE_URL, &refs)
 }
 
+fn normalized_used_percent(v: &Value) -> Option<f64> {
+    if let Some(used) = v
+        .get("used_percent")
+        .or_else(|| v.get("usedPercent"))
+        .and_then(|x| x.as_f64())
+    {
+        return Some(used.clamp(0.0, 100.0));
+    }
+    v.get("remaining_percent")
+        .or_else(|| v.get("remainingPercent"))
+        .or_else(|| v.get("percent_remaining"))
+        .and_then(|x| x.as_f64())
+        .map(|remaining| (100.0 - remaining).clamp(0.0, 100.0))
+}
+
 fn window_from(v: &Value) -> Option<(f64, Option<String>, i64)> {
-    let pct = v.get("used_percent").and_then(|x| x.as_f64())?;
-    let secs = v.get("limit_window_seconds").and_then(|x| x.as_i64()).unwrap_or(0);
+    let pct = normalized_used_percent(v)?;
+    let secs = v
+        .get("limit_window_seconds")
+        .and_then(|x| x.as_i64())
+        .unwrap_or(0);
     let reset = if let Some(ts) = v.get("reset_at").and_then(|x| x.as_i64()) {
         resets_from_unix(ts).0
     } else if let Some(after) = v.get("reset_after_seconds").and_then(|x| x.as_i64()) {
@@ -251,7 +270,7 @@ fn window_from(v: &Value) -> Option<(f64, Option<String>, i64)> {
 
 fn classify(secs: i64) -> (&'static str, &'static str) {
     if secs > 0 && secs <= 6 * 3600 {
-        ("session", "Sesión")
+        ("5h", "5 horas")
     } else if secs >= 6 * 24 * 3600 {
         ("weekly", "Semanal")
     } else {
@@ -282,16 +301,29 @@ pub fn snapshot_from_json(body: &Value, plan_hint: Option<&str>) -> ProviderSnap
             } else {
                 classify(secs)
             };
-            let visible = if i == 0 { "always" } else { "always" };
-            let id = if i == 0 && id == "window" { "session" } else { id };
-            lines.push(progress_pct(id, label, pct, reset, secs, visible));
+            let id = match (i, id) {
+                (0, "window") => "session",
+                (_, "window") => "secondary",
+                _ => id,
+            };
+            lines.push(progress_pct(id, label, pct, reset, secs, "always"));
         }
     }
     if let Some(credits) = body.get("credits") {
         if credits.get("unlimited").and_then(|v| v.as_bool()) == Some(true) {
             lines.push(values_line("credits", "Créditos", "Ilimitados", "demand"));
-        } else if let Some(bal) = credits.get("balance").and_then(|v| v.as_str()) {
-            lines.push(values_line("credits", "Créditos", bal, "demand"));
+        } else if let Some(balance) = credits.get("balance") {
+            let parsed = balance
+                .as_f64()
+                .or_else(|| balance.as_str().and_then(|value| value.parse::<f64>().ok()));
+            if let Some(value) = parsed {
+                lines.push(values_line(
+                    "credits",
+                    "Créditos",
+                    &format!("{:.0}", value.floor()),
+                    "demand",
+                ));
+            }
         }
     }
     if let Some(count) = body
@@ -305,7 +337,10 @@ pub fn snapshot_from_json(body: &Value, plan_hint: Option<&str>) -> ProviderSnap
             "demand",
         ));
     }
-    if let Some(arr) = body.get("additional_rate_limits").and_then(|v| v.as_array()) {
+    if let Some(arr) = body
+        .get("additional_rate_limits")
+        .and_then(|v| v.as_array())
+    {
         for extra in arr {
             let name = extra
                 .get("limit_name")
@@ -397,5 +432,46 @@ mod tests {
         assert!(write_back_at(&path, &auth).is_err());
         assert!(!path.exists());
         assert!(!path.with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn remaining_percent_is_converted_once_in_adapter() {
+        let window = serde_json::json!({
+            "remaining_percent": 71.0,
+            "limit_window_seconds": 604800,
+            "reset_at": 4103049600i64
+        });
+        let (used, _, _) = window_from(&window).expect("window");
+        assert_eq!(used, 29.0);
+        let body = serde_json::json!({
+            "rate_limit": {"primary_window": window}
+        });
+        let snapshot = snapshot_from_json(&body, Some("Plus"));
+        assert_eq!(snapshot.quotas[0].used_percent, Some(29.0));
+        assert_eq!(snapshot.quotas[0].remaining_percent, Some(71.0));
+    }
+
+    #[test]
+    fn credits_are_rounded_down_and_reset_count_is_preserved() {
+        let body = serde_json::json!({
+            "plan_type": "plus",
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 0.0,
+                    "limit_window_seconds": 18000,
+                    "reset_at": 4102444800i64
+                }
+            },
+            "credits": {"balance": "478.0394270000"},
+            "rate_limit_reset_credits": {"available_count": 1}
+        });
+        let snapshot = snapshot_from_json(&body, None);
+        let credits = snapshot.credits.expect("credits");
+        assert_eq!(credits.remaining, 478.0);
+        assert_eq!(credits.resets_available, Some(1));
+        assert_eq!(
+            snapshot.quotas[0].window_type,
+            crate::model::WindowType::FiveHour
+        );
     }
 }

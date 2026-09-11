@@ -1,12 +1,14 @@
 [package]
 name = "iausagebar"
-version = "0.1.0"
+version = "0.2.0"
 description = "Monitor de uso de planes de IA para la bandeja de Windows"
 authors = ["Alberth Salazar"]
 edition = "2021"
 
 [lib]
 name = "iausagebar_lib"
+# Keep rlib-only: adding cdylib/staticlib can hit the GNU linker error
+# "export ordinal too large" because of Tauri's exported symbol surface.
 crate-type = ["rlib"]
 
 [build-dependencies]
@@ -15,7 +17,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"] }
 tauri-plugin-single-instance = "2"
-tauri-plugin-opener = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }

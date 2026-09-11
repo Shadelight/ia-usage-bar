@@ -5,8 +5,9 @@ use serde_json::Value;
 use crate::config::AppConfig;
 use crate::http::{self, FetchError};
 use crate::model::{
-    badge_line, json_f64, json_str, progress_pct, snapshot_err, snapshot_ok, values_line,
-    ProviderSnapshot, VendorId,
+    badge_line, json_f64, json_str, progress_pct, snapshot_needs_auth, snapshot_ok,
+    snapshot_with_status, values_line, ProviderSnapshot, ProviderStatus, ProviderStatusReason,
+    VendorId,
 };
 use crate::paths::{app_config_dir, home_dir};
 
@@ -26,11 +27,9 @@ impl Provider for Kimi {
         cfg.api_key(VendorId::Kimi).is_some() || kimi_creds_path().exists()
     }
     fn refresh(&self, cfg: &AppConfig) -> ProviderSnapshot {
-        let token = cfg
-            .api_key(VendorId::Kimi)
-            .or_else(read_kimi_token);
+        let token = cfg.api_key(VendorId::Kimi).or_else(read_kimi_token);
         let Some(token) = token else {
-            return snapshot_err(VendorId::Kimi, VendorId::Kimi.login_hint());
+            return snapshot_needs_auth(VendorId::Kimi, VendorId::Kimi.login_hint());
         };
         match fetch_kimi(&token) {
             Ok(s) => s,
@@ -48,7 +47,7 @@ impl Provider for SuperGrok {
     }
     fn refresh(&self, _cfg: &AppConfig) -> ProviderSnapshot {
         let Some(key) = read_grok_key() else {
-            return snapshot_err(VendorId::Supergrok, VendorId::Supergrok.login_hint());
+            return snapshot_needs_auth(VendorId::Supergrok, VendorId::Supergrok.login_hint());
         };
         match fetch_supergrok(&key) {
             Ok(s) => s,
@@ -69,10 +68,15 @@ impl Provider for CommandCode {
     fn refresh(&self, cfg: &AppConfig) -> ProviderSnapshot {
         let token = cfg
             .api_key(VendorId::CommandCode)
-            .or_else(|| read_json_token(&commandcode_auth(), &["token", "access_token", "accessToken"]))
+            .or_else(|| {
+                read_json_token(
+                    &commandcode_auth(),
+                    &["token", "access_token", "accessToken"],
+                )
+            })
             .or_else(|| read_json_token(&pi_auth(), &["token", "access_token"]));
         let Some(token) = token else {
-            return snapshot_err(VendorId::CommandCode, VendorId::CommandCode.login_hint());
+            return snapshot_needs_auth(VendorId::CommandCode, VendorId::CommandCode.login_hint());
         };
         match fetch_commandcode(&token) {
             Ok(s) => s,
@@ -89,8 +93,9 @@ impl Provider for Nous {
         nous_creds().exists()
     }
     fn refresh(&self, _cfg: &AppConfig) -> ProviderSnapshot {
-        let Some(token) = read_json_token(&nous_creds(), &["access_token", "accessToken", "token"]) else {
-            return snapshot_err(VendorId::Nous, VendorId::Nous.login_hint());
+        let Some(token) = read_json_token(&nous_creds(), &["access_token", "accessToken", "token"])
+        else {
+            return snapshot_needs_auth(VendorId::Nous, VendorId::Nous.login_hint());
         };
         match fetch_nous(&token) {
             Ok(s) => s,
@@ -107,7 +112,10 @@ fn kimi_creds_path() -> std::path::PathBuf {
 }
 
 fn read_kimi_token() -> Option<String> {
-    read_json_token(&kimi_creds_path(), &["access_token", "accessToken", "token"])
+    read_json_token(
+        &kimi_creds_path(),
+        &["access_token", "accessToken", "token"],
+    )
 }
 
 fn fetch_kimi(token: &str) -> Result<ProviderSnapshot, FetchError> {
@@ -120,12 +128,21 @@ fn fetch_kimi(token: &str) -> Result<ProviderSnapshot, FetchError> {
     if let Some(w) = weekly {
         let pct = json_f64(w, &["utilization", "usedPercent", "percent"]).unwrap_or(0.0);
         let reset = json_str(w, &["resets_at", "resetAt"]);
-        lines.push(progress_pct("weekly", "Semanal", pct, reset, 604_800, "always"));
+        lines.push(progress_pct(
+            "weekly", "Semanal", pct, reset, 604_800, "always",
+        ));
     }
     if let Some(w) = body.get("five_hour").or_else(|| body.get("rate_limit")) {
         let pct = json_f64(w, &["utilization", "usedPercent", "percent"]).unwrap_or(0.0);
         let reset = json_str(w, &["resets_at", "resetAt"]);
-        lines.push(progress_pct("session", "Sesión 5h", pct, reset, 18_000, "always"));
+        lines.push(progress_pct(
+            "session",
+            "Sesión 5h",
+            pct,
+            reset,
+            18_000,
+            "always",
+        ));
     }
     let plan = json_str(&body, &["plan", "membership", "level"]).unwrap_or_else(|| "Kimi".into());
     Ok(snapshot_ok(VendorId::Kimi, &plan, lines))
@@ -136,7 +153,10 @@ fn grok_auth_path() -> std::path::PathBuf {
 }
 
 fn read_grok_key() -> Option<String> {
-    read_json_token(&grok_auth_path(), &["key", "api_key", "access_token", "token"])
+    read_json_token(
+        &grok_auth_path(),
+        &["key", "api_key", "access_token", "token"],
+    )
 }
 
 fn fetch_supergrok(key: &str) -> Result<ProviderSnapshot, FetchError> {
@@ -148,10 +168,17 @@ fn fetch_supergrok(key: &str) -> Result<ProviderSnapshot, FetchError> {
     if let Some(w) = body.get("weekly").or_else(|| body.get("included")) {
         let pct = json_f64(w, &["percent", "utilization", "usedPercent"]).unwrap_or(0.0);
         let reset = json_str(w, &["resets_at", "resetAt"]);
-        lines.push(progress_pct("weekly", "Semanal", pct, reset, 604_800, "always"));
+        lines.push(progress_pct(
+            "weekly", "Semanal", pct, reset, 604_800, "always",
+        ));
     }
     if let Some(bal) = json_f64(&body, &["prepaid_balance", "balance"]) {
-        lines.push(values_line("prepaid", "Prepago", &format!("${bal:.2}"), "demand"));
+        lines.push(values_line(
+            "prepaid",
+            "Prepago",
+            &format!("${bal:.2}"),
+            "demand",
+        ));
     }
     if lines.is_empty() {
         let pct = json_f64(&body, &["percent", "utilization"]).unwrap_or(0.0);
@@ -177,7 +204,10 @@ fn fetch_commandcode(token: &str) -> Result<ProviderSnapshot, FetchError> {
     )
     .ok();
     let mut lines = Vec::new();
-    if let Some(w) = credits.get("fiveHour").or_else(|| credits.pointer("/windowLimits/fiveHour")) {
+    if let Some(w) = credits
+        .get("fiveHour")
+        .or_else(|| credits.pointer("/windowLimits/fiveHour"))
+    {
         let used = json_f64(w, &["used", "spent"]).unwrap_or(0.0);
         let cap = json_f64(w, &["limit", "cap"]).unwrap_or(0.0);
         if cap > 0.0 {
@@ -191,7 +221,10 @@ fn fetch_commandcode(token: &str) -> Result<ProviderSnapshot, FetchError> {
             ));
         }
     }
-    if let Some(w) = credits.get("weekly").or_else(|| credits.pointer("/windowLimits/weekly")) {
+    if let Some(w) = credits
+        .get("weekly")
+        .or_else(|| credits.pointer("/windowLimits/weekly"))
+    {
         let used = json_f64(w, &["used", "spent"]).unwrap_or(0.0);
         let cap = json_f64(w, &["limit", "cap"]).unwrap_or(0.0);
         if cap > 0.0 {
@@ -207,7 +240,12 @@ fn fetch_commandcode(token: &str) -> Result<ProviderSnapshot, FetchError> {
     }
     let remaining = json_f64(&credits, &["remaining", "credits", "balance"]);
     if let Some(r) = remaining {
-        lines.push(values_line("credits", "Créditos", &format!("${r:.2}"), "demand"));
+        lines.push(values_line(
+            "credits",
+            "Créditos",
+            &format!("${r:.2}"),
+            "demand",
+        ));
     }
     let plan = subs
         .as_ref()
@@ -226,7 +264,8 @@ fn fetch_nous(token: &str) -> Result<ProviderSnapshot, FetchError> {
         &[("Authorization", &format!("Bearer {token}"))],
     )?;
     let monthly = json_f64(&body, &["monthly_credits", "subscription_credits"]).unwrap_or(0.0);
-    let remaining = json_f64(&body, &["subscription_credits_remaining", "remaining"]).unwrap_or(0.0);
+    let remaining =
+        json_f64(&body, &["subscription_credits_remaining", "remaining"]).unwrap_or(0.0);
     let pct = if monthly > 0.0 {
         ((monthly - remaining) / monthly) * 100.0
     } else {
@@ -258,7 +297,12 @@ impl Provider for Windsurf {
     }
     fn refresh(&self, _cfg: &AppConfig) -> ProviderSnapshot {
         if !windsurf_installed() {
-            return snapshot_err(VendorId::Windsurf, VendorId::Windsurf.login_hint());
+            return snapshot_with_status(
+                VendorId::Windsurf,
+                ProviderStatus::Unavailable,
+                ProviderStatusReason::LocalServiceUnavailable,
+                "Windsurf no está disponible en este equipo",
+            );
         }
         snapshot_ok(
             VendorId::Windsurf,

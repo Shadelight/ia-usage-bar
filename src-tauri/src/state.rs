@@ -1,18 +1,24 @@
 //! Estado compartido de la app y helpers de bloqueo.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
-use tauri::{menu::MenuItem, Wry};
+use tauri::{
+    menu::{CheckMenuItem, MenuItem, Submenu},
+    Wry,
+};
 
 use crate::config::AppConfig;
-use crate::model::ProviderSnapshot;
+use crate::model::{ProviderSnapshot, VendorInfo};
 
 pub(crate) struct AppState {
     pub(crate) snapshots: Mutex<HashMap<String, ProviderSnapshot>>,
     pub(crate) config: Mutex<AppConfig>,
+    /// Credential detection is intentionally cached: building the dashboard
+    /// must be side-effect free and must not probe every installed CLI.
+    pub(crate) catalog: Mutex<Vec<VendorInfo>>,
     pub(crate) notify: Mutex<HashMap<String, NotifyState>>,
     pub(crate) notifications_enabled: AtomicBool,
     pub(crate) allow_exit: AtomicBool,
@@ -28,22 +34,18 @@ pub(crate) struct AppState {
 pub(crate) struct TrayMenuState {
     pub(crate) header: MenuItem<Wry>,
     pub(crate) status: MenuItem<Wry>,
+    pub(crate) autostart: CheckMenuItem<Wry>,
+    pub(crate) always_on_top: CheckMenuItem<Wry>,
+    pub(crate) compact_mode: CheckMenuItem<Wry>,
+    pub(crate) primary_submenu: Submenu<Wry>,
 }
 
 #[derive(Default, Clone)]
 pub(crate) struct NotifyState {
     pub(crate) initialized: bool,
     pub(crate) prev_resets: Option<String>,
-    pub(crate) notified_75: bool,
-    pub(crate) notified_90: bool,
-    pub(crate) notified_limit: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum UsageAlert {
-    At75,
-    At90,
-    At95,
+    pub(crate) previous_utilization: Option<f64>,
+    pub(crate) notified: HashSet<u8>,
 }
 
 /// Lock a mutex, tolerating poisoning instead of cascading the panic. A single

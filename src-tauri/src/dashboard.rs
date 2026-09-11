@@ -4,15 +4,19 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_notification::NotificationExt;
 
 use crate::commands::parse_id;
-use crate::model::{most_headroom, monthly_spend, Dashboard, ProviderSnapshot, SpendRow, VendorId};
+use crate::model::{
+    monthly_spend, most_headroom, Dashboard, ProviderSnapshot, ProviderStatus,
+    ProviderStatusReason, SpendRow, VendorId,
+};
 use crate::providers;
-use crate::state::{claim_refresh, lock_or_recover, AppState, NotifyState, UsageAlert};
+use crate::state::{claim_refresh, lock_or_recover, AppState, NotifyState};
 use crate::tray::update_tray_from_dashboard;
 
-pub(crate) fn build_dashboard(_app: &AppHandle, state: &AppState) -> Dashboard {
+pub(crate) fn build_dashboard(app: &AppHandle, state: &AppState) -> Dashboard {
     let cfg = lock_or_recover(&state.config).clone();
     let snaps = lock_or_recover(&state.snapshots);
     let providers: Vec<ProviderSnapshot> = cfg
@@ -43,12 +47,14 @@ pub(crate) fn build_dashboard(_app: &AppHandle, state: &AppState) -> Dashboard {
     };
     Dashboard {
         providers,
-        catalog: providers::catalog(&cfg),
+        catalog: lock_or_recover(&state.catalog).clone(),
         refresh_minutes: cfg.refresh_minutes,
         primary: cfg.primary.clone(),
         notifications: cfg.notifications,
-        show_usage_as: cfg.show_usage_as.clone(),
-        reset_times: cfg.reset_times.clone(),
+        notify_thresholds: cfg.notify_thresholds.clone(),
+        autostart: app.autolaunch().is_enabled().unwrap_or(false),
+        always_on_top: cfg.always_on_top,
+        compact_mode: cfg.compact_mode,
         next_update_in_secs: interval.saturating_sub(elapsed),
         spend_month_usd,
         spend,
@@ -81,31 +87,28 @@ fn reset_happened(prev: &Option<String>, cur: &Option<String>) -> bool {
     }
 }
 
-fn take_usage_alerts(util: f64, ns: &mut NotifyState, window_reset: bool) -> Vec<UsageAlert> {
+fn take_usage_alerts(
+    util: f64,
+    ns: &mut NotifyState,
+    window_reset: bool,
+    thresholds: &[u8],
+) -> Vec<u8> {
     if window_reset {
-        ns.notified_75 = false;
-        ns.notified_90 = false;
-        ns.notified_limit = false;
+        ns.notified.clear();
     }
-    if util < 70.0 {
-        ns.notified_75 = false;
-        ns.notified_90 = false;
-        ns.notified_limit = false;
-        return Vec::new();
-    }
+    let previous = if window_reset {
+        0.0
+    } else {
+        ns.previous_utilization.unwrap_or(0.0)
+    };
     let mut out = Vec::new();
-    if util >= 75.0 && !ns.notified_75 {
-        out.push(UsageAlert::At75);
-        ns.notified_75 = true;
+    for threshold in thresholds.iter().copied() {
+        let threshold_value = f64::from(threshold);
+        if previous < threshold_value && util >= threshold_value && ns.notified.insert(threshold) {
+            out.push(threshold);
+        }
     }
-    if util >= 90.0 && !ns.notified_90 {
-        out.push(UsageAlert::At90);
-        ns.notified_90 = true;
-    }
-    if util >= 95.0 && !ns.notified_limit {
-        out.push(UsageAlert::At95);
-        ns.notified_limit = true;
-    }
+    ns.previous_utilization = Some(util);
     out
 }
 
@@ -114,15 +117,16 @@ fn check_notifications(app: &AppHandle, snap: &ProviderSnapshot) {
     if !state.notifications_enabled.load(Ordering::Relaxed) {
         return;
     }
-    if !snap.connected {
+    if !snap.is_connected() {
         return;
     }
     let Some(util) = snap.primary_utilization else {
         return;
     };
     let mut map = lock_or_recover(&state.notify);
+    let thresholds = lock_or_recover(&state.config).notify_thresholds.clone();
     let ns = map.entry(snap.id.clone()).or_default();
-    let cur = snap.lines.iter().find_map(|l| l.resets_at().map(|s| s.to_string()));
+    let cur = snap.quotas.iter().find_map(|quota| quota.reset_at.clone());
     if ns.initialized {
         let reset = reset_happened(&ns.prev_resets, &cur);
         if reset {
@@ -132,25 +136,18 @@ fn check_notifications(app: &AppHandle, snap: &ProviderSnapshot) {
                 "Tu límite se reinició. Listo para seguir.",
             );
         }
-        for alert in take_usage_alerts(util, ns, reset) {
-            let (title, body) = match alert {
-                UsageAlert::At75 => (
-                    format!("{} al 75%", snap.name),
-                    format!("Vas al {:.0}% de tu cuota. Queda margen, pero ya está cerca.", util),
-                ),
-                UsageAlert::At90 => (
-                    format!("{} al 90%", snap.name),
-                    format!("Llegaste al {:.0}%. Conviene cambiar de herramienta antes de cortarte.", util),
-                ),
-                UsageAlert::At95 => (
-                    format!("Límite {}", snap.name),
-                    format!("Llegaste al {:.0}% de tu cuota.", util),
-                ),
+        for threshold in take_usage_alerts(util, ns, reset, &thresholds) {
+            let title = if threshold >= 95 {
+                format!("Límite {}", snap.name)
+            } else {
+                format!("{} al {threshold}%", snap.name)
             };
+            let body = format!("Llegaste al {:.0}% de tu cuota.", util);
             send_notification(app, &title, &body);
         }
     }
     ns.prev_resets = cur;
+    ns.previous_utilization = Some(util);
     ns.initialized = true;
 }
 
@@ -183,7 +180,7 @@ pub(crate) fn refresh_sync(app: &AppHandle, only: Option<&str>) {
     if outcome.is_err() {
         eprintln!("refresh_sync: refresh panicked; marking data stale and continuing");
         for snap in lock_or_recover(&state.snapshots).values_mut() {
-            snap.stale = true;
+            snap.mark_stale();
         }
         emit_dashboard(app);
     }
@@ -200,12 +197,7 @@ fn refresh_once(app: &AppHandle, only: Option<&str>) {
     let ids: Vec<VendorId> = if let Some(only) = only {
         parse_id(only).into_iter().collect()
     } else {
-        let enabled = cfg.enabled_ids();
-        if enabled.is_empty() {
-            VendorId::all().to_vec()
-        } else {
-            enabled
-        }
+        cfg.enabled_ids()
     };
     let now = Instant::now();
     let backoff = lock_or_recover(&state.backoff_until).clone();
@@ -217,14 +209,13 @@ fn refresh_once(app: &AppHandle, only: Option<&str>) {
             }
         }
         let cfg = cfg.clone();
-        handles.push(std::thread::spawn(move || (id, providers::refresh(id, &cfg))));
+        handles.push(std::thread::spawn(move || {
+            (id, providers::refresh(id, &cfg))
+        }));
     }
     for h in handles {
         if let Ok((id, snap)) = h.join() {
-            let rate_limited = snap
-                .error
-                .as_deref()
-                .is_some_and(|e| e.contains("Límite de peticiones"));
+            let rate_limited = snap.status_reason == Some(ProviderStatusReason::RateLimited);
             if rate_limited {
                 lock_or_recover(&state.backoff_until).insert(
                     id.slug().to_string(),
@@ -233,31 +224,53 @@ fn refresh_once(app: &AppHandle, only: Option<&str>) {
             }
             let stored = {
                 let mut snaps = lock_or_recover(&state.snapshots);
-                if snap.stale {
-                    if let Some(prev) = snaps.get_mut(id.slug()) {
-                        if !prev.lines.is_empty() {
-                            prev.stale = true;
-                            prev.error = snap.error.clone();
-                            prev.updated_at = snap.updated_at.clone();
-                            prev.clone()
-                        } else {
-                            snaps.insert(id.slug().to_string(), snap.clone());
-                            snap
-                        }
-                    } else {
-                        snaps.insert(id.slug().to_string(), snap.clone());
-                        snap
-                    }
-                } else {
-                    snaps.insert(id.slug().to_string(), snap.clone());
-                    snap
-                }
+                let merged = merge_snapshot(snaps.get(id.slug()), snap);
+                snaps.insert(id.slug().to_string(), merged.clone());
+                merged
             };
+            if !stored.is_connected() {
+                crate::logfile::append(&format!(
+                    "{} status={:?} reason={:?}",
+                    stored.id, stored.status, stored.status_reason
+                ));
+            }
             check_notifications(app, &stored);
         }
     }
     *lock_or_recover(&state.last_refresh) = Some(Instant::now());
     emit_dashboard(app);
+}
+
+fn merge_snapshot(
+    previous: Option<&ProviderSnapshot>,
+    mut incoming: ProviderSnapshot,
+) -> ProviderSnapshot {
+    if incoming.is_connected() {
+        return incoming;
+    }
+
+    if let Some(previous) = previous.filter(|snapshot| {
+        snapshot.is_connected() && (!snapshot.lines.is_empty() || !snapshot.quotas.is_empty())
+    }) {
+        let rate_limited = incoming.status_reason == Some(ProviderStatusReason::RateLimited);
+        let mut retained = previous.clone();
+        retained.mark_stale();
+        retained.status_reason = incoming.status_reason;
+        retained.error = incoming.error.take();
+        retained.updated_at = incoming.updated_at;
+        if !rate_limited {
+            retained.status = incoming.status;
+            retained.hint = incoming.hint;
+        }
+        return retained;
+    }
+
+    if incoming.status_reason == Some(ProviderStatusReason::RateLimited) {
+        incoming.status = ProviderStatus::Error;
+        incoming.status_reason = Some(ProviderStatusReason::Unknown);
+        incoming.stale = false;
+    }
+    incoming
 }
 
 pub(crate) fn run_loop(app: AppHandle) {
@@ -299,23 +312,83 @@ mod tests {
     fn usage_alerts_fire_at_75_and_90() {
         let mut ns = NotifyState::default();
         assert_eq!(
-            take_usage_alerts(76.0, &mut ns, false),
-            vec![UsageAlert::At75]
+            take_usage_alerts(76.0, &mut ns, false, &[75, 90, 95]),
+            vec![75]
         );
-        assert!(take_usage_alerts(80.0, &mut ns, false).is_empty());
+        assert!(take_usage_alerts(80.0, &mut ns, false, &[75, 90, 95]).is_empty());
         assert_eq!(
-            take_usage_alerts(91.0, &mut ns, false),
-            vec![UsageAlert::At90]
+            take_usage_alerts(91.0, &mut ns, false, &[75, 90, 95]),
+            vec![90]
         );
         assert_eq!(
-            take_usage_alerts(96.0, &mut ns, false),
-            vec![UsageAlert::At95]
+            take_usage_alerts(96.0, &mut ns, false, &[75, 90, 95]),
+            vec![95]
         );
-        assert!(take_usage_alerts(50.0, &mut ns, false).is_empty());
-        assert!(!ns.notified_75);
+        assert!(take_usage_alerts(50.0, &mut ns, false, &[75, 90, 95]).is_empty());
+        assert!(ns.notified.contains(&75));
         assert_eq!(
-            take_usage_alerts(92.0, &mut ns, true),
-            vec![UsageAlert::At75, UsageAlert::At90]
+            take_usage_alerts(92.0, &mut ns, true, &[75, 90, 95]),
+            vec![75, 90]
         );
+    }
+
+    #[test]
+    fn custom_thresholds_fire_once_per_window() {
+        let mut ns = NotifyState::default();
+        assert_eq!(take_usage_alerts(85.0, &mut ns, false, &[80, 95]), vec![80]);
+        assert!(take_usage_alerts(90.0, &mut ns, false, &[80, 95]).is_empty());
+        assert_eq!(take_usage_alerts(96.0, &mut ns, false, &[80, 95]), vec![95]);
+    }
+
+    #[test]
+    fn transient_failure_retains_metrics_but_exposes_failure_status() {
+        let previous = crate::model::snapshot_ok(
+            VendorId::Anthropic,
+            "Pro",
+            vec![crate::model::progress_pct(
+                "session", "Sesión", 25.0, None, 18_000, "always",
+            )],
+        );
+        let incoming = providers::map_fetch_err(
+            VendorId::Anthropic,
+            crate::http::FetchError::Network("offline".into()),
+        );
+        let merged = merge_snapshot(Some(&previous), incoming);
+        assert_eq!(merged.status, ProviderStatus::Unavailable);
+        assert!(merged.stale);
+        assert_eq!(merged.lines.len(), 1);
+    }
+
+    #[test]
+    fn rate_limit_retains_previous_good_snapshot_as_stale() {
+        let previous = crate::model::snapshot_ok(
+            VendorId::Anthropic,
+            "Pro",
+            vec![crate::model::progress_pct(
+                "session", "Sesión", 25.0, None, 18_000, "always",
+            )],
+        );
+        let incoming =
+            providers::map_fetch_err(VendorId::Anthropic, crate::http::FetchError::RateLimited);
+        let merged = merge_snapshot(Some(&previous), incoming);
+
+        assert_eq!(merged.status, ProviderStatus::Connected);
+        assert_eq!(
+            merged.status_reason,
+            Some(ProviderStatusReason::RateLimited)
+        );
+        assert!(merged.stale);
+        assert_eq!(merged.lines.len(), 1);
+    }
+
+    #[test]
+    fn rate_limit_without_previous_data_is_generic_error() {
+        let incoming =
+            providers::map_fetch_err(VendorId::Anthropic, crate::http::FetchError::RateLimited);
+        let merged = merge_snapshot(None, incoming);
+
+        assert_eq!(merged.status, ProviderStatus::Error);
+        assert_eq!(merged.status_reason, Some(ProviderStatusReason::Unknown));
+        assert!(!merged.stale);
     }
 }

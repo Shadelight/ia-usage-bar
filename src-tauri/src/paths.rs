@@ -3,7 +3,12 @@
 use std::path::PathBuf;
 
 pub fn home_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+    dirs::home_dir().unwrap_or_else(|| {
+        // Never reinterpret a missing profile as the process working
+        // directory: provider code may write refreshed credentials.
+        eprintln!("Windows user profile directory is unavailable");
+        std::env::temp_dir().join("iausagebar-missing-home")
+    })
 }
 
 pub fn claude_dir() -> PathBuf {
