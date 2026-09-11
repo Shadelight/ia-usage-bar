@@ -24,8 +24,16 @@ releases/
 
 # Sistema / logs
 *.log
+logs/
 .DS_Store
 Thumbs.db
+
+# Scratch de sourcing de iconos de proveedor (el resultado curado vive en
+# src/assets/providers/, que sí se versiona; ver NOTICE para la atribución)
+icons.tgz
+icons_extract/
+slugs.md
+tarball_url.txt
 
 # Superpowers SDD scratch (ledger, briefs, review packages)
 .superpowers/
