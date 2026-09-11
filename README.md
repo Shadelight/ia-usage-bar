@@ -12,7 +12,7 @@
 
 ### [⬇ Download the latest release](https://github.com/Shadelight/ia-usage-bar/releases/latest)
 
-[Installation](#install) · [Supported providers](#supported-providers) · [Privacy](#privacy--security)
+[Website](https://shadelight.github.io/ia-usage-bar/) · [Installation](#install) · [Supported providers](#supported-providers) · [Privacy](#privacy--security)
 
 ## Why IA Usage Bar
 
@@ -110,6 +110,11 @@ need a manually pasted API key, saved through Settings into Windows
 Credential Manager.
 
 ## Privacy & security
+
+**Your credentials stay on your machine.** IA Usage Bar reuses sessions and
+credentials that already exist locally when a provider allows it — OAuth/CLI
+login, device flows, local session files, user-configured API keys — instead
+of asking you to re-authenticate.
 
 - Read-only and local-first. **No telemetry.**
 - Tokens are read from files the official CLIs already maintain (e.g.

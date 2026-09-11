@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IA Usage Bar — AI usage limits for Windows</title>
+<meta name="description" content="Monitor AI usage limits, quota resets, spend and provider status for Claude Code, Codex, Cursor, Copilot and more, from one Windows tray app.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="IA Usage Bar">
+<meta property="og:description" content="All your AI usage limits. One Windows app.">
+<meta property="og:image" content="https://shadelight.github.io/ia-usage-bar/assets/hero.png">
+<meta property="og:url" content="https://shadelight.github.io/ia-usage-bar/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="IA Usage Bar">
+<meta name="twitter:description" content="All your AI usage limits. One Windows app.">
+<meta name="twitter:image" content="https://shadelight.github.io/ia-usage-bar/assets/hero.png">
+<meta name="theme-color" content="#1c1c1e">
+<link rel="canonical" href="https://shadelight.github.io/ia-usage-bar/">
+<link rel="icon" href="./favicon.ico">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-row">
+    <a class="brand" href="#top">
+      <img src="./icon.png" alt="">
+      IA Usage Bar
+    </a>
+    <nav class="nav-links">
+      <a href="#features" data-i18n="navFeatures">Funciones</a>
+      <a href="#providers" data-i18n="navProviders">Proveedores</a>
+      <a href="#privacy" data-i18n="navPrivacy">Privacidad</a>
+      <a href="https://github.com/Shadelight/ia-usage-bar" data-i18n="navGithub">GitHub</a>
+    </nav>
+    <div class="nav-actions">
+      <button class="icon-btn theme-btn" data-theme-btn title="Toggle theme" aria-label="Toggle theme">
+        <svg class="theme-icon-dark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="theme-icon-light" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </button>
+      <button class="icon-btn" data-lang-btn="es">ES</button>
+      <button class="icon-btn" data-lang-btn="en">EN</button>
+      <a class="btn btn-primary btn-sm" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="navDownload">Descargar</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="wrap">
+      <span class="eyebrow"><span class="dot"></span> Windows 10/11 · Open source</span>
+      <h1 data-i18n="heroTitle">Todos tus límites de IA.<br>Una sola app de <span>Windows</span>.</h1>
+      <p class="subtitle" data-i18n="heroSubtitle">Monitoriza cuotas de sesión, reinicios semanales, gasto y estado de las herramientas de IA que realmente usas.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="ctaPrimary">Descargar para Windows</a>
+        <a class="btn btn-secondary" href="https://github.com/Shadelight/ia-usage-bar" data-i18n="ctaSecondary">Ver en GitHub</a>
+      </div>
+      <p class="fine-print" data-i18n="finePrint">Gratis · Open source · Windows 10/11</p>
+      <div class="shot-frame">
+        <img src="./assets/hero.png" alt="IA Usage Bar provider panel" loading="eager">
+      </div>
+    </div>
+  </section>
+
+  <section id="providers">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 data-i18n="providersTitle">Una app, todos los proveedores que pagas</h2>
+        <p data-i18n="providersSubtitle">Activa solo los que usas. IA Usage Bar nunca desactiva un proveedor por ti.</p>
+      </div>
+      <div class="provider-grid">
+        <span class="chip">Claude Code</span>
+        <span class="chip">Codex / ChatGPT</span>
+        <span class="chip">Cursor</span>
+        <span class="chip">Antigravity</span>
+        <span class="chip">GitHub Copilot</span>
+        <span class="chip">OpenAI API</span>
+        <span class="chip">Anthropic API</span>
+        <span class="chip">OpenRouter</span>
+        <span class="chip">Z.AI</span>
+        <span class="chip">DeepSeek</span>
+        <span class="chip">Grok</span>
+        <span class="chip">Groq</span>
+        <span class="chip">Kiro</span>
+        <span class="chip">Windsurf</span>
+        <span class="chip faint" data-i18n="providersMore">+ más vía clave API o sesión local</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="alt">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="card kicker" style="display:inline-block;background:none;border:none;padding:0;" data-i18n="limitsKicker">Límites y reinicios</span>
+        <h2 data-i18n="limitsTitle">Sesión, semanal, mensual — todo de un vistazo</h2>
+        <p data-i18n="limitsSubtitle">Porcentaje usado vs. disponible, cuenta atrás del reinicio, y avisos de ritmo.</p>
+      </div>
+      <div class="grid-3">
+        <div class="card">
+          <div class="kicker">01</div>
+          <h3 data-i18n="limitCard1t">Cuota de sesión</h3>
+          <p data-i18n="limitCard1p">Usado/disponible en vivo para la ventana de sesión actual, por proveedor.</p>
+        </div>
+        <div class="card">
+          <div class="kicker">02</div>
+          <h3 data-i18n="limitCard2t">Semanal y mensual</h3>
+          <p data-i18n="limitCard2p">Cuotas de ventana móvil y calendario con hora exacta de reinicio.</p>
+        </div>
+        <div class="card">
+          <div class="kicker">03</div>
+          <h3 data-i18n="limitCard3t">Manejo de datos obsoletos</h3>
+          <p data-i18n="limitCard3p">Si un proveedor no responde, se mantienen los últimos datos válidos.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="callout">
+        <span class="badge" data-i18n="calloutBadge">Cambia</span>
+        <p data-i18n="calloutText"><b>Cursor</b> tiene el mayor margen ahora mismo (74%).</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="alt">
+    <div class="wrap split">
+      <div>
+        <div class="card kicker" style="background:none;border:none;padding:0;" data-i18n="compactKicker">Modo compacto</div>
+        <h2 data-i18n="compactTitle">Ventana pequeña, misma señal</h2>
+        <p data-i18n="compactP1">Se reduce a la cuota principal del proveedor seleccionado y oculta el detalle secundario. Pin la mantiene siempre visible.</p>
+        <p data-i18n="compactP2">Ambos estados persisten entre reinicios y se reflejan en el menú de la bandeja.</p>
+      </div>
+      <div class="shot-frame">
+        <img src="./assets/compact.png" alt="IA Usage Bar compact mode" loading="lazy">
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap split reverse">
+      <div>
+        <div class="card kicker" style="background:none;border:none;padding:0;" data-i18n="spendKicker">Gasto y créditos</div>
+        <h2 data-i18n="spendTitle">Entiende tu uso y coste estimado</h2>
+        <p data-i18n="spendP1">Consulta el gasto reportado por el proveedor cuando lo expone, y una estimación local calculada a partir de los logs de uso cuando no — siempre etiquetado, nunca mezclado.</p>
+        <ul>
+          <li><span class="tag" data-i18n="spendLi1tag">Reportado por el proveedor</span><span data-i18n="spendLi1">cifras directas del propio endpoint de uso del proveedor</span></li>
+          <li><span class="tag" data-i18n="spendLi2tag">Estimado</span><span data-i18n="spendLi2">coste equivalente calculado localmente a partir de los logs de uso, no una factura</span></li>
+        </ul>
+      </div>
+      <div class="shot-frame">
+        <img src="./assets/settings.png" alt="IA Usage Bar settings" loading="lazy">
+      </div>
+    </div>
+  </section>
+
+  <section class="alt">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker" style="color:var(--accent);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;" data-i18n="statusKicker">Estado y notificaciones</span>
+        <h2 data-i18n="statusTitle">Estado estructurado, no un error genérico</h2>
+        <p data-i18n="statusSubtitle">Cada proveedor reporta lo que realmente falla. Umbrales de notificación configurables.</p>
+      </div>
+      <div class="grid-3">
+        <div class="card">
+          <h3 data-i18n="statusCard1t">Necesita login</h3>
+          <p data-i18n="statusCard1p">Inicia sesión en la app/CLI del proveedor y usa Detectar o Actualizar.</p>
+        </div>
+        <div class="card">
+          <h3 data-i18n="statusCard2t">Necesita permiso</h3>
+          <p data-i18n="statusCard2p">La credencial autentica pero no puede leer el uso — revisa el plan.</p>
+        </div>
+        <div class="card">
+          <h3 data-i18n="statusCard3t">Límite de tasa / no disponible</h3>
+          <p data-i18n="statusCard3p">IA Usage Bar no pudo obtener datos frescos ahora. Conserva el último dato válido y muestra la causa cuando puede determinarla.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="privacy">
+    <div class="wrap">
+      <div class="section-head">
+        <span style="color:var(--accent);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;" data-i18n="privacyKicker">Privacidad y seguridad</span>
+        <h2 data-i18n="privacyTitle">Tus credenciales se quedan en tu equipo</h2>
+        <p data-i18n="privacySubtitle">IA Usage Bar reutiliza sesiones y credenciales que ya existen localmente cuando el proveedor lo permite.</p>
+      </div>
+      <ul class="priv-list">
+        <li data-i18n="privacyLi1">Las claves API añadidas manualmente se guardan en Windows Credential Manager, nunca en texto plano.</li>
+        <li data-i18n="privacyLi2">La app nunca almacena contraseñas.</li>
+        <li data-i18n="privacyLi3">El procesamiento es local, salvo las llamadas que cada proveedor activo necesita a su propio endpoint de uso.</li>
+        <li data-i18n="privacyLi4">Sin telemetría, sin analítica.</li>
+      </ul>
+      <div class="priv-table">
+        <div class="priv-row"><span data-i18n="privacyRow1k">Sesión del proveedor</span><span data-i18n="privacyRow1v">La gestiona la app/CLI original, leída localmente</span></div>
+        <div class="priv-row"><span data-i18n="privacyRow2k">Claves API manuales</span><span data-i18n="privacyRow2v">Windows Credential Manager</span></div>
+        <div class="priv-row"><span data-i18n="privacyRow3k">Configuración</span><span data-i18n="privacyRow3v">Solo local</span></div>
+        <div class="priv-row"><span data-i18n="privacyRow4k">Telemetría</span><span class="none" data-i18n="privacyRow4vNone">Ninguna</span></div>
+      </div>
+      <p style="text-align:center;margin-top:22px;">
+        <a href="https://github.com/Shadelight/ia-usage-bar/blob/main/SECURITY.md" style="color:var(--accent);font-weight:600;font-size:14px;" data-i18n="privacyLink">Política completa en SECURITY.md →</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="alt">
+    <div class="wrap">
+      <div class="section-head">
+        <span style="color:var(--accent);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;" data-i18n="ossKicker">Open source</span>
+        <h2 data-i18n="ossTitle">Licencia MIT, inspecciona todo</h2>
+        <p data-i18n="ossSubtitle">Sin caja negra. Lee el código, abre un issue o envía un PR.</p>
+      </div>
+      <div class="grid-3">
+        <a class="card" href="https://github.com/Shadelight/ia-usage-bar">
+          <h3 data-i18n="ossCard1t">Código</h3>
+          <p data-i18n="ossCard1p">Historial completo e issues en GitHub.</p>
+        </a>
+        <a class="card" href="https://github.com/Shadelight/ia-usage-bar/blob/main/CONTRIBUTING.md">
+          <h3 data-i18n="ossCard2t">Contribuir</h3>
+          <p data-i18n="ossCard2p">Setup, convenciones de código y checklist de PR.</p>
+        </a>
+        <a class="card" href="https://github.com/Shadelight/ia-usage-bar/blob/main/SECURITY.md">
+          <h3 data-i18n="ossCard3t">Seguridad</h3>
+          <p data-i18n="ossCard3p">Política de reporte de vulnerabilidades y manejo de credenciales.</p>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="final-cta">
+    <div class="wrap">
+      <h2 data-i18n="finalTitle">Deja de adivinar tu cuota.</h2>
+      <p data-i18n="finalSubtitle">Una app en la bandeja, todos los proveedores, siempre al día.</p>
+      <a class="btn btn-primary" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="finalCta">Descargar IA Usage Bar para Windows</a>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap footer-row">
+    <span>&copy; <span data-year>2026</span> IA Usage Bar. MIT License. <span data-i18n="footerNote">No afiliado con Anthropic, OpenAI, Cursor ni ningún proveedor listado.</span></span>
+    <nav class="footer-links">
+      <a href="https://github.com/Shadelight/ia-usage-bar">GitHub</a>
+      <a href="https://github.com/Shadelight/ia-usage-bar/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/Shadelight/ia-usage-bar/blob/main/SECURITY.md">Security</a>
+      <a href="https://github.com/Shadelight/ia-usage-bar/blob/main/LICENSE">License</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="./app.js" defer></script>
+</body>
+</html>
