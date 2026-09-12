@@ -283,6 +283,9 @@ fn run_hidden(cmd: &str, args: &[&str]) -> Option<String> {
     let out = std::process::Command::new(cmd)
         .args(args)
         .creation_flags(CREATE_NO_WINDOW)
+        // Nunca heredar stdin: un hijo que espere entrada bloquearía
+        // el hilo de refresh/detect para siempre.
+        .stdin(std::process::Stdio::null())
         .output()
         .ok()?;
     if !out.status.success() && out.stdout.is_empty() {

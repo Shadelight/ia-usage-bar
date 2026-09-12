@@ -101,12 +101,25 @@ pub(crate) fn detect_providers(
     app: AppHandle,
     state: tauri::State<AppState>,
 ) -> Result<Vec<String>, String> {
-    let mut cfg = lock_or_recover(&state.config);
-    let mut candidate = cfg.clone();
-    let newly = config::run_detect(&mut candidate)?;
-    *cfg = candidate;
-    refresh_catalog_and_tray(&app, &state, &cfg);
-    drop(cfg);
+    // Sin locks durante el detect: sondea CLIs y red, y un hijo colgado no
+    // debe congelar los comandos ni el refresh (que también piden config).
+    let snapshot = lock_or_recover(&state.config).clone();
+    let mut working = snapshot;
+    let newly = config::run_detect(&mut working)?;
+    {
+        let mut cfg = lock_or_recover(&state.config);
+        if cfg.load_recovered {
+            // Recuperación pendiente de revisión: no tocar nada.
+            return Ok(newly);
+        }
+        for id in &newly {
+            if let Some(vid) = parse_id(id) {
+                cfg.set_enabled(vid, true);
+            }
+        }
+        cfg.save()?;
+        refresh_catalog_and_tray(&app, &state, &cfg);
+    }
     do_refresh(&app, None);
     Ok(newly)
 }

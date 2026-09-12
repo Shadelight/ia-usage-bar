@@ -354,6 +354,7 @@ async function main() {
       // input renders empty with a "saved" badge. On failure keep the draft
       // (what the user typed is never discarded without confirmation).
       if (saved || !isTauri()) clearCredentialDraft(id);
+      else showCommandError(t("commandFailed"));
       if (view === "settings") renderSettings(dash, settingsCategory);
     }
     if (btn.dataset.delkey) {
@@ -369,13 +370,15 @@ async function main() {
     if (btn.dataset.expand) {
       const id = btn.dataset.expand;
       // Toggle by reading current DOM state to avoid importing module state.
-      const row = btn.closest("[data-provider]");
+      // NOTE: rows carry `data-provider-item`, not `data-provider`.
+      const row = btn.closest("[data-provider-item]");
       const isOpen = row?.querySelector(".prov-detail") != null;
       setExpandedProvider(isOpen ? null : id);
       if (view === "settings") renderSettings(dash, settingsCategory);
     }
     if (btn.hasAttribute("data-detect")) {
-      await invokeCmd("detect_providers");
+      const ok = (await invokeCmd("detect_providers")) !== null;
+      if (!ok && isTauri()) showCommandError(t("commandFailed"));
     }
     if (btn.dataset.refreshProvider) {
       await invokeCmd("refresh_provider", { id: btn.dataset.refreshProvider });
@@ -384,7 +387,12 @@ async function main() {
       const copied = await copyToClipboard(btn.dataset.copyCli);
       if (copied) showToast(t("copiedCliCmd"));
     }
-    if (btn.dataset.theme) {
+    // NOTE: <html> always carries data-theme (applyTheme sets it on load),
+    // so an unscoped [data-theme] match would catch EVERY click via
+    // closest() fallthrough and rebuild settings mid-gesture — killing
+    // checkbox toggles, open selects and the action that was clicked.
+    // Only real theme controls (never documentElement) may enter here.
+    if (btn !== document.documentElement && btn.dataset.theme) {
       applyTheme(btn.dataset.theme as AppTheme);
       renderSettings(dash, settingsCategory);
     }
@@ -452,15 +460,23 @@ async function main() {
       return;
     }
     if ((el as HTMLInputElement).dataset.enable) {
-      const id = (el as HTMLInputElement).dataset.enable!;
-      const enabled = (el as HTMLInputElement).checked;
+      const input = el as HTMLInputElement;
+      const id = input.dataset.enable!;
+      const enabled = input.checked;
       // Optimistic local update: the new row (with an immediately editable
       // input) paints without waiting for the backend round-trip.
       const vendor = dash?.catalog.find((v) => v.id === id);
       if (vendor) vendor.enabled = enabled;
       if (enabled) setExpandedProvider(id);
       if (view === "settings") renderSettings(dash, settingsCategory);
-      await invokeCmd("set_provider_enabled", { id, enabled });
+      const ok = (await invokeCmd("set_provider_enabled", { id, enabled })) !== null;
+      if (!ok && isTauri()) {
+        // Backend rejected: revert model AND form so the UI never lies checked.
+        if (vendor) vendor.enabled = !enabled;
+        setExpandedProvider(null);
+        if (view === "settings") renderSettings(dash, settingsCategory);
+        showCommandError(t("commandFailed"));
+      }
     }
     if (el.id === "cfg-sync") {
       const enabled = (el as HTMLInputElement).checked;

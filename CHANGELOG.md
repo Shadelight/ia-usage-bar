@@ -4,6 +4,20 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+### Fixed
+
+- Ajustes: los clics en controles sin acción propia ya no caen en la rama
+  de tema vía `<html data-theme>` (reconstruía el panel a mitad del gesto
+  y mataba toggles, selects y la acción pulsada). La rama de tema solo
+  acepta controles reales.
+- Ajustes: las filas de proveedor vuelven a plegarse (el toggle buscaba
+  `[data-provider]` y las filas usan `data-provider-item`).
+- Ajustes: activar, guardar credencial y detectar avisan con toast si el
+  backend falla (antes quedaban en silencio) y el check revierte.
+- Sync: `detect_providers` ya no mantiene locks durante el sondeo, y los
+  hijos (`gh`, sondas) nunca heredan stdin (un hijo colgado no congela
+  comandos ni refresh).
+
 ### Added
 
 - M5 sync con el teléfono (V1 local, sin backend): `SyncPayload` cifrado

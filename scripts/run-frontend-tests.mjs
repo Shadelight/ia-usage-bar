@@ -95,7 +95,9 @@ for (const tsPath of collectClosure(entries)) {
   writeFileSync(outPath, transpile(tsPath));
   for (const match of source.matchAll(ASSET_URL_RE)) {
     const assetPath = resolve(dirname(tsPath), match[1]);
-    if (assetPath.startsWith(root) && !assetPath.endsWith(".ts") && existsSync(assetPath)) {
+    if (assetPath.startsWith(root) && existsSync(assetPath)) {
+      // .ts assets are mirrored verbatim (text reads like readFileSync of
+      // sources); transpiled modules land as .js and never collide with them.
       mirroredAssets.add(assetPath);
     }
   }

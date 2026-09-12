@@ -36,13 +36,19 @@ use tray::{on_tray_left_click, show_window};
 /// entry was removed to keep the root menu compact).
 fn run_provider_detect(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
-    let mut cfg = lock_or_recover(&state.config);
-    let mut candidate = cfg.clone();
+    // Sin locks durante el detect (ver detect_providers): un probe colgado
+    // no debe congelar comandos ni refresh.
+    let snapshot = lock_or_recover(&state.config).clone();
+    let mut candidate = snapshot;
     match config::run_detect(&mut candidate) {
         Ok(_) => {
-            *cfg = candidate;
-            let snapshot = cfg.clone();
-            drop(cfg);
+            {
+                let mut cfg = lock_or_recover(&state.config);
+                if !cfg.load_recovered {
+                    *cfg = candidate;
+                }
+            }
+            let snapshot = lock_or_recover(&state.config).clone();
             commands::refresh_catalog_and_tray(app, &state, &snapshot);
             do_refresh(app, None);
         }

@@ -62,6 +62,9 @@ fn resolve_token(cfg: &AppConfig) -> Option<String> {
     }
     let mut command = Command::new("gh");
     command.args(["auth", "token"]);
+    // Nunca heredar stdin: un hijo que pregunte algo bloquearía el hilo
+    // para siempre (el detect corre con rondeo de refresh detrás).
+    command.stdin(std::process::Stdio::null());
     #[cfg(windows)]
     command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     let out = command.output().ok()?;
