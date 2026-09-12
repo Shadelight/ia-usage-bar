@@ -8,12 +8,15 @@ use crate::config::AppConfig;
 use crate::http::{self, FetchError};
 use crate::jwt;
 use std::path::Path;
+use std::{fs::File, io::{Read, Seek, SeekFrom}};
+use walkdir::WalkDir;
 
 use crate::model::{
     progress_pct, resets_from_unix, snapshot_needs_auth, snapshot_ok, values_line,
     ProviderSnapshot, VendorId,
 };
 use crate::paths::home_dir;
+use crate::watch::codex_sessions_dir;
 
 use super::Provider;
 
@@ -91,6 +94,82 @@ fn auth_path() -> std::path::PathBuf {
         }
     }
     home_dir().join(".codex").join("auth.json")
+}
+
+/// Fuente rápida para el watcher: abre los últimos `rate_limits` que Codex
+/// acaba de registrar. Nunca lee ni propaga mensajes de sesión; la salida se
+/// reduce inmediatamente al mismo `ProviderSnapshot` normalizado.
+pub fn snapshot_from_sessions() -> Option<ProviderSnapshot> {
+    let rate_limits = latest_session_rate_limits(&codex_sessions_dir())?;
+    let body = session_rate_limits_body(&rate_limits)?;
+    let plan_hint = read_auth().and_then(|auth| plan_from_id(&auth.id_token));
+    let snapshot = snapshot_from_json(&body, plan_hint.as_deref());
+    (!snapshot.quotas.is_empty()).then_some(snapshot)
+}
+
+fn latest_session_rate_limits(root: &Path) -> Option<Value> {
+    let mut files: Vec<_> = WalkDir::new(root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file() && entry.path().extension().is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl")))
+        .filter_map(|entry| entry.metadata().ok().and_then(|meta| meta.modified().ok().map(|modified| (modified, entry.into_path()))))
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.into_iter().take(20).find_map(|(_, path)| {
+        let mut latest = None;
+        let raw = read_tail(&path, 1_048_576).ok()?;
+        for line in raw.lines() {
+            let Ok(value) = serde_json::from_str::<Value>(line) else { continue };
+            if let Some(rate) = find_rate_limits(&value) {
+                latest = Some(rate.clone());
+            }
+        }
+        latest
+    })
+}
+
+fn read_tail(path: &Path, max_bytes: u64) -> std::io::Result<String> {
+    let mut file = File::open(path)?;
+    let len = file.metadata()?.len();
+    let start = len.saturating_sub(max_bytes);
+    file.seek(SeekFrom::Start(start))?;
+    let mut raw = String::new();
+    file.read_to_string(&mut raw)?;
+    if start > 0 {
+        Ok(raw.split_once('\n').map(|(_, rest)| rest).unwrap_or("").to_string())
+    } else {
+        Ok(raw)
+    }
+}
+
+fn find_rate_limits(value: &Value) -> Option<&Value> {
+    match value {
+        Value::Object(map) => map.get("rate_limits").or_else(|| map.values().find_map(find_rate_limits)),
+        Value::Array(values) => values.iter().find_map(find_rate_limits),
+        _ => None,
+    }
+}
+
+fn session_rate_limits_body(rate_limits: &Value) -> Option<Value> {
+    let primary = rate_limits.get("primary_window").or_else(|| rate_limits.get("primary")).and_then(normalize_session_window)?;
+    let secondary = rate_limits.get("secondary_window").or_else(|| rate_limits.get("secondary")).and_then(normalize_session_window);
+    let mut limit = serde_json::Map::new();
+    limit.insert("primary_window".into(), primary);
+    if let Some(window) = secondary { limit.insert("secondary_window".into(), window); }
+    Some(serde_json::json!({ "rate_limit": Value::Object(limit) }))
+}
+
+fn normalize_session_window(window: &Value) -> Option<Value> {
+    let used = normalized_used_percent(window)?;
+    let seconds = window.get("limit_window_seconds").and_then(Value::as_i64)
+        .or_else(|| window.get("window_seconds").and_then(Value::as_i64))
+        .or_else(|| window.get("window_minutes").and_then(Value::as_i64).map(|mins| mins * 60))?;
+    let mut normalized = serde_json::json!({ "used_percent": used, "limit_window_seconds": seconds });
+    let reset = window.get("reset_at").or_else(|| window.get("resets_at"));
+    if let Some(seconds) = reset.and_then(Value::as_i64) { normalized["reset_at"] = Value::from(seconds); }
+    else if let Some(iso) = reset.and_then(Value::as_str).and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()) { normalized["reset_at"] = Value::from(iso.timestamp()); }
+    else if let Some(after) = window.get("reset_after_seconds").and_then(Value::as_i64) { normalized["reset_after_seconds"] = Value::from(after); }
+    Some(normalized)
 }
 
 fn read_auth() -> Option<Auth> {
@@ -489,5 +568,18 @@ mod tests {
             snapshot.quotas[0].window_type,
             crate::model::WindowType::FiveHour
         );
+    }
+
+    #[test]
+    fn session_rate_limits_use_the_same_normalized_snapshot() {
+        let rate_limits = serde_json::json!({
+            "primary": { "used_percent": 21.0, "window_minutes": 300, "resets_at": 4102444800i64 },
+            "secondary": { "remaining_percent": 85.0, "window_minutes": 10080, "resets_at": 4103049600i64 }
+        });
+        let body = session_rate_limits_body(&rate_limits).expect("normaliza rate_limits");
+        let snapshot = snapshot_from_json(&body, Some("Plus"));
+        assert_eq!(snapshot.quotas.len(), 2);
+        assert_eq!(snapshot.quotas[0].used_percent, Some(21.0));
+        assert_eq!(snapshot.quotas[1].used_percent, Some(15.0));
     }
 }

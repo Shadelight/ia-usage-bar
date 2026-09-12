@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- M5 deliberately uses HTTP only on a trusted LAN. The actual payload is
+     authenticated and encrypted before it leaves the PC. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

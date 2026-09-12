@@ -1,0 +1,41 @@
+{
+  "name": "ia-usage",
+  "displayName": "IA Usage",
+  "description": "Live AI quota status powered by your local IA Usage CLI.",
+  "version": "0.1.0",
+  "publisher": "Shadelight",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/Shadelight/ia-usage-bar" },
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "iaUsage.show", "title": "Show usage", "category": "IA Usage" },
+      { "command": "iaUsage.refresh", "title": "Refresh now", "category": "IA Usage" },
+      { "command": "iaUsage.restart", "title": "Reconnect CLI", "category": "IA Usage" }
+    ],
+    "configuration": {
+      "title": "IA Usage",
+      "properties": {
+        "iaUsage.cliPath": { "type": "string", "default": "", "description": "Absolute path to iausage.exe. Empty uses PATH." },
+        "iaUsage.providers": { "type": "array", "items": { "type": "string" }, "default": ["anthropic", "openai", "cursor"], "description": "Provider IDs visible in the status bar." },
+        "iaUsage.display": { "type": "string", "enum": ["compact", "full"], "default": "compact", "description": "Status bar label density." },
+        "iaUsage.remotePollSeconds": { "type": "number", "default": 60, "minimum": 15, "description": "Remote fallback polling interval used by iausage watch." }
+      }
+    }
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20",
+    "package": "npm run check && npm run bundle && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.4",
+    "typescript": "^5.8.3"
+  }
+}

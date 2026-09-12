@@ -40,6 +40,8 @@ spend in one resident tray window, so you know before you hit a wall.
 - Configurable notification thresholds and autostart with Windows.
 - Per-provider connection guide and, where a provider publishes one, direct
   links to its official usage/status page.
+- Event-driven Codex session updates (two-second debounce) with controlled
+  remote polling, plus a VS Code-compatible status-bar companion.
 - Local diagnostics export for bug reports (sanitized — no tokens, no keys).
 - API keys are stored in Windows Credential Manager, never in plain
   `config.toml`. No telemetry.
@@ -159,8 +161,14 @@ Only items with an approved design so far:
 - Expanding the provider-links registry (usage/billing/status pages) as
   more official URLs are verified.
 
-Longer-term ideas (companion apps, sync) exist only as an unbuilt
-architecture sketch in `docs/superpowers/specs/` — not a commitment.
+The Android companion is implemented in [`android/`](android/README.md): it
+pairs over the local encrypted sync protocol, keeps an encrypted offline
+snapshot and includes a home-screen widget. Remote relay sync is intentionally
+not part of this local-first release.
+
+The VS Code companion lives in
+[`apps/vscode-extension/`](apps/vscode-extension/README.md). It is a visual
+client of `iausage watch --jsonl`, never a second provider collector.
 
 ## Contributing
 

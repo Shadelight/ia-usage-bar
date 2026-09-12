@@ -24,6 +24,7 @@ pub mod refresh_policy;
 pub mod snapshot_v1;
 pub mod sync;
 pub mod sync_server;
+pub mod watch;
 
 /// Versión del contrato `DashboardSnapshotV1` que emite `--json` y la GUI.
 pub const SNAPSHOT_SCHEMA_VERSION: u32 = 1;

@@ -18,7 +18,7 @@ use iausage_core::descriptor::{descriptor, FetchStrategyKind};
 use iausage_core::doctor;
 use iausage_core::guard;
 use iausage_core::model::{most_headroom, now_iso, ProviderSnapshot, VendorId};
-use iausage_core::{providers, snapshot_v1, sync};
+use iausage_core::{providers, snapshot_v1, sync, watch};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -32,6 +32,7 @@ fn usage_help() -> String {
           iausage best [--json]\n  \
           iausage doctor [provider] [--json]\n  \
           iausage refresh [--provider ID]\n  \
+          iausage watch --jsonl [--poll-seconds N]\n  \
           iausage guard --provider ID [--window W] [--min-remaining N]\n  \
           iausage enable <provider> | iausage disable <provider>\n  \
             iausage config validate\n  \
@@ -295,6 +296,69 @@ fn cmd_refresh(args: &[String]) -> ExitCode {
         Err(e) => eprintln!("aviso sync: {e}"),
     }
     ExitCode::SUCCESS
+}
+
+/// Stream persistente para clientes visuales. Cada línea es JSON independiente
+/// y contiene el contrato V1 completo para que los clientes nunca necesiten
+/// replicar parsers de proveedores.
+fn cmd_watch(args: &[String]) -> ExitCode {
+    let mut jsonl = false;
+    let mut poll_seconds = 60u64;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--jsonl" => jsonl = true,
+            "--poll-seconds" => {
+                i += 1;
+                poll_seconds = match args.get(i).and_then(|value| value.parse().ok()) {
+                    Some(seconds) if seconds >= 15 => seconds,
+                    _ => return fail("watch: --poll-seconds debe ser al menos 15"),
+                };
+            }
+            other => return fail(&format!("watch: argumento desconocido {other}")),
+        }
+        i += 1;
+    }
+    if !jsonl {
+        return fail("watch: requiere --jsonl para mantener stdout como protocolo estable");
+    }
+    let root = watch::codex_sessions_dir();
+    if !root.is_dir() {
+        return fail(&format!("watch: no existe el directorio de sesiones Codex ({})", root.display()));
+    }
+
+    let (cfg, mut snapshots) = load_state(false, None);
+    emit_watch_snapshot("initial", &cfg, &snapshots);
+    match watch::run_codex_session_watch(
+        &root,
+        watch::DEFAULT_DEBOUNCE,
+        std::time::Duration::from_secs(poll_seconds),
+        |tick| match tick {
+            watch::WatchTick::CodexSessionChanged => {
+                if let Some(snapshot) = iausage_core::providers::codex_snapshot_from_sessions() {
+                    let _ = iausage_core::cache::save_valid(&snapshot);
+                    snapshots.insert(snapshot.id.clone(), snapshot);
+                    emit_watch_snapshot("codex-session", &cfg, &snapshots);
+                }
+            }
+            watch::WatchTick::RemotePoll => {
+                let (fresh_cfg, fresh) = load_state(true, None);
+                snapshots = fresh;
+                emit_watch_snapshot("remote-poll", &fresh_cfg, &snapshots);
+            }
+        },
+    ) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("iausage: watch: {error}");
+            ExitCode::from(guard::EXIT_UNAVAILABLE as u8)
+        }
+    }
+}
+
+fn emit_watch_snapshot(source: &str, cfg: &AppConfig, snapshots: &HashMap<String, ProviderSnapshot>) {
+    let snapshot: serde_json::Value = serde_json::from_str(&snapshot_v1_json(cfg, snapshots)).unwrap_or_else(|_| serde_json::json!({}));
+    println!("{}", serde_json::json!({ "type": "snapshot", "source": source, "snapshot": snapshot }));
 }
 
 fn cmd_guard(args: &[String]) -> ExitCode {
@@ -721,6 +785,7 @@ fn main() -> ExitCode {
         "best" => cmd_best(&argv[1..]),
         "doctor" => cmd_doctor(&argv[1..]),
         "refresh" => cmd_refresh(&argv[1..]),
+        "watch" => cmd_watch(&argv[1..]),
         "guard" => cmd_guard(&argv[1..]),
         "enable" => cmd_enable(&argv[1..], true),
         "disable" => cmd_enable(&argv[1..], false),

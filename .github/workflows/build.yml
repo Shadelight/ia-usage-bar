@@ -44,3 +44,44 @@ jobs:
 
       - name: Test Tauri backend
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.1.0"
+      - name: Unit tests and debug APK
+        working-directory: android
+        run: gradle :app:testDebugUnitTest :app:assembleDebug
+
+  vscode-extension:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install extension dependencies
+        working-directory: apps/vscode-extension
+        run: npm ci
+      - name: Validate and package VSIX
+        working-directory: apps/vscode-extension
+        run: npm run package
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: ia-usage-vscode-extension
+          path: apps/vscode-extension/*.vsix
