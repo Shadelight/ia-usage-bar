@@ -21,13 +21,13 @@
 </head>
 <body>
 
-<header class="nav">
+<header class="nav" id="site-nav">
   <div class="wrap nav-row">
     <a class="brand" href="#top">
       <img src="./icon.png" alt="">
       IA Usage Bar
     </a>
-    <nav class="nav-links">
+    <nav class="nav-links" aria-label="Primary">
       <a href="#features" data-i18n="navFeatures">Funciones</a>
       <a href="#providers" data-i18n="navProviders">Proveedores</a>
       <a href="#privacy" data-i18n="navPrivacy">Privacidad</a>
@@ -41,6 +41,26 @@
       <button class="icon-btn" data-lang-btn="es">ES</button>
       <button class="icon-btn" data-lang-btn="en">EN</button>
       <a class="btn btn-primary btn-sm" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="navDownload">Descargar</a>
+      <button class="icon-btn menu-btn" data-menu-btn aria-expanded="false" aria-controls="mobile-menu" aria-label="Abrir menú">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+  <div class="mobile-menu" id="mobile-menu">
+    <div class="wrap">
+      <nav class="mobile-links" aria-label="Mobile">
+        <a href="#features" data-i18n="navFeatures">Funciones</a>
+        <a href="#providers" data-i18n="navProviders">Proveedores</a>
+        <a href="#privacy" data-i18n="navPrivacy">Privacidad</a>
+        <a href="https://github.com/Shadelight/ia-usage-bar" data-i18n="navGithub">GitHub</a>
+      </nav>
+      <div class="mobile-actions">
+        <a class="btn btn-primary" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="navDownload">Descargar</a>
+        <div class="mobile-lang">
+          <button class="icon-btn" data-lang-btn="es">ES</button>
+          <button class="icon-btn" data-lang-btn="en">EN</button>
+        </div>
+      </div>
     </div>
   </div>
 </header>

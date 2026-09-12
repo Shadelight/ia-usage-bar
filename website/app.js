@@ -1,5 +1,7 @@
 const COPY = {
   en: {
+    menuOpen: "Open menu",
+    menuClose: "Close menu",
     navFeatures: "Features",
     navProviders: "Providers",
     navPrivacy: "Privacy",
@@ -84,6 +86,8 @@ const COPY = {
     footerNote: "Not affiliated with Anthropic, OpenAI, Cursor, or any listed provider.",
   },
   es: {
+    menuOpen: "Abrir menú",
+    menuClose: "Cerrar menú",
     navFeatures: "Funciones",
     navProviders: "Proveedores",
     navPrivacy: "Privacidad",
@@ -169,12 +173,24 @@ const COPY = {
   },
 };
 
+let currentLang = "es";
+
+function updateMenuLabel() {
+  const btn = document.querySelector("[data-menu-btn]");
+  if (!btn) return;
+  const dict = COPY[currentLang] || COPY.en;
+  const open = btn.getAttribute("aria-expanded") === "true";
+  btn.setAttribute("aria-label", open ? dict.menuClose : dict.menuOpen);
+}
+
 function applyCopy(lang) {
+  currentLang = lang;
   const dict = COPY[lang] || COPY.en;
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     const key = el.getAttribute("data-i18n");
     if (dict[key] !== undefined) el.innerHTML = dict[key];
   });
+  updateMenuLabel();
   document.documentElement.lang = lang;
   document.querySelectorAll("[data-lang-btn]").forEach((btn) => {
     btn.classList.toggle("active", btn.getAttribute("data-lang-btn") === lang);
@@ -219,9 +235,37 @@ function initTheme() {
   }
 }
 
+function initMenu() {
+  const btn = document.querySelector("[data-menu-btn]");
+  const header = document.getElementById("site-nav");
+  const panel = document.getElementById("mobile-menu");
+  if (!btn || !header || !panel) return;
+  const setOpen = (open) => {
+    btn.setAttribute("aria-expanded", String(open));
+    header.classList.toggle("nav-open", open);
+    updateMenuLabel();
+  };
+  btn.addEventListener("click", () => {
+    setOpen(btn.getAttribute("aria-expanded") !== "true");
+  });
+  panel.addEventListener("click", (e) => {
+    if (e.target.closest("a")) setOpen(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") setOpen(false);
+  });
+  document.addEventListener("click", (e) => {
+    if (header.classList.contains("nav-open") && !header.contains(e.target)) setOpen(false);
+  });
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 860) setOpen(false);
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   initLang();
   initTheme();
+  initMenu();
   const yearEl = document.querySelector("[data-year]");
   if (yearEl) yearEl.textContent = String(new Date().getFullYear());
 });

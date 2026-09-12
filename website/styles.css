@@ -383,4 +383,85 @@ footer {
 .footer-links { display: flex; gap: 18px; flex-wrap: wrap; }
 .footer-links a:hover { color: var(--text); }
 
+.icon-btn.active { color: var(--text); border-color: var(--accent); }
+
+/* Anchored sections sit below the sticky header */
+section[id] { scroll-margin-top: 76px; }
+
+/* Hamburger + mobile menu */
+.menu-btn {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 34px;
+  height: 32px;
+  padding: 0;
+}
+.menu-btn span {
+  display: block;
+  width: 16px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+.nav-open .menu-btn span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.nav-open .menu-btn span:nth-child(2) { opacity: 0; }
+.nav-open .menu-btn span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+.mobile-menu { display: none; }
+
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 860px) {
+  .nav-links { display: none; }
+  .nav-actions [data-lang-btn],
+  .nav-actions .btn { display: none; }
+  .menu-btn { display: inline-flex; }
+
+  .nav-open .mobile-menu {
+    display: block;
+    border-top: 1px solid var(--border);
+    animation: menu-in 0.18s ease;
+  }
+  .mobile-links a {
+    display: block;
+    padding: 13px 2px;
+    font-size: 15px;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .mobile-links a:hover { color: var(--accent); }
+  .mobile-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 0 16px;
+  }
+  .mobile-actions .btn { flex: 1; justify-content: center; }
+  .mobile-lang { display: flex; gap: 8px; }
+}
+
+@media (min-width: 861px) {
+  .mobile-menu { display: none !important; }
+}
+
+/* Small phones */
+@media (max-width: 480px) {
+  .hero { padding: 52px 0 30px; }
+  section { padding: 46px 0; }
+  .cta-row .btn { flex: 1 1 100%; justify-content: center; }
+  .callout { flex-direction: column; align-items: flex-start; }
+  .split li { flex-wrap: wrap; row-gap: 2px; }
+  .split li .tag { min-width: 0; }
+  .priv-row { flex-direction: column; gap: 4px; }
+  .priv-row span:last-child { text-align: left; }
+  .final-cta { padding: 52px 0; }
+}
+
 [hidden] { display: none !important; }
