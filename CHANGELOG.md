@@ -4,6 +4,24 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-09-12
+
+### Added
+
+- M6: companion Android con pareo QR, validación de fingerprint, descifrado
+  local del envelope M5, caché protegida por Android Keystore, dashboard,
+  refresco en segundo plano y widget de inicio.
+- `iausage watch --jsonl`: stream persistente de snapshots para clientes
+  visuales. Codex observa cambios de sesión locales con debounce de dos
+  segundos y conserva el polling remoto como respaldo limitado.
+- Extensión IA Usage para VS Code y forks compatibles: barra de estado,
+  tooltip, refresco manual y empaquetado `.vsix` en CI/releases.
+
+### Fixed
+
+- El estado de credenciales se reconcilia después de guardar y validar, sin
+  desincronizar los controles de Ajustes ni ocultar acciones de recuperación.
+
 ## [0.2.2] - 2026-09-12
 
 ### Added
