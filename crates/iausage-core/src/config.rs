@@ -43,6 +43,9 @@ pub struct AppConfig {
     /// dentro del config dir. La passphrase vive en keyring, nunca aquí.
     #[serde(default)]
     pub sync_export_dir: Option<String>,
+    /// Exponer el sync HTTP en LAN (0.0.0.0). Solo con opt-in explícito.
+    #[serde(default)]
+    pub sync_lan: bool,
     /// True when `load()` could not parse `config.toml` and fell back to
     /// defaults after backing the bad file aside. Never persisted; callers
     /// must not overwrite `config.toml` while this is set.
@@ -95,6 +98,7 @@ impl Default for AppConfig {
             compact_mode: false,
             sync_enabled: false,
             sync_export_dir: None,
+            sync_lan: false,
             load_recovered: false,
         }
     }

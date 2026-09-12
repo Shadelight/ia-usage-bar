@@ -177,3 +177,29 @@ export async function invokeCmd<T>(
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
+
+// M5 sync con el tel├®fono (comandos sync_* del backend).
+export interface SyncExportInfo {
+  path: string;
+  bytes: number;
+}
+
+export interface SyncStatusDto {
+  enabled: boolean;
+  deviceId: string;
+  fingerprint: string;
+  exportDir: string;
+  hasPassphrase: boolean;
+  lan: boolean;
+  serverRunning: boolean;
+  serverAddr: string;
+  lastExport: SyncExportInfo | null;
+}
+
+export interface SyncPairingDto {
+  uri: string;
+  fingerprint: string;
+  host: string;
+  port: number;
+  qrPngBase64: string;
+}

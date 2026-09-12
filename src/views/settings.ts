@@ -2,14 +2,14 @@
 // Apariencia/Datos y registros/Acerca de) over the same underlying config.
 
 import { $, escapeHtml, invokeCmd } from "../api";
-import type { Dashboard, ProviderSnapshot, VendorInfo } from "../api";
+import type { Dashboard, ProviderSnapshot, SyncPairingDto, SyncStatusDto, VendorInfo } from "../api";
 import { lang, t } from "../i18n";
 import { providerVisual } from "../providers";
 import { actionIconSvg, getProviderActions } from "../provider-actions";
 import { deriveProviderState, formatStatusText, isKeyInputDisabled } from "../provider-state";
 import { activeItemScrollDelta, horizontalWheelDelta } from "../layout";
 
-export type SettingsCategory = "general" | "providers" | "notifications" | "appearance" | "data" | "about";
+export type SettingsCategory = "general" | "providers" | "notifications" | "appearance" | "data" | "sync" | "about";
 
 // Local UI state that must survive full body re-renders (renderSettings
 // rebuilds innerHTML on every dashboard update).
@@ -30,13 +30,14 @@ export function clearCredentialDraft(id: string): void {
   delete credentialDrafts[id];
 }
 
-const CATEGORIES: SettingsCategory[] = ["general", "providers", "notifications", "appearance", "data", "about"];
+const CATEGORIES: SettingsCategory[] = ["general", "providers", "notifications", "appearance", "data", "sync", "about"];
 const CATEGORY_LABEL: Record<SettingsCategory, string> = {
   general: "settingsGeneral",
   providers: "settingsProviders",
   notifications: "settingsNotifications",
   appearance: "settingsAppearance",
   data: "settingsData",
+  sync: "settingsSync",
   about: "settingsAbout",
 };
 
@@ -259,6 +260,102 @@ function dataBody(): string {
   `;
 }
 
+// --- M5 sync con el teléfono (categoría "sync") ---
+
+let syncCategory: SettingsCategory = "general";
+let syncStatus: SyncStatusDto | null = null;
+let syncPairing: SyncPairingDto | null = null;
+let syncPassphraseDraft = "";
+
+export function setSyncPassphraseDraft(value: string): void {
+  syncPassphraseDraft = value;
+}
+
+export function clearSyncPassphraseDraft(): void {
+  syncPassphraseDraft = "";
+}
+
+export function setSyncPairing(dto: SyncPairingDto | null): void {
+  syncPairing = dto;
+}
+
+function syncStatusRow(label: string, value: string, id: string): string {
+  return `<div class="row"><span>${escapeHtml(label)}</span><strong id="${id}">${escapeHtml(value)}</strong></div>`;
+}
+
+function syncBody(): string {
+  const st = syncStatus;
+  const server = st
+    ? `${st.serverRunning ? t("syncServerRunning") : t("syncServerStopped")}${st.serverRunning ? ` · ${st.serverAddr}` : ""}`
+    : "—";
+  const lastExport = st?.lastExport ? `${st.lastExport.path} (${st.lastExport.bytes} B)` : t("syncNeverExported");
+  return `
+    <p class="lede">${t("syncLede")}</p>
+    ${toggleRow("cfg-sync", t("syncEnable"), st?.enabled ?? false)}
+    ${syncStatusRow(t("syncDevice"), st ? `${st.deviceId} (${st.fingerprint})` : "—", "sync-device")}
+    ${syncStatusRow(t("syncFolder"), st?.exportDir ?? "—", "sync-dir")}
+    ${syncStatusRow(t("syncServer"), server, "sync-server")}
+    ${syncStatusRow(t("syncLastExport"), lastExport, "sync-export")}
+    <label class="key-label" for="sync-pass">${escapeHtml(t("syncPassphrase"))}</label>
+    <div class="key-row">
+      <input id="sync-pass" data-sync-pass type="password"
+        placeholder="${escapeHtml(t("syncPassHint"))}" value="${escapeHtml(syncPassphraseDraft)}"
+        autocomplete="new-password" spellcheck="false" />
+      <button type="button" data-savesyncpass>${escapeHtml(t("syncSavePassphrase"))}</button>
+      ${st?.hasPassphrase ? `<button type="button" class="ghost" data-forgetsyncpass>${escapeHtml(t("syncForgetPassphrase"))}</button>` : ""}
+    </div>
+    ${toggleRow("cfg-sync-lan", t("syncLanExpose"), st?.lan ?? false)}
+    <p class="lede">${t("syncLanHint")}</p>
+    <div class="prov-buttons">
+      <button type="button" data-syncqr>${actionIconSvg("external-link", 12)}<span>${escapeHtml(t("syncShowQr"))}</span></button>
+      <button type="button" data-syncexport>${actionIconSvg("refresh", 12)}<span>${escapeHtml(t("syncExportNow"))}</span></button>
+    </div>
+    <div id="sync-qr" class="sync-qr">${syncPairing ? `
+      <img src="data:image/png;base64,${syncPairing.qrPngBase64}" alt="QR" />
+      <p class="sync-uri">${escapeHtml(syncPairing.uri)}</p>
+      <p class="lede">${escapeHtml(t("syncFingerprint"))}: <strong>${escapeHtml(syncPairing.fingerprint)}</strong></p>
+    ` : ""}</div>
+  `;
+}
+
+/** Trae el estado y parchea los nodos (nunca rebuild: no roba el foco). */
+export async function reloadSyncStatus(): Promise<void> {
+  const st = await invokeCmd<SyncStatusDto>("sync_get_status");
+  if (!st) return;
+  syncStatus = st;
+  const set = (id: string, value: string): void => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  };
+  set("sync-device", `${st.deviceId} (${st.fingerprint})`);
+  set("sync-dir", st.exportDir);
+  set(
+    "sync-server",
+    `${st.serverRunning ? t("syncServerRunning") : t("syncServerStopped")}${st.serverRunning ? ` · ${st.serverAddr}` : ""}`,
+  );
+  set("sync-export", st.lastExport ? `${st.lastExport.path} (${st.lastExport.bytes} B)` : t("syncNeverExported"));
+  const toggle = document.getElementById("cfg-sync") as HTMLInputElement | null;
+  if (toggle && document.activeElement !== toggle) toggle.checked = st.enabled;
+  const lan = document.getElementById("cfg-sync-lan") as HTMLInputElement | null;
+  if (lan && document.activeElement !== lan) lan.checked = st.lan;
+}
+
+/**
+ * Re-render de la categoría sync tras una acción explícita. Si el usuario
+ * está escribiendo la passphrase, solo parchea estado.
+ */
+export function refreshSyncView(): void {
+  if (syncCategory !== "sync") return;
+  const typing = (document.activeElement as HTMLElement | null)?.id === "sync-pass";
+  if (typing && syncPassphraseDraft) {
+    void reloadSyncStatus();
+    return;
+  }
+  const body = document.getElementById("settings-body");
+  if (body) body.innerHTML = syncBody();
+  void reloadSyncStatus();
+}
+
 const REPO_URL = "https://github.com/Shadelight/ia-usage-bar";
 
 function aboutBody(): string {
@@ -328,6 +425,7 @@ async function paintAboutVersion(): Promise<void> {
 
 export function renderSettings(dash: Dashboard | null, category: SettingsCategory = "general"): void {
   if (!dash) return;
+  syncCategory = category;
   const previousCategory = $("settings-cats").querySelector<HTMLElement>(".settings-cat.active")?.dataset.setcat;
   const previousCategoryScroll = $("settings-cats").scrollLeft;
   const previousBodyScroll = $("settings-body").scrollTop;
@@ -342,11 +440,13 @@ export function renderSettings(dash: Dashboard | null, category: SettingsCategor
     : category === "notifications" ? notificationsBody(dash)
     : category === "appearance" ? appearanceBody(dash)
     : category === "data" ? dataBody()
+    : category === "sync" ? syncBody()
     : aboutBody();
   $("settings-body").innerHTML = body;
   $("settings-body").scrollTop = categoryChanged ? 0 : previousBodyScroll;
   wireCategoryScroll(categoryChanged, previousCategoryScroll);
   if (category === "about") void paintAboutVersion();
+  if (category === "sync") void reloadSyncStatus();
 }
 
 export async function persistConfig(dash: Dashboard | null): Promise<void> {

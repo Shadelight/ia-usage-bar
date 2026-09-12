@@ -1,12 +1,12 @@
 import "./styles.css";
 
 import { $, escapeHtml, invokeCmd, isTauri } from "./api";
-import type { Dashboard, ProviderStatus } from "./api";
+import type { Dashboard, ProviderStatus, SyncPairingDto } from "./api";
 import { sanitizeTechnicalDetails, shouldShowRecoveryToast } from "./errors";
 import { setLang, t } from "./i18n";
 import { buildSanitizedDiagnosis, renderDash, updateLoadingClocks, updateResetClocks } from "./views/dash";
 import { actionIconSvg } from "./provider-actions";
-import { checkForUpdates, clearCredentialDraft, focusProviderInSettings, persistConfig, renderSettings, setCredentialDraft, setExpandedProvider, setSavingProvider } from "./views/settings";
+import { checkForUpdates, clearCredentialDraft, clearSyncPassphraseDraft, focusProviderInSettings, persistConfig, refreshSyncView, renderSettings, setCredentialDraft, setExpandedProvider, setSavingProvider, setSyncPairing, setSyncPassphraseDraft } from "./views/settings";
 import type { SettingsCategory } from "./views/settings";
 import { previewDashboard, renderSpend } from "./views/spend";
 
@@ -298,7 +298,7 @@ async function main() {
 
   document.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
-    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url]");
+    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-savesyncpass],[data-forgetsyncpass],[data-syncqr],[data-syncexport]");
     if (!btn) {
       if (!target.closest("#head-menu, #btn-menu")) closeHeadMenu();
       return;
@@ -389,6 +389,43 @@ async function main() {
       renderSettings(dash, settingsCategory);
     }
     if (btn.dataset.openUrl) await openExternal(btn.dataset.openUrl);
+    if (btn.hasAttribute("data-savesyncpass")) {
+      const input = document.getElementById("sync-pass") as HTMLInputElement | null;
+      const passphrase = input?.value || "";
+      const saved = (await invokeCmd("sync_set_passphrase", { passphrase })) !== null;
+      if (saved || !isTauri()) {
+        clearSyncPassphraseDraft();
+        setSyncPairing(null);
+        showToast(t("syncPassphraseSaved"));
+      } else {
+        showCommandError(t("commandFailed"));
+      }
+      if (view === "settings") refreshSyncView();
+    }
+    if (btn.hasAttribute("data-forgetsyncpass")) {
+      const done = (await invokeCmd("sync_set_passphrase", { passphrase: "" })) !== null;
+      if (done || !isTauri()) {
+        clearSyncPassphraseDraft();
+        setSyncPairing(null);
+        showToast(t("syncUpdated"));
+      } else {
+        showCommandError(t("commandFailed"));
+      }
+      if (view === "settings") refreshSyncView();
+    }
+    if (btn.hasAttribute("data-syncqr")) {
+      const lanToggle = document.getElementById("cfg-sync-lan") as HTMLInputElement | null;
+      const pairing = await invokeCmd<SyncPairingDto>("sync_get_pairing", { lan: lanToggle?.checked ?? false });
+      if (pairing) setSyncPairing(pairing);
+      else showCommandError(t("commandFailed"));
+      if (view === "settings") refreshSyncView();
+    }
+    if (btn.hasAttribute("data-syncexport")) {
+      const path = await invokeCmd<string>("sync_export_now");
+      if (path) showToast(`${t("syncExported")} ${path}`);
+      else showCommandError(t("commandFailed"));
+      if (view === "settings") refreshSyncView();
+    }
   });
 
   document.addEventListener("input", (e) => {
@@ -398,6 +435,12 @@ async function main() {
     const el = e.target as HTMLElement;
     const keyInput = (el as HTMLInputElement).dataset?.key;
     if (keyInput && el instanceof HTMLInputElement) setCredentialDraft(keyInput, el.value);
+    if ((el as HTMLInputElement).dataset?.syncPass !== undefined && el instanceof HTMLInputElement) {
+      setSyncPassphraseDraft(el.value);
+    }
+    if ((el as HTMLInputElement).dataset?.syncPass !== undefined && el instanceof HTMLInputElement) {
+      setSyncPassphraseDraft(el.value);
+    }
   });
 
   document.addEventListener("change", async (e) => {
@@ -419,7 +462,19 @@ async function main() {
       if (view === "settings") renderSettings(dash, settingsCategory);
       await invokeCmd("set_provider_enabled", { id, enabled });
     }
-    if (el.id === "cfg-autostart") {
+    if (el.id === "cfg-sync") {
+      const enabled = (el as HTMLInputElement).checked;
+      const ok = (await invokeCmd("sync_set_enabled", { enabled })) !== null;
+      if (!ok && isTauri()) {
+        showCommandError(t("syncNeedPassphrase"));
+      }
+      if (view === "settings") refreshSyncView();
+    } else if (el.id === "cfg-sync-lan") {
+      const lan = (el as HTMLInputElement).checked;
+      const ok = (await invokeCmd("sync_set_lan", { lan })) !== null;
+      if (!ok && isTauri()) showCommandError(t("commandFailed"));
+      if (view === "settings") refreshSyncView();
+    } else if (el.id === "cfg-autostart") {
       const enabled = (el as HTMLInputElement).checked;
       await invokeCmd("set_autostart_enabled", { enabled });
       if (dash) dash.autostart = enabled;
@@ -456,7 +511,7 @@ async function main() {
     const [cmd, arg] = (ev.payload || "").split(":");
     if (cmd === "settings") {
       view = "settings";
-      if (arg === "providers" || arg === "about" || arg === "general" || arg === "data") {
+      if (arg === "providers" || arg === "about" || arg === "general" || arg === "data" || arg === "sync") {
         settingsCategory = arg as SettingsCategory;
         localStorage.setItem("settingsCategory", settingsCategory);
       }

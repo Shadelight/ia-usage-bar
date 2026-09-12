@@ -1000,3 +1000,13 @@ button, input, select { font: inherit; color: inherit; }
 /* Keep every settings tab reachable: discrete horizontal scroll, no cuts. */
 .settings-cats { scroll-padding-inline: 4px; }
 .settings-cat { scroll-margin-inline: 2px; }
+
+/* M5 sync: QR de pareo (fondo claro para que escanee bien) + URI. */
+.sync-qr { margin: 12px 0 4px; text-align: center; }
+.sync-qr:empty { display: none; }
+.sync-qr img {
+  width: 188px; height: 188px; image-rendering: pixelated;
+  background: #fff; padding: 10px; border-radius: 12px;
+  border: 1px solid var(--line);
+}
+.sync-uri { font-size: 11px; color: var(--muted); word-break: break-all; margin: 8px 0 2px; }

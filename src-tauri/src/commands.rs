@@ -143,6 +143,15 @@ pub(crate) fn set_app_config(
             }
         }
     }
+    // El sync se gobierna por sus comandos dedicados; un save general de
+    // Ajustes nunca debe apagarlo ni borrar su carpeta, passphrase aparte
+    // (la passphrase vive en keyring y ningún save la toca).
+    {
+        let current = lock_or_recover(&state.config);
+        incoming.sync_enabled = current.sync_enabled;
+        incoming.sync_export_dir.clone_from(&current.sync_export_dir);
+        incoming.sync_lan = current.sync_lan;
+    }
     incoming.normalize();
     incoming.save()?;
     state
@@ -431,6 +440,175 @@ pub(crate) fn check_for_updates(app: AppHandle) -> Result<UpdateCheck, String> {
         latest,
         url,
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SyncExportInfo {
+    path: String,
+    bytes: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SyncStatus {
+    enabled: bool,
+    device_id: String,
+    fingerprint: String,
+    export_dir: String,
+    has_passphrase: bool,
+    lan: bool,
+    server_running: bool,
+    server_addr: String,
+    last_export: Option<SyncExportInfo>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SyncPairing {
+    uri: String,
+    fingerprint: String,
+    host: String,
+    port: u16,
+    qr_png_base64: String,
+}
+
+fn sync_last_export(cfg: &AppConfig, device_id: &str) -> Option<SyncExportInfo> {
+    let path = crate::sync::resolve_export_dir(cfg).join(format!("{device_id}.json"));
+    let bytes = std::fs::metadata(&path).ok()?.len();
+    Some(SyncExportInfo {
+        path: path.display().to_string(),
+        bytes,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn sync_get_status(
+    _app: AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<SyncStatus, String> {
+    let cfg = lock_or_recover(&state.config).clone();
+    let device_id = crate::sync::load_or_create_device_id()?;
+    let server = lock_or_recover(&state.sync_server);
+    Ok(SyncStatus {
+        enabled: cfg.sync_enabled,
+        fingerprint: crate::sync::pairing_fingerprint(&device_id),
+        device_id: device_id.clone(),
+        export_dir: crate::sync::resolve_export_dir(&cfg).display().to_string(),
+        has_passphrase: crate::sync::has_passphrase(),
+        lan: cfg.sync_lan,
+        server_running: server.running,
+        server_addr: server.addr.clone(),
+        last_export: sync_last_export(&cfg, &device_id),
+    })
+}
+
+#[tauri::command]
+pub(crate) fn sync_set_enabled(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    if enabled && !crate::sync::has_passphrase() {
+        return Err("sync: primero guarda una passphrase".into());
+    }
+    let mut cfg = lock_or_recover(&state.config).clone();
+    cfg.sync_enabled = enabled;
+    cfg.save()?;
+    *lock_or_recover(&state.config) = cfg;
+    crate::sync_service::ensure_sync_server(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn sync_set_passphrase(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+    passphrase: String,
+) -> Result<(), String> {
+    crate::sync::store_passphrase(passphrase.trim())?;
+    if passphrase.trim().is_empty() {
+        // Olvidar la passphrase con sync activo dejar├¡a el servidor cifrando
+        // con una clave que ya no existe: se apaga y se pide reactivar.
+        let mut cfg = lock_or_recover(&state.config).clone();
+        cfg.sync_enabled = false;
+        cfg.save()?;
+        *lock_or_recover(&state.config) = cfg;
+    }
+    crate::sync_service::ensure_sync_server(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn sync_set_export_dir(
+    _app: AppHandle,
+    state: tauri::State<AppState>,
+    dir: String,
+) -> Result<(), String> {
+    let mut cfg = lock_or_recover(&state.config).clone();
+    let trimmed = dir.trim();
+    cfg.sync_export_dir = if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    };
+    cfg.save()?;
+    *lock_or_recover(&state.config) = cfg;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn sync_set_lan(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+    lan: bool,
+) -> Result<(), String> {
+    let mut cfg = lock_or_recover(&state.config).clone();
+    cfg.sync_lan = lan;
+    cfg.save()?;
+    *lock_or_recover(&state.config) = cfg;
+    // Rebind: el bind (loopback vs 0.0.0.0) exige reiniciar el hilo.
+    crate::sync_service::ensure_sync_server(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn sync_get_pairing(lan: bool) -> Result<SyncPairing, String> {
+    let device_id = crate::sync::load_or_create_device_id()?;
+    let host = if lan {
+        crate::sync_server::lan_ip().ok_or_else(|| "sync: sin IP LAN detectable".to_string())?
+    } else {
+        "127.0.0.1".to_string()
+    };
+    let info = crate::sync_server::PairingInfo::new(
+        host.clone(),
+        crate::sync_server::SYNC_DEFAULT_PORT,
+        &device_id,
+    );
+    let uri = info.to_uri();
+    let png = crate::sync_server::pairing_qr_png(&uri, 512)?;
+    use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+    Ok(SyncPairing {
+        uri,
+        fingerprint: info.fingerprint,
+        host,
+        port: info.port,
+        qr_png_base64: B64.encode(&png),
+    })
+}
+
+#[tauri::command]
+pub(crate) fn sync_export_now(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
+    let cfg = lock_or_recover(&state.config).clone();
+    let snaps = lock_or_recover(&state.snapshots).clone();
+    let version = app.package_info().version.to_string();
+    match crate::sync::export_current_snapshot(&cfg, &snaps, Some(version))? {
+        Some(path) => Ok(path.display().to_string()),
+        None => Err("sync desactivado".into()),
+    }
 }
 
 #[cfg(test)]

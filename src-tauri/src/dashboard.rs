@@ -307,6 +307,20 @@ fn refresh_once(app: &AppHandle, only: Option<&str>) {
     *lock_or_recover(&state.last_refresh) = Some(Instant::now());
     state.app_bootstrapping.store(false, Ordering::Release);
     emit_dashboard(app);
+
+    // M5: export best-effort del blob cifrado tras cada refresh completo
+    // (los parciales por provider no reescriben el snapshot entero).
+    if only.is_none() {
+        let cfg = lock_or_recover(&state.config).clone();
+        if cfg.sync_enabled {
+            let snaps = lock_or_recover(&state.snapshots).clone();
+            let version = app.package_info().version.to_string();
+            match crate::sync::export_current_snapshot(&cfg, &snaps, Some(version)) {
+                Ok(_) => {}
+                Err(error) => eprintln!("sync auto-export skipped: {error}"),
+            }
+        }
+    }
 }
 
 fn merge_snapshot(

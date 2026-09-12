@@ -34,6 +34,9 @@ pub(crate) struct AppState {
     /// as a single coalesced rerun when the in-flight refresh finishes.
     pub(crate) rerun_requested: AtomicBool,
     pub(crate) backoff_until: Mutex<HashMap<String, Instant>>,
+    /// Servidor sync M5 (hilo dedicado). Se arranca/reinicia/detiene con
+    /// `sync_service::ensure_sync_server` según la config.
+    pub(crate) sync_server: Mutex<crate::sync_service::SyncServerState>,
 }
 
 pub(crate) struct TrayMenuState {

@@ -7,11 +7,12 @@
 
 pub use iausage_core::{
     cache, config, cost, descriptor, doctor, guard, health, http, jwt, logfile, model, pace,
-    paths, pricing, providers, refresh_policy, snapshot_v1,
+    paths, pricing, providers, refresh_policy, snapshot_v1, sync, sync_server,
 };
 mod commands;
 mod dashboard;
 mod state;
+mod sync_service;
 mod tray;
 
 use std::collections::HashMap;
@@ -97,6 +98,7 @@ pub fn run() {
                 refreshing: AtomicBool::new(false),
                 rerun_requested: AtomicBool::new(false),
                 backoff_until: Mutex::new(HashMap::new()),
+                sync_server: Mutex::new(sync_service::SyncServerState::default()),
             });
 
             let tray_header =
@@ -263,6 +265,9 @@ pub fn run() {
             let h1 = app.handle().clone();
             std::thread::spawn(move || run_loop(h1));
 
+            // Servidor sync M5: solo arranca si está activo en config.
+            sync_service::ensure_sync_server(app.handle());
+
             let h2 = app.handle().clone();
             std::thread::spawn(move || {
                 #[cfg(debug_assertions)]
@@ -317,6 +322,13 @@ pub fn run() {
             commands::clear_logs,
             commands::export_diagnostics,
             commands::check_for_updates,
+            commands::sync_get_status,
+            commands::sync_set_enabled,
+            commands::sync_set_passphrase,
+            commands::sync_set_export_dir,
+            commands::sync_set_lan,
+            commands::sync_get_pairing,
+            commands::sync_export_now,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
