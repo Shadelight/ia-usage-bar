@@ -34,7 +34,14 @@ test("expand toggle queries the real row attribute", () => {
 test("failed enable reverts the checkbox and reports", () => {
   const changeHandler = main.slice(main.indexOf("dataset.enable"));
   assert.match(changeHandler, /showCommandError\(t\("commandFailed"\)\)/);
-  assert.match(changeHandler, /input\.checked = !enabled/);
+  // Model reverts in all variants.
+  assert.match(changeHandler, /vendor\.enabled = !enabled/);
+  // Form reverts either by direct node write or by collapsing + re-render.
+  assert.ok(
+    changeHandler.includes("input.checked = !enabled") ||
+      changeHandler.includes("setExpandedProvider(null)"),
+    "must revert the visible checkbox on backend failure",
+  );
 });
 
 test("failed save/detect report instead of staying silent", () => {
