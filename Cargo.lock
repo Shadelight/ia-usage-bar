@@ -1904,7 +1904,7 @@ dependencies = [
 
 [[package]]
 name = "iausage"
-version = "0.3.0"
+version = "0.2.4"
 dependencies = [
  "iausage-core",
  "serde_json",
@@ -1912,7 +1912,7 @@ dependencies = [
 
 [[package]]
 name = "iausage-core"
-version = "0.3.0"
+version = "0.2.4"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1937,7 +1937,7 @@ dependencies = [
 
 [[package]]
 name = "iausagebar"
-version = "0.3.0"
+version = "0.2.4"
 dependencies = [
  "ab_glyph",
  "base64 0.22.1",
