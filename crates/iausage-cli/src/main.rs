@@ -35,7 +35,7 @@ fn usage_help() -> String {
           iausage guard --provider ID [--window W] [--min-remaining N]\n  \
           iausage enable <provider> | iausage disable <provider>\n  \
             iausage config validate\n  \
-            iausage sync <export|verify|status|set-passphrase|enable|disable>\n  \
+            iausage sync <export|verify|status|set-passphrase|enable|disable|serve|qr>\n  \
             iausage version\n\
         \n\
         --json emite DashboardSnapshotV1 (schemaVersion 1), el mismo contrato\n\
@@ -399,7 +399,7 @@ fn cmd_enable(args: &[String], enabled: bool) -> ExitCode {
 fn cmd_sync(args: &[String]) -> ExitCode {
     let Some((sub, rest)) = args.split_first() else {
         return fail(
-            "sync: uso `iausage sync <export|verify|status|set-passphrase|enable|disable>`",
+            "sync: uso `iausage sync <export|verify|status|set-passphrase|enable|disable|serve|qr>`",
         );
     };
     match sub.as_str() {
@@ -409,6 +409,8 @@ fn cmd_sync(args: &[String]) -> ExitCode {
         "set-passphrase" => cmd_sync_set_passphrase(rest),
         "enable" => cmd_sync_enable(rest, true),
         "disable" => cmd_sync_enable(rest, false),
+        "serve" => cmd_sync_serve(rest),
+        "qr" => cmd_sync_qr(rest),
         s => fail(&format!("sync: subcomando desconocido {s}")),
     }
 }
@@ -563,6 +565,148 @@ fn cmd_sync_enable(args: &[String], enabled: bool) -> ExitCode {
             ExitCode::from(guard::EXIT_UNAVAILABLE as u8)
         }
     }
+}
+
+fn cmd_sync_serve(args: &[String]) -> ExitCode {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    let mut port = iausage_core::sync_server::SYNC_DEFAULT_PORT;
+    let mut lan = false;
+    let mut refresh = false;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--port" => {
+                i += 1;
+                match args.get(i).and_then(|s| s.parse::<u16>().ok()) {
+                    Some(p) => port = p,
+                    None => return fail("sync serve: --port debe ser 1–65535"),
+                }
+            }
+            "--lan" => lan = true,
+            "--refresh" => refresh = true,
+            s => return fail(&format!("sync serve: argumento desconocido {s}")),
+        }
+        i += 1;
+    }
+    let passphrase = match sync::load_passphrase() {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("iausage: sin passphrase guardada; usa `iausage sync set-passphrase`.");
+            return ExitCode::from(guard::EXIT_UNAVAILABLE as u8);
+        }
+    };
+    let device_id = match sync::load_or_create_device_id() {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("iausage: {e}");
+            return ExitCode::from(guard::EXIT_UNAVAILABLE as u8);
+        }
+    };
+    // Foto fija al arrancar: el CLI no re-consulta providers por petición.
+    let (cfg, snaps) = load_state(refresh, None);
+    let catalog = providers::catalog(&cfg);
+    let snapshot = snapshot_v1::build(&snaps, &catalog, now_iso(), Some(VERSION.into()));
+    let payload = sync::build_payload(device_id.clone(), now_iso(), snapshot);
+    let serve_cfg = if lan {
+        iausage_core::sync_server::ServeConfig {
+            bind: "0.0.0.0".into(),
+            port,
+            lan: true,
+        }
+    } else {
+        iausage_core::sync_server::ServeConfig::loopback(port)
+    };
+    println!(
+        "sync sirviendo en {} (Ctrl+C para parar).",
+        serve_cfg.addr()
+    );
+    let supplier: iausage_core::sync_server::PayloadFn = Arc::new(move || Ok(payload.clone()));
+    let stop = Arc::new(AtomicBool::new(false));
+    match iausage_core::sync_server::run_server(
+        &serve_cfg,
+        VERSION,
+        &device_id,
+        supplier,
+        &passphrase,
+        stop,
+    ) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("iausage: {e}");
+            ExitCode::from(guard::EXIT_UNAVAILABLE as u8)
+        }
+    }
+}
+
+fn cmd_sync_qr(args: &[String]) -> ExitCode {
+    let mut lan = false;
+    let mut port = iausage_core::sync_server::SYNC_DEFAULT_PORT;
+    let mut out: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--lan" => lan = true,
+            "--port" => {
+                i += 1;
+                match args.get(i).and_then(|s| s.parse::<u16>().ok()) {
+                    Some(p) => port = p,
+                    None => return fail("sync qr: --port debe ser 1–65535"),
+                }
+            }
+            "--out" => {
+                i += 1;
+                out = args.get(i).cloned();
+                if out.is_none() {
+                    return fail("sync qr: falta valor para --out");
+                }
+            }
+            s => return fail(&format!("sync qr: argumento desconocido {s}")),
+        }
+        i += 1;
+    }
+    let device_id = match sync::load_or_create_device_id() {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("iausage: {e}");
+            return ExitCode::from(guard::EXIT_UNAVAILABLE as u8);
+        }
+    };
+    let host = if lan {
+        match iausage_core::sync_server::lan_ip() {
+            Some(ip) => ip,
+            None => {
+                eprintln!("iausage: sin IP LAN detectable en este equipo.");
+                return ExitCode::from(guard::EXIT_UNAVAILABLE as u8);
+            }
+        }
+    } else {
+        eprintln!("aviso: sin --lan el QR apunta a 127.0.0.1 (inútil para el teléfono).");
+        "127.0.0.1".to_string()
+    };
+    let info = iausage_core::sync_server::PairingInfo::new(host, port, &device_id);
+    let uri = info.to_uri();
+    let path = out.unwrap_or_else(|| "pairing-qr.png".to_string());
+    match iausage_core::sync_server::pairing_qr_png(&uri, 512) {
+        Ok(png) => {
+            if let Err(e) = std::fs::write(&path, &png) {
+                eprintln!("iausage: no se pudo escribir {path}: {e}");
+                return ExitCode::from(guard::EXIT_UNAVAILABLE as u8);
+            }
+        }
+        Err(e) => {
+            eprintln!("iausage: {e}");
+            return ExitCode::from(guard::EXIT_UNAVAILABLE as u8);
+        }
+    }
+    println!("QR guardado en {path}");
+    println!("URI: {uri}");
+    println!(
+        "fingerprint: {} (verifícalo en el teléfono)",
+        info.fingerprint
+    );
+    ExitCode::SUCCESS
 }
 
 fn main() -> ExitCode {
