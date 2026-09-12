@@ -1,21 +1,34 @@
 package com.shadelight.iausage.data
 
-import android.net.Uri
 import java.security.MessageDigest
+import java.net.URI
+import java.net.URLDecoder
 
 object PairingUri {
     private const val PREFIX = "iausage://pair"
     private const val CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
     fun parse(raw: String): PairingInfo {
-        val uri = Uri.parse(raw.trim())
-        require("iausage" == uri.scheme && "pair" == uri.host && raw.startsWith(PREFIX)) { "El QR no es un enlace de IA Usage." }
-        require(uri.getQueryParameter("v") == "1") { "La versión del QR no es compatible." }
-        val host = uri.getQueryParameter("host")?.trim().orEmpty()
-        val port = uri.getQueryParameter("port")?.toIntOrNull()
-        val device = uri.getQueryParameter("device")?.trim().orEmpty()
-        val fingerprint = uri.getQueryParameter("fp")?.trim().orEmpty()
-        val minApp = uri.getQueryParameter("minApp")?.trim().orEmpty()
+        val trimmed = raw.trim()
+        val uri = runCatching { URI(trimmed) }.getOrElse { throw IllegalArgumentException("El QR no es un enlace de IA Usage.") }
+        require("iausage" == uri.scheme && "pair" == uri.host && trimmed.startsWith(PREFIX)) { "El QR no es un enlace de IA Usage." }
+        val query = uri.rawQuery.orEmpty()
+            .split('&')
+            .mapNotNull { entry ->
+                val separator = entry.indexOf('=')
+                if (separator <= 0) null else {
+                    val key = URLDecoder.decode(entry.substring(0, separator), "UTF-8")
+                    val value = URLDecoder.decode(entry.substring(separator + 1), "UTF-8")
+                    key to value
+                }
+            }
+            .toMap()
+        require(query["v"] == "1") { "La versión del QR no es compatible." }
+        val host = query["host"]?.trim().orEmpty()
+        val port = query["port"]?.toIntOrNull()
+        val device = query["device"]?.trim().orEmpty()
+        val fingerprint = query["fp"]?.trim().orEmpty()
+        val minApp = query["minApp"]?.trim().orEmpty()
         require(host.isNotEmpty() && !host.equals("localhost", true) && host != "127.0.0.1") { "El QR no contiene una dirección LAN válida." }
         require(port != null && port in 1..65535) { "El puerto del QR no es válido." }
         require(device.matches(Regex("[0-9a-fA-F]{16,128}"))) { "El identificador del PC no es válido." }
