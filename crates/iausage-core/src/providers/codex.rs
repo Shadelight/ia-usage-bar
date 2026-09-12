@@ -210,18 +210,11 @@ fn write_back_at(path: &Path, auth: &Auth) -> Result<(), FetchError> {
     root["tokens"] = tokens;
     let bytes = serde_json::to_vec_pretty(&root)
         .map_err(|e| FetchError::Parse(format!("serializar auth.json: {e}")))?;
-    write_atomic(path, &bytes)
-}
-
-/// Write `bytes` to `path` via a sibling temp file + rename, so a crash or a
-/// concurrent write can never leave `path` truncated or half-written.
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), FetchError> {
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, bytes).map_err(|e| FetchError::Network(format!("escritura: {e}")))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        FetchError::Network(format!("rename: {e}"))
-    })
+    // `rename(temp, existing)` does not replace the target on Windows. Reuse
+    // the config writer's backup-and-replace algorithm so a refreshed OAuth
+    // token survives there without truncating or failing on an existing file.
+    crate::config::atomic_write(path, &bytes)
+        .map_err(|e| FetchError::Network(format!("escritura auth.json: {e}")))
 }
 
 fn fetch_usage(auth: &Auth) -> Result<Value, FetchError> {
@@ -410,10 +403,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // F-H1: a failed write must return Err and must not leave a partial or
-    // truncated file behind.
     #[test]
-    fn write_back_into_missing_dir_errs_without_partial_file() {
+    fn write_back_replaces_an_existing_auth_file() {
+        let dir = scratch_dir("replace-existing");
+        let path = dir.join("auth.json");
+        std::fs::write(&path, r#"{"tokens":{"access_token":"old","refresh_token":"old"}}"#).unwrap();
+        let auth = Auth {
+            access_token: "new-access".into(),
+            refresh_token: "new-refresh".into(),
+            id_token: String::new(),
+            account_id: None,
+            expires_at: None,
+            extra: serde_json::Map::new(),
+            tokens_extra: serde_json::Map::new(),
+        };
+        write_back_at(&path, &auth).expect("replace existing auth.json");
+        let body: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(body["tokens"]["access_token"], "new-access");
+        assert_eq!(body["tokens"]["refresh_token"], "new-refresh");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // The shared atomic writer creates the credential directory when Codex
+    // has not written auth.json yet.
+    #[test]
+    fn write_back_creates_missing_directory_without_partial_file() {
         let path = std::env::temp_dir()
             .join(format!("codex-test-{}-nodir", std::process::id()))
             .join("nested")
@@ -429,9 +444,10 @@ mod tests {
             extra: serde_json::Map::new(),
             tokens_extra: serde_json::Map::new(),
         };
-        assert!(write_back_at(&path, &auth).is_err());
-        assert!(!path.exists());
+        write_back_at(&path, &auth).expect("write into a new Codex directory");
+        assert!(path.exists());
         assert!(!path.with_extension("json.tmp").exists());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
     }
 
     #[test]

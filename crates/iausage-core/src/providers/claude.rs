@@ -178,15 +178,19 @@ fn fetch_usage(token: &str) -> Result<Value, FetchError> {
 
 pub fn snapshot_from_json(plan: &str, body: &Value) -> ProviderSnapshot {
     let mut lines = Vec::new();
-    if let Some(w) = body.get("five_hour") {
-        let util = json_f64(w, &["utilization"]).unwrap_or(0.0);
+    if let Some((w, util)) = body
+        .get("five_hour")
+        .and_then(|value| json_f64(value, &["utilization"]).map(|util| (value, util)))
+    {
         let reset = json_str(w, &["resets_at"]);
         lines.push(progress_pct(
             "session", "Sesión", util, reset, 18_000, "always",
         ));
     }
-    if let Some(w) = body.get("seven_day") {
-        let util = json_f64(w, &["utilization"]).unwrap_or(0.0);
+    if let Some((w, util)) = body
+        .get("seven_day")
+        .and_then(|value| json_f64(value, &["utilization"]).map(|util| (value, util)))
+    {
         let reset = json_str(w, &["resets_at"]);
         lines.push(progress_pct(
             "weekly", "Semanal", util, reset, 604_800, "always",
@@ -217,7 +221,9 @@ pub fn snapshot_from_json(plan: &str, body: &Value) -> ProviderSnapshot {
                 .pointer("/scope/model/display_name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Modelo");
-            let util = json_f64(item, &["utilization"]).unwrap_or(0.0);
+            let Some(util) = json_f64(item, &["utilization"]) else {
+                continue;
+            };
             let reset = json_str(item, &["resets_at"]);
             lines.push(progress_pct(
                 &format!("scoped_{}", label.to_ascii_lowercase()),
@@ -230,31 +236,16 @@ pub fn snapshot_from_json(plan: &str, body: &Value) -> ProviderSnapshot {
         }
     }
     if let Some(ex) = body.get("extra_usage") {
-        let used = json_f64(
+        if let Some((used, limit)) = json_f64(
             ex,
-            &[
-                "used_credits",
-                "used_usd",
-                "used",
-                "spent",
-                "amount",
-                "current",
-            ],
+            &["used_credits", "used_usd", "used", "spent", "amount", "current"],
         )
-        .unwrap_or(0.0);
-        let limit = json_f64(
+        .zip(json_f64(
             ex,
-            &[
-                "monthly_limit",
-                "limit_usd",
-                "limit",
-                "cap",
-                "max",
-                "budget",
-            ],
-        )
-        .unwrap_or(0.0);
-        if limit > 0.0 {
+            &["monthly_limit", "limit_usd", "limit", "cap", "max", "budget"],
+        ))
+        .filter(|(_, limit)| *limit > 0.0)
+        {
             let pct = json_f64(ex, &["utilization"]).unwrap_or((used / limit) * 100.0);
             lines.push(progress_pct(
                 "extra",
@@ -497,5 +488,14 @@ mod tests {
             .quotas
             .iter()
             .any(|quota| quota.id == "sonnet" || quota.id == "opus"));
+    }
+
+    #[test]
+    fn missing_utilization_does_not_become_zero_percent() {
+        let snapshot = snapshot_from_json(
+            "Pro",
+            &serde_json::json!({"five_hour": {"resets_at": "2099-01-01T00:00:00Z"}}),
+        );
+        assert!(snapshot.quotas.is_empty());
     }
 }

@@ -281,20 +281,14 @@ pub fn snapshot_from_json(body: &Value) -> ProviderSnapshot {
         .or_else(|| list.first());
     let mut lines = Vec::new();
     if let Some(row) = credit {
-        let used = row
-            .get("currentUsageWithPrecision")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
-        let limit = row
-            .get("usageLimitWithPrecision")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
+        let used = row.get("currentUsageWithPrecision").and_then(|v| v.as_f64());
+        let limit = row.get("usageLimitWithPrecision").and_then(|v| v.as_f64());
         let reset = body
             .get("nextDateReset")
             .and_then(|v| v.as_f64())
             .map(|secs| resets_from_unix(secs as i64).0)
             .flatten();
-        if limit > 0.0 {
+        if let Some((used, limit)) = used.zip(limit).filter(|(_, limit)| *limit > 0.0) {
             lines.push(progress_pct(
                 "credits",
                 "Créditos",
@@ -304,12 +298,14 @@ pub fn snapshot_from_json(body: &Value) -> ProviderSnapshot {
                 "always",
             ));
         }
-        lines.push(values_line(
-            "credit_n",
-            "Uso",
-            &format!("{used:.1} / {limit:.0}"),
-            "always",
-        ));
+        if let Some((used, limit)) = used.zip(limit) {
+            lines.push(values_line(
+                "credit_n",
+                "Uso",
+                &format!("{used:.1} / {limit:.0}"),
+                "always",
+            ));
+        }
     }
     snapshot_ok(VendorId::Kiro, plan, lines)
 }

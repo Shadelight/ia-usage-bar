@@ -18,6 +18,11 @@ const previousStatuses = new Map<string, ProviderStatus>();
 let toastTimer: number | undefined;
 const uiStarted = performance.now();
 let refreshWhenFocused: string | null = null;
+// Dashboard events are asynchronous and can describe the state from before a
+// command finished. Keep local intent authoritative until Rust accepts or
+// rejects it, without ever replacing the control the user is touching.
+const pendingProviderEnabled = new Map<string, boolean>();
+const pendingSourcePreferences = new Map<string, string | null>();
 
 type AppTheme = "system" | "light" | "dark";
 
@@ -137,6 +142,13 @@ function paintDash() {
 
 async function applyDashboard(d: Dashboard) {
   const compactChanged = dash?.compactMode !== d.compactMode;
+  for (const vendor of d.catalog) {
+    const enabled = pendingProviderEnabled.get(vendor.id);
+    if (enabled !== undefined) vendor.enabled = enabled;
+    if (pendingSourcePreferences.has(vendor.id)) {
+      vendor.sourcePreference = pendingSourcePreferences.get(vendor.id) ?? null;
+    }
+  }
   watchRecoveries(d);
   dash = d;
   if (view === "settings") {
@@ -217,13 +229,37 @@ async function handleAction(act: string) {
       }
       break;
     case "refresh":
-      await invokeCmd("refresh_now");
+      // The command starts background work, so make that work visible before
+      // its first dashboard event reaches the webview.
+      document.querySelectorAll<HTMLButtonElement>('[data-act="refresh"]').forEach((button) => {
+        button.disabled = true;
+        button.classList.add("is-refreshing");
+        button.setAttribute("aria-busy", "true");
+      });
+      $("updated").textContent = t("updating");
+      if (!(await invokeCmd("refresh_now")).ok && isTauri()) {
+        document.querySelectorAll<HTMLButtonElement>('[data-act="refresh"]').forEach((button) => {
+          button.disabled = false;
+          button.classList.remove("is-refreshing");
+          button.removeAttribute("aria-busy");
+        });
+      }
       break;
     case "detect":
       await invokeCmd("detect_providers");
       break;
     case "settings":
       view = "settings";
+      renderSettings(dash, settingsCategory);
+      paintDash();
+      break;
+    case "manage-providers":
+      // The provider catalog is intentionally curated by VendorId::all();
+      // “Add” means enable one of those supported integrations, rather than
+      // pretending that an arbitrary custom provider can be queried.
+      view = "settings";
+      settingsCategory = "providers";
+      localStorage.setItem("settingsCategory", settingsCategory);
       renderSettings(dash, settingsCategory);
       paintDash();
       break;
@@ -307,6 +343,12 @@ async function main() {
       focusProviderInSettings(providerId);
       return;
     }
+    if (btn.dataset.act === "provider-login" && btn.dataset.providerId) {
+      const result = await invokeCmd("start_provider_login", { id: btn.dataset.providerId });
+      if (result.ok) showToast(t("loginStarted"));
+      else showCommandError(result.error ?? t("commandFailed"));
+      return;
+    }
     if (btn.dataset.act === "copy-provider-diagnosis") {
       const providerId = btn.dataset.providerId || selectedId;
       const snapshot = dash?.providers.find((p) => p.id === providerId);
@@ -341,7 +383,7 @@ async function main() {
       setCredentialDraft(id, input?.value || "");
       setSavingProvider(id);
       renderSettings(dash, settingsCategory);
-      const saved = (await invokeCmd("save_api_key", { id, key: input?.value || "" })) !== null;
+      const saved = (await invokeCmd("save_api_key", { id, key: input?.value || "" })).ok;
       setSavingProvider(null);
       // On success the secret stays server-side only: drop the draft so the
       // input renders empty with a "saved" badge. On failure keep the draft
@@ -352,7 +394,7 @@ async function main() {
     }
     if (btn.dataset.delkey) {
       const id = btn.dataset.delkey;
-      const deleted = (await invokeCmd("delete_api_key", { id })) !== null;
+      const deleted = (await invokeCmd("delete_api_key", { id })).ok;
       if (deleted || !isTauri()) {
         clearCredentialDraft(id);
         if (view === "settings") renderSettings(dash, settingsCategory);
@@ -370,7 +412,7 @@ async function main() {
       if (view === "settings") renderSettings(dash, settingsCategory);
     }
     if (btn.hasAttribute("data-detect")) {
-      const ok = (await invokeCmd("detect_providers")) !== null;
+      const ok = (await invokeCmd("detect_providers")).ok;
       if (!ok && isTauri()) showCommandError(t("commandFailed"));
     }
     if (btn.dataset.refreshProvider) {
@@ -393,7 +435,7 @@ async function main() {
     if (btn.hasAttribute("data-savesyncpass")) {
       const input = document.getElementById("sync-pass") as HTMLInputElement | null;
       const passphrase = input?.value || "";
-      const saved = (await invokeCmd("sync_set_passphrase", { passphrase })) !== null;
+      const saved = (await invokeCmd("sync_set_passphrase", { passphrase })).ok;
       if (saved || !isTauri()) {
         clearSyncPassphraseDraft();
         setSyncPairing(null);
@@ -404,7 +446,7 @@ async function main() {
       if (view === "settings") refreshSyncView();
     }
     if (btn.hasAttribute("data-forgetsyncpass")) {
-      const done = (await invokeCmd("sync_set_passphrase", { passphrase: "" })) !== null;
+      const done = (await invokeCmd("sync_set_passphrase", { passphrase: "" })).ok;
       if (done || !isTauri()) {
         clearSyncPassphraseDraft();
         setSyncPairing(null);
@@ -417,13 +459,13 @@ async function main() {
     if (btn.hasAttribute("data-syncqr")) {
       const lanToggle = document.getElementById("cfg-sync-lan") as HTMLInputElement | null;
       const pairing = await invokeCmd<SyncPairingDto>("sync_get_pairing", { lan: lanToggle?.checked ?? false });
-      if (pairing) setSyncPairing(pairing);
+      if (pairing.ok) setSyncPairing(pairing.value);
       else showCommandError(t("commandFailed"));
       if (view === "settings") refreshSyncView();
     }
     if (btn.hasAttribute("data-syncexport")) {
       const path = await invokeCmd<string>("sync_export_now");
-      if (path) showToast(`${t("syncExported")} ${path}`);
+      if (path.ok) showToast(`${t("syncExported")} ${path.value}`);
       else showCommandError(t("commandFailed"));
       if (view === "settings") refreshSyncView();
     }
@@ -450,9 +492,21 @@ async function main() {
   document.addEventListener("change", async (e) => {
     const el = e.target as HTMLElement;
     if ((el as HTMLSelectElement).dataset.source) {
-      const id = (el as HTMLSelectElement).dataset.source!;
-      const source = (el as HTMLSelectElement).value;
-      await invokeCmd("set_source_preference", { id, source });
+      const input = el as HTMLSelectElement;
+      const id = input.dataset.source!;
+      const source = input.value;
+      const vendor = dash?.catalog.find((item) => item.id === id);
+      const previous = vendor?.sourcePreference ?? null;
+      const preference = source === "auto" ? null : source;
+      pendingSourcePreferences.set(id, preference);
+      if (vendor) vendor.sourcePreference = preference;
+      const ok = (await invokeCmd("set_source_preference", { id, source })).ok;
+      pendingSourcePreferences.delete(id);
+      if (!ok && isTauri()) {
+        if (vendor) vendor.sourcePreference = previous;
+        input.value = previous ?? "auto";
+        showCommandError(t("commandFailed"));
+      }
       return;
     }
     if ((el as HTMLInputElement).dataset.enable) {
@@ -462,10 +516,12 @@ async function main() {
       // Optimistic local update: the new row (with an immediately editable
       // input) paints without waiting for the backend round-trip.
       const vendor = dash?.catalog.find((v) => v.id === id);
+      pendingProviderEnabled.set(id, enabled);
       if (vendor) vendor.enabled = enabled;
       // Preserve the checkbox node that was just changed. The next dashboard
       // event patches status text only; it never replaces this form.
-      const ok = (await invokeCmd("set_provider_enabled", { id, enabled })) !== null;
+      const ok = (await invokeCmd("set_provider_enabled", { id, enabled })).ok;
+      pendingProviderEnabled.delete(id);
       if (!ok && isTauri()) {
         // Backend rejected: revert model AND node so the UI never lies checked.
         if (vendor) vendor.enabled = !enabled;
@@ -475,14 +531,14 @@ async function main() {
     }
     if (el.id === "cfg-sync") {
       const enabled = (el as HTMLInputElement).checked;
-      const ok = (await invokeCmd("sync_set_enabled", { enabled })) !== null;
+      const ok = (await invokeCmd("sync_set_enabled", { enabled })).ok;
       if (!ok && isTauri()) {
         showCommandError(t("syncNeedPassphrase"));
       }
       if (view === "settings") refreshSyncView();
     } else if (el.id === "cfg-sync-lan") {
       const lan = (el as HTMLInputElement).checked;
-      const ok = (await invokeCmd("sync_set_lan", { lan })) !== null;
+      const ok = (await invokeCmd("sync_set_lan", { lan })).ok;
       if (!ok && isTauri()) showCommandError(t("commandFailed"));
       if (view === "settings") refreshSyncView();
     } else if (el.id === "cfg-autostart") {
@@ -536,7 +592,7 @@ async function main() {
   window.setInterval(updateLoadingClocks, 1_000);
 
   const d = await invokeCmd<Dashboard>("get_dashboard");
-  if (d) await applyDashboard(d);
+  if (d.ok) await applyDashboard(d.value);
   else renderBootstrapError();
 }
 

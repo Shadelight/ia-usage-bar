@@ -186,7 +186,9 @@ impl VendorId {
             VendorId::Cursor => "Abre Cursor e inicia sesión.",
             VendorId::Antigravity => "Abre Antigravity e inicia sesión.",
             VendorId::Copilot => "Ejecuta `gh auth login --web` o define GITHUB_COPILOT_TOKEN.",
-            VendorId::OpenaiAdmin => "Pega una Admin API key de platform.openai.com (mide gasto de la organización).",
+            VendorId::OpenaiAdmin => {
+                "Pega una Admin API key de platform.openai.com (mide gasto de la organización)."
+            }
             VendorId::Kiro => "Ejecuta `kiro-cli login`.",
             VendorId::Supergrok => "Ejecuta `grok login`.",
             VendorId::CommandCode => "Inicia sesión con `commandcode` o pi.",
@@ -210,7 +212,10 @@ impl VendorId {
                 usage_url: Some("https://claude.ai/settings/usage".into()),
                 billing_url: Some("https://claude.ai/settings/billing".into()),
                 status_url: Some("https://status.anthropic.com".into()),
-                docs_url: Some("https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview".into()),
+                docs_url: Some(
+                    "https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview"
+                        .into(),
+                ),
                 app_url: Some("https://claude.ai".into()),
             },
             VendorId::AnthropicApi => VendorLinks {
@@ -229,7 +234,9 @@ impl VendorId {
             },
             VendorId::OpenaiAdmin => VendorLinks {
                 usage_url: Some("https://platform.openai.com/usage".into()),
-                billing_url: Some("https://platform.openai.com/settings/organization/billing".into()),
+                billing_url: Some(
+                    "https://platform.openai.com/settings/organization/billing".into(),
+                ),
                 status_url: Some("https://status.openai.com".into()),
                 docs_url: Some("https://platform.openai.com/docs".into()),
                 app_url: Some("https://platform.openai.com".into()),
@@ -284,7 +291,9 @@ impl VendorId {
                 app_url: None,
             },
             VendorId::Minimax => VendorLinks {
-                usage_url: Some("https://platform.minimaxi.com/user-center/basic-information".into()),
+                usage_url: Some(
+                    "https://platform.minimaxi.com/user-center/basic-information".into(),
+                ),
                 billing_url: None,
                 status_url: None,
                 docs_url: Some("https://platform.minimaxi.com/document/guides".into()),
@@ -559,6 +568,11 @@ pub struct ProviderUsage {
     pub stale: bool,
     pub error: Option<String>,
     pub hint: Option<String>,
+    /// Most recent refresh attempt, successful or not. `updated_at` remains
+    /// the timestamp of the last valid data, so stale cache is never passed
+    /// off as a successful refresh.
+    #[serde(default)]
+    pub last_attempt_at: Option<String>,
     pub updated_at: String,
     pub quotas: Vec<UsageQuota>,
     pub credits: Option<CreditsSummary>,
@@ -577,6 +591,16 @@ impl ProviderUsage {
         self.stale = true;
         for quota in &mut self.quotas {
             quota.stale = true;
+        }
+    }
+
+    /// Records the transport that actually produced this snapshot. This must
+    /// be changed together with quota sources; otherwise the detail view and
+    /// individual quota rows would contradict each other after a fallback.
+    pub fn set_active_source(&mut self, source: UsageSource) {
+        self.active_source = Some(source);
+        for quota in &mut self.quotas {
+            quota.source = source;
         }
     }
 }
@@ -942,6 +966,7 @@ pub fn snapshot_ok(id: VendorId, plan: &str, lines: Vec<MetricLine>) -> Provider
         stale: false,
         error: None,
         hint: None,
+        last_attempt_at: Some(updated_at.clone()),
         updated_at,
         quotas,
         credits,
@@ -970,6 +995,7 @@ pub fn snapshot_with_status(
         stale: false,
         error: Some(error.to_string()),
         hint: Some(id.login_hint().to_string()),
+        last_attempt_at: Some(now_iso()),
         updated_at: now_iso(),
         quotas: vec![],
         credits: None,
@@ -1145,6 +1171,21 @@ mod tests {
         snapshot.mark_stale();
         assert!(snapshot.stale);
         assert!(snapshot.quotas.iter().all(|quota| quota.stale));
+    }
+
+    #[test]
+    fn active_source_tracks_the_source_that_produced_the_snapshot() {
+        let mut snapshot = snapshot_ok(
+            VendorId::Antigravity,
+            "Pro",
+            vec![progress_pct("5h", "5h", 10.0, None, 18_000, "always")],
+        );
+        snapshot.set_active_source(UsageSource::Oauth);
+        assert_eq!(snapshot.active_source, Some(UsageSource::Oauth));
+        assert!(snapshot
+            .quotas
+            .iter()
+            .all(|quota| quota.source == UsageSource::Oauth));
     }
 }
 

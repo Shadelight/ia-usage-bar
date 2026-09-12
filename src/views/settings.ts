@@ -324,23 +324,23 @@ function syncBody(): string {
 /** Trae el estado y parchea los nodos (nunca rebuild: no roba el foco). */
 export async function reloadSyncStatus(): Promise<void> {
   const st = await invokeCmd<SyncStatusDto>("sync_get_status");
-  if (!st) return;
-  syncStatus = st;
+  if (!st.ok) return;
+  syncStatus = st.value;
   const set = (id: string, value: string): void => {
     const el = document.getElementById(id);
     if (el) el.textContent = value;
   };
-  set("sync-device", `${st.deviceId} (${st.fingerprint})`);
-  set("sync-dir", st.exportDir);
+  set("sync-device", `${st.value.deviceId} (${st.value.fingerprint})`);
+  set("sync-dir", st.value.exportDir);
   set(
     "sync-server",
-    `${st.serverRunning ? t("syncServerRunning") : t("syncServerStopped")}${st.serverRunning ? ` · ${st.serverAddr}` : ""}`,
+    `${st.value.serverRunning ? t("syncServerRunning") : t("syncServerStopped")}${st.value.serverRunning ? ` · ${st.value.serverAddr}` : ""}`,
   );
-  set("sync-export", st.lastExport ? `${st.lastExport.path} (${st.lastExport.bytes} B)` : t("syncNeverExported"));
+  set("sync-export", st.value.lastExport ? `${st.value.lastExport.path} (${st.value.lastExport.bytes} B)` : t("syncNeverExported"));
   const toggle = document.getElementById("cfg-sync") as HTMLInputElement | null;
-  if (toggle && document.activeElement !== toggle) toggle.checked = st.enabled;
+  if (toggle && document.activeElement !== toggle) toggle.checked = st.value.enabled;
   const lan = document.getElementById("cfg-sync-lan") as HTMLInputElement | null;
-  if (lan && document.activeElement !== lan) lan.checked = st.lan;
+  if (lan && document.activeElement !== lan) lan.checked = st.value.lan;
 }
 
 /**
@@ -383,16 +383,16 @@ export async function checkForUpdates(): Promise<void> {
   result.classList.remove("hidden", "update-available", "update-error");
   result.textContent = t("checkingUpdates");
   const update = await invokeCmd<{ current: string; latest: string; url: string; updateAvailable: boolean }>("check_for_updates");
-  if (!update) {
+  if (!update.ok) {
     result.textContent = t("updateCheckFailed");
     result.classList.add("update-error");
     return;
   }
-  if (update.updateAvailable) {
-    result.innerHTML = `<span>${t("updateAvailable")} · ${escapeHtml(update.latest)}</span><button data-open-url="${escapeHtml(update.url)}">${t("viewRelease")}</button>`;
+  if (update.value.updateAvailable) {
+    result.innerHTML = `<span>${t("updateAvailable")} · ${escapeHtml(update.value.latest)}</span><button data-open-url="${escapeHtml(update.value.url)}">${t("viewRelease")}</button>`;
     result.classList.add("update-available");
   } else {
-    result.textContent = `${t("upToDate")} · IA Usage ${escapeHtml(update.current)}`;
+    result.textContent = `${t("upToDate")} · IA Usage ${escapeHtml(update.value.current)}`;
   }
 }
 
@@ -475,7 +475,9 @@ export function patchSettings(dash: Dashboard | null, category: SettingsCategory
     if (active) {
       if (snapshot?.activeSource) {
         active.classList.remove("hidden");
-        active.innerHTML = `${escapeHtml(t("usingNow"))}: <strong>${escapeHtml(sourceName(snapshot.activeSource))}</strong>`;
+        // Keep this to text-only mutation: this patch is specifically allowed
+        // to run while a native <select> popup is open.
+        active.textContent = `${t("usingNow")}: ${sourceName(snapshot.activeSource)}`;
       } else {
         active.classList.add("hidden");
       }

@@ -36,8 +36,10 @@ jobs:
       - name: Test frontend
         run: npm run test:frontend
 
-      - name: Test backend
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Validate Rust workspace
+        run: |
+          cargo check --workspace --locked
+          cargo test --workspace --locked
 
       - name: Build bundled CLI
         run: cargo build --release --locked -p iausage

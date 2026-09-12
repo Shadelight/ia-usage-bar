@@ -6,7 +6,7 @@ use crate::config::AppConfig;
 use crate::http::{self, FetchError};
 use crate::model::{
     json_f64, json_str, progress_pct, snapshot_needs_auth, snapshot_ok, snapshot_with_status,
-    values_line, ProviderSnapshot, ProviderStatus, ProviderStatusReason, VendorId,
+    values_line, ProviderSnapshot, ProviderStatus, ProviderStatusReason, UsageSource, VendorId,
 };
 
 use super::Provider;
@@ -34,14 +34,17 @@ impl Provider for Antigravity {
     fn refresh(&self, _cfg: &AppConfig) -> ProviderSnapshot {
         let local_bases = discover_local_bases();
         for base in &local_bases {
-            if let Ok(snap) = fetch_local(base) {
+            if let Ok(mut snap) = fetch_local(base) {
+                snap.set_active_source(UsageSource::LocalSession);
                 return snap;
             }
         }
-        if !local_bases.is_empty() {
-            return local_service_unavailable();
-        }
+        // A running but unhealthy local server must not mask a valid Google
+        // session. Local is preferred, Cloud is the fallback.
         let Some(token) = read_keyring_token() else {
+            if !local_bases.is_empty() {
+                return local_service_unavailable();
+            }
             return snapshot_needs_auth(
                 VendorId::Antigravity,
                 "No hay una sesión Google guardada para Antigravity",
@@ -49,6 +52,7 @@ impl Provider for Antigravity {
         };
         match fetch_cloud(&token) {
             Ok(mut snap) => {
+                snap.set_active_source(UsageSource::Oauth);
                 snap.lines.insert(
                     0,
                     values_line("source", "Fuente", "Google API (app cerrada)", "always"),
@@ -339,6 +343,9 @@ pub(crate) fn snapshot_from_quota(body: &Value, plan: &str) -> ProviderSnapshot 
                     } else {
                         18_000
                     };
+                    let Some(pct) = bucket_pct(b) else {
+                        continue;
+                    };
                     lines.push(progress_pct(
                         &format!(
                             "{}_{}",
@@ -346,7 +353,7 @@ pub(crate) fn snapshot_from_quota(body: &Value, plan: &str) -> ProviderSnapshot 
                             label.to_ascii_lowercase().replace(' ', "_")
                         ),
                         &format!("{name} {label}"),
-                        bucket_pct(b),
+                        pct,
                         json_str(b, &["resetTime", "resetsAt", "reset_at"]),
                         secs,
                         "always",
@@ -363,20 +370,20 @@ pub(crate) fn snapshot_from_quota(body: &Value, plan: &str) -> ProviderSnapshot 
     snapshot_ok(VendorId::Antigravity, plan, lines)
 }
 
-fn bucket_pct(b: &Value) -> f64 {
+fn bucket_pct(b: &Value) -> Option<f64> {
     if let Some(rem) = json_f64(b, &["remainingFraction", "remaining_fraction"]) {
         let used = if rem <= 1.0 {
             (1.0 - rem) * 100.0
         } else {
             100.0 - rem
         };
-        return used.clamp(0.0, 100.0);
+        return Some(used.clamp(0.0, 100.0));
     }
-    let used = json_f64(b, &["usedFraction", "utilization", "usedPercent"]).unwrap_or(0.0);
+    let used = json_f64(b, &["usedFraction", "utilization", "usedPercent"])?;
     if used <= 1.0 {
-        used * 100.0
+        Some(used * 100.0)
     } else {
-        used
+        Some(used)
     }
 }
 
@@ -390,7 +397,7 @@ fn push_bucket(
     visible: &str,
 ) {
     let Some(b) = group.get(key) else { return };
-    let pct = bucket_pct(b);
+    let Some(pct) = bucket_pct(b) else { return };
     let reset = json_str(b, &["resetTime", "resetsAt", "reset_at"]);
     lines.push(progress_pct(
         &format!("{}_{suffix}", name.to_ascii_lowercase().replace(' ', "_")),
@@ -424,5 +431,14 @@ mod tests {
             snapshot.status_reason,
             Some(ProviderStatusReason::MissingCredential)
         );
+    }
+
+    #[test]
+    fn missing_bucket_measurement_is_omitted() {
+        let snapshot = snapshot_from_quota(&serde_json::json!({
+            "plan": "Pro",
+            "groups": [{"displayName": "Gemini", "fiveHour": {}}]
+        }), "Pro");
+        assert!(snapshot.quotas.is_empty());
     }
 }

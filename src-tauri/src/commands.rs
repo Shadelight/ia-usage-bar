@@ -1,5 +1,6 @@
 //! Comandos expuestos al frontend (`#[tauri::command]`).
 
+use std::process::Command;
 use std::sync::atomic::Ordering;
 
 use serde::Serialize;
@@ -90,20 +91,58 @@ pub(crate) fn set_source_preference(
     cfg.save()?;
     *lock_or_recover(&state.config) = cfg.clone();
     refresh_catalog_and_tray(&app, &state, &cfg);
-    do_refresh(&app, None);
+    // Changing one source only invalidates that provider. A full refresh here
+    // unnecessarily produces dashboard events for every Settings control.
+    lock_or_recover(&state.backoff_until).remove(vid.slug());
+    do_refresh(&app, Some(id));
     Ok(())
 }
 
 #[tauri::command]
 pub(crate) fn refresh_now(app: AppHandle, state: tauri::State<AppState>) {
     touch_activity(&state);
+    // A manual refresh is an explicit retry request, not a decorative button:
+    // do not silently skip providers because of an automatic backoff.
+    lock_or_recover(&state.backoff_until).clear();
     do_refresh(&app, None);
 }
 
 #[tauri::command]
 pub(crate) fn refresh_provider(app: AppHandle, state: tauri::State<AppState>, id: String) {
     touch_activity(&state);
+    lock_or_recover(&state.backoff_until).remove(&id);
     do_refresh(&app, Some(id));
+}
+
+fn provider_login_command(id: VendorId) -> Result<(&'static str, &'static [&'static str]), String> {
+    match id {
+        VendorId::Anthropic => Ok(("claude", &[])),
+        VendorId::Openai => Ok(("codex", &["login"])),
+        _ => Err(format!(
+            "{} no tiene un inicio de sesión automático disponible",
+            id.display_name()
+        )),
+    }
+}
+
+/// Starts the provider's official interactive client in a separate terminal.
+/// OAuth credentials remain owned by that client; this app only observes them.
+#[tauri::command]
+pub(crate) fn start_provider_login(id: String) -> Result<(), String> {
+    let id = parse_id(&id).ok_or_else(|| format!("Proveedor desconocido: {id}"))?;
+    let (program, args) = provider_login_command(id)?;
+    let mut command = Command::new(program);
+    command.args(args);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        command.creation_flags(CREATE_NEW_CONSOLE);
+    }
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("No se pudo iniciar {program}: {error}"))
 }
 
 #[tauri::command]
@@ -172,7 +211,9 @@ pub(crate) fn set_app_config(
     {
         let current = lock_or_recover(&state.config);
         incoming.sync_enabled = current.sync_enabled;
-        incoming.sync_export_dir.clone_from(&current.sync_export_dir);
+        incoming
+            .sync_export_dir
+            .clone_from(&current.sync_export_dir);
         incoming.sync_lan = current.sync_lan;
     }
     incoming.normalize();
@@ -180,7 +221,8 @@ pub(crate) fn set_app_config(
     state
         .notifications_enabled
         .store(incoming.notifications, Ordering::Relaxed);
-    *lock_or_recover(&state.config) = incoming;    let current = lock_or_recover(&state.config).clone();
+    *lock_or_recover(&state.config) = incoming;
+    let current = lock_or_recover(&state.config).clone();
     refresh_catalog_and_tray(&app, &state, &current);
     do_refresh(&app, None);
     Ok(())
@@ -199,7 +241,14 @@ pub(crate) fn set_provider_enabled(
     cfg.save()?;
     *lock_or_recover(&state.config) = cfg.clone();
     refresh_catalog_and_tray(&app, &state, &cfg);
-    do_refresh(&app, None);
+    if enabled {
+        lock_or_recover(&state.backoff_until).remove(vid.slug());
+        do_refresh(&app, Some(id));
+    } else {
+        // The provider immediately disappears from the catalog/dashboard; no
+        // network request is needed just to turn something off.
+        crate::dashboard::emit_dashboard(&app);
+    }
     Ok(())
 }
 
@@ -635,11 +684,19 @@ pub(crate) fn sync_export_now(
 
 #[cfg(test)]
 mod update_tests {
-    use super::version_parts;
+    use super::{provider_login_command, version_parts};
+    use crate::model::VendorId;
 
     #[test]
     fn compares_release_versions_numerically() {
         assert!(version_parts("v0.10.0") > version_parts("0.2.9"));
         assert_eq!(version_parts("v0.2.0"), vec![0, 2, 0]);
+    }
+
+    #[test]
+    fn oauth_login_actions_use_the_official_clients() {
+        assert_eq!(provider_login_command(VendorId::Anthropic), Ok(("claude", &[][..])));
+        assert_eq!(provider_login_command(VendorId::Openai), Ok(("codex", &["login"][..])));
+        assert!(provider_login_command(VendorId::Cursor).is_err());
     }
 }

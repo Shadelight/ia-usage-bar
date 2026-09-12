@@ -6,7 +6,8 @@ use serde_json::Value;
 use crate::config::AppConfig;
 use crate::http::{self, FetchError};
 use crate::model::{
-    json_f64, snapshot_needs_auth, snapshot_ok, values_line, ProviderSnapshot, VendorId,
+    json_f64, snapshot_needs_auth, snapshot_ok, snapshot_with_status, values_line,
+    ProviderSnapshot, VendorId,
 };
 
 use super::Provider;
@@ -36,6 +37,14 @@ impl Provider for OpenaiAdmin {
         };
         match fetch_costs(&key) {
             Ok(snap) => snap,
+            Err(FetchError::Http(403, detail)) => snapshot_with_status(
+                VendorId::OpenaiAdmin,
+                crate::model::ProviderStatus::NeedsPermission,
+                crate::model::ProviderStatusReason::MissingPermission,
+                &format!(
+                    "La clave Admin de OpenAI necesita el permiso api.usage.read para consultar costes de organización. {detail}"
+                ),
+            ),
             // A permission response is authoritative. Retrying a legacy
             // endpoint with the same key hides the actionable api.usage.read
             // diagnosis behind a second, unrelated failure.
@@ -67,21 +76,7 @@ fn fetch_costs(key: &str) -> Result<ProviderSnapshot, FetchError> {
             ("Content-Type", "application/json"),
         ],
     )?;
-    let mut total = 0.0;
-    if let Some(arr) = body.get("data").and_then(|v| v.as_array()) {
-        for bucket in arr {
-            if let Some(results) = bucket.get("results").and_then(|v| v.as_array()) {
-                for row in results {
-                    total += json_f64(row, &["amount", "value"]).unwrap_or(0.0);
-                    if let Some(amt) = row.get("amount") {
-                        total += json_f64(amt, &["value"]).unwrap_or(0.0);
-                    }
-                }
-            } else {
-                total += json_f64(bucket, &["amount", "cost"]).unwrap_or(0.0);
-            }
-        }
-    }
+    let total = parse_cost_total(&body)?;
     Ok(snapshot_ok(
         VendorId::OpenaiAdmin,
         "Admin API",
@@ -92,6 +87,37 @@ fn fetch_costs(key: &str) -> Result<ProviderSnapshot, FetchError> {
             "always",
         )],
     ))
+}
+
+fn parse_cost_total(body: &Value) -> Result<f64, FetchError> {
+    let mut total = 0.0;
+    let mut found_amount = false;
+    if let Some(arr) = body.get("data").and_then(|v| v.as_array()) {
+        for bucket in arr {
+            if let Some(results) = bucket.get("results").and_then(|v| v.as_array()) {
+                for row in results {
+                    if let Some(amount) = json_f64(row, &["amount", "value"]) {
+                        total += amount;
+                        found_amount = true;
+                    }
+                    if let Some(amt) = row.get("amount") {
+                        if let Some(amount) = json_f64(amt, &["value"]) {
+                            total += amount;
+                            found_amount = true;
+                        }
+                    }
+                }
+            } else {
+                if let Some(amount) = json_f64(bucket, &["amount", "cost"]) {
+                    total += amount;
+                    found_amount = true;
+                }
+            }
+        }
+    }
+    found_amount
+        .then_some(total)
+        .ok_or_else(|| FetchError::Parse("openai admin: respuesta de costes sin importes".into()))
 }
 
 fn fetch_legacy_grants(key: &str) -> Result<ProviderSnapshot, FetchError> {
@@ -133,5 +159,17 @@ mod tests {
         assert!(should_try_legacy(&FetchError::Http(410, String::new())));
         assert!(!should_try_legacy(&FetchError::Http(403, String::new())));
         assert!(!should_try_legacy(&FetchError::Http(401, String::new())));
+    }
+
+    #[test]
+    fn missing_cost_amount_is_not_reported_as_zero_spend() {
+        let body = serde_json::json!({"data": [{"results": [{"amount": null}]}]});
+        assert!(matches!(parse_cost_total(&body), Err(FetchError::Parse(_))));
+    }
+
+    #[test]
+    fn admin_provider_uses_only_the_admin_key_name() {
+        assert_eq!(VendorId::OpenaiAdmin.env_key(), Some("OPENAI_ADMIN_KEY"));
+        assert_ne!(VendorId::OpenaiAdmin.env_key(), Some("OPENAI_API_KEY"));
     }
 }

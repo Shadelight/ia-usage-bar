@@ -170,33 +170,15 @@ pub fn snapshot_from_json(body: &Value) -> Result<ProviderSnapshot, String> {
     let reset = json_str(body, &["billingCycleEnd"]);
     let mut lines = Vec::new();
     if let Some(plan_obj) = body.pointer("/individualUsage/plan") {
-        let total = json_f64(plan_obj, &["totalPercentUsed"]).unwrap_or(0.0);
-        let auto = json_f64(plan_obj, &["autoPercentUsed"]).unwrap_or(0.0);
-        let api = json_f64(plan_obj, &["apiPercentUsed"]).unwrap_or(0.0);
-        lines.push(progress_pct(
-            "total",
-            "Uso total",
-            total,
-            reset.clone(),
-            2_592_000,
-            "always",
-        ));
-        lines.push(progress_pct(
-            "cursor_models",
-            "Cursor Models",
-            auto,
-            reset.clone(),
-            2_592_000,
-            "always",
-        ));
-        lines.push(progress_pct(
-            "other_models",
-            "Other Models",
-            api,
-            reset.clone(),
-            2_592_000,
-            "always",
-        ));
+        for (id, label, field) in [
+            ("total", "Uso total", "totalPercentUsed"),
+            ("cursor_models", "Cursor Models", "autoPercentUsed"),
+            ("other_models", "Other Models", "apiPercentUsed"),
+        ] {
+            if let Some(pct) = json_f64(plan_obj, &[field]) {
+                lines.push(progress_pct(id, label, pct, reset.clone(), 2_592_000, "always"));
+            }
+        }
     } else {
         // Fallback: mensajes de display de cuentas team/enterprise.
         if let Some(pct) = parse_display_pct(
@@ -336,5 +318,16 @@ mod tests {
         let quota = snapshot.quotas.iter().find(|quota| quota.id == "grok_bot").unwrap();
         assert_eq!(quota.window_type, crate::model::WindowType::Weekly);
         assert_eq!(quota.used_percent, Some(25.0));
+    }
+
+    #[test]
+    fn only_emits_percentages_present_in_cursor_response() {
+        let snapshot = snapshot_from_json(&serde_json::json!({
+            "individualUsage": { "plan": { "totalPercentUsed": 8.0 } }
+        }))
+        .unwrap();
+        assert_eq!(snapshot.quotas.len(), 1);
+        assert_eq!(snapshot.quotas[0].id, "total");
+        assert_eq!(snapshot.quotas[0].used_percent, Some(8.0));
     }
 }

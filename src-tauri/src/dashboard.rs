@@ -11,7 +11,7 @@ use tauri_plugin_notification::NotificationExt;
 
 use crate::commands::parse_id;
 use crate::model::{
-    monthly_spend, most_headroom, Dashboard, ProviderSnapshot, ProviderStatus,
+    monthly_spend, most_headroom, now_iso, Dashboard, ProviderSnapshot, ProviderStatus,
     ProviderStatusReason, SpendRow, VendorId,
 };
 use crate::providers;
@@ -180,9 +180,10 @@ pub(crate) fn refresh_sync(app: &AppHandle, only: Option<&str>) {
     // while one is in flight sets a rerun flag instead of spawning a competing
     // fan-out (which could drive concurrent writes to the same auth.json — F-H1).
     if !claim_refresh(&state.refreshing) {
-        if only.is_none() {
-            state.rerun_requested.store(true, Ordering::Release);
-        }
+        // A provider-only settings change that lands during a global refresh
+        // still needs a follow-up pass: the in-flight pass captured the old
+        // config. Coalesce it into one full rerun instead of dropping it.
+        state.rerun_requested.store(true, Ordering::Release);
         return;
     }
     state.rerun_requested.store(false, Ordering::Release);
@@ -205,7 +206,7 @@ pub(crate) fn refresh_sync(app: &AppHandle, only: Option<&str>) {
     emit_dashboard(app);
 
     // Coalesced rerun for whatever asked while we were busy.
-    if only.is_none() && state.rerun_requested.swap(false, Ordering::AcqRel) {
+    if state.rerun_requested.swap(false, Ordering::AcqRel) {
         do_refresh(app, None);
     }
 }
@@ -224,6 +225,15 @@ fn refresh_once(app: &AppHandle, only: Option<&str>) {
         .into_iter()
         .filter(|id| backoff.get(id.slug()).is_none_or(|until| now >= *until))
         .collect();
+    let attempted_at = now_iso();
+    {
+        let mut snapshots = lock_or_recover(&state.snapshots);
+        for id in &ids {
+            if let Some(snapshot) = snapshots.get_mut(id.slug()) {
+                snapshot.last_attempt_at = Some(attempted_at.clone());
+            }
+        }
+    }
     {
         let mut loading = lock_or_recover(&state.loading_providers);
         loading.extend(ids.iter().map(|id| id.slug().to_string()));
@@ -337,6 +347,7 @@ fn merge_snapshot(
         let rate_limited = incoming.status_reason == Some(ProviderStatusReason::RateLimited);
         let mut retained = previous.clone();
         retained.mark_stale();
+        retained.last_attempt_at = incoming.last_attempt_at.take();
         retained.status_reason = incoming.status_reason;
         retained.error = incoming.error.take();
         if !rate_limited {
@@ -363,15 +374,13 @@ pub(crate) fn run_loop(app: AppHandle) {
             let idle = lock_or_recover(&state.last_activity).elapsed().as_secs();
             (cfg.refresh_adaptive, cfg.refresh_minutes, idle)
         };
-        let wait = crate::refresh_policy::next_interval_secs(
-            &crate::refresh_policy::PolicyInput {
-                adaptive,
-                manual_minutes: manual,
-                secs_since_activity: idle,
-                // TODO(0.3.x): leer el modo de ahorro de batería real de Windows.
-                battery_saver: false,
-            },
-        )
+        let wait = crate::refresh_policy::next_interval_secs(&crate::refresh_policy::PolicyInput {
+            adaptive,
+            manual_minutes: manual,
+            secs_since_activity: idle,
+            // TODO(0.3.x): leer el modo de ahorro de batería real de Windows.
+            battery_saver: false,
+        })
         .max(60);
         std::thread::sleep(Duration::from_secs(wait));
     }

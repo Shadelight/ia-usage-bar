@@ -23,6 +23,13 @@ test("last-update age is derived from the snapshot timestamp", () => {
   assert.deepEqual(elapsedLabel("2026-09-11T12:00:00Z", Date.parse("2026-09-11T12:03:20Z")), { count: 3, unit: "minutes" });
 });
 
+test("stale data distinguishes the failed attempt from the valid-data timestamp", () => {
+  const dash = readFileSync(new URL("../src/views/dash.ts", import.meta.url), "utf8");
+  assert.match(dash, /refreshFailedAttempt/);
+  assert.match(dash, /lastAttemptAt/);
+  assert.match(dash, /staleDataFrom/);
+});
+
 test("the native window is the only owner of the outer rounded chrome", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const panelRule = css.match(/\.panel\s*\{([^}]*)\}/)?.[1] ?? "";

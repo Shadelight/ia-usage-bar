@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 // - enable/save/detect failures were silent (no toast, no revert).
 
 const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+const settings = readFileSync(new URL("../src/views/settings.ts", import.meta.url), "utf8");
 
 test("theme branch ignores the documentElement fallthrough", () => {
   assert.match(
@@ -44,9 +45,46 @@ test("failed enable reverts the checkbox and reports", () => {
   );
 });
 
+test("void Rust commands use an explicit outcome instead of null as success", () => {
+  const api = readFileSync(new URL("../src/api.ts", import.meta.url), "utf8");
+  assert.match(api, /type CommandResult<T>/);
+  assert.match(api, /return \{ ok: true, value: await invoke<T>\(cmd, args\) \}/);
+  assert.doesNotMatch(main, /invokeCmd[^\n]*!== null/);
+});
+
+test("dashboard refreshes patch Settings instead of rebuilding its controls", () => {
+  assert.match(main, /if \(view === "settings"\) \{[\s\S]*?patchSettings\(dash, settingsCategory\);/);
+  assert.match(main, /pendingProviderEnabled/);
+  assert.match(main, /pendingSourcePreferences/);
+});
+
+test("the Settings patch does not replace native inputs during a refresh", () => {
+  const patchBody = settings.slice(settings.indexOf("export function patchSettings"));
+  assert.match(patchBody, /data-provider-item/);
+  assert.doesNotMatch(patchBody, /innerHTML/);
+});
+
+test("the add buttons open the supported-provider catalog", () => {
+  assert.match(main, /case "manage-providers"/);
+  assert.match(main, /settingsCategory = "providers"/);
+});
+
+test("source preference is optimistic and rolls the native select back on failure", () => {
+  const changeHandler = main.slice(main.indexOf("dataset.source"));
+  assert.match(changeHandler, /pendingSourcePreferences\.set\(id, preference\)/);
+  assert.match(changeHandler, /input\.value = previous \?\? "auto"/);
+});
+
 test("failed save/detect report instead of staying silent", () => {
   const saveKey = main.slice(main.indexOf("dataset.savekey"));
   assert.match(saveKey, /showCommandError\(t\("commandFailed"\)\)/);
   const detect = main.slice(main.indexOf('hasAttribute("data-detect")'));
   assert.match(detect, /showCommandError\(t\("commandFailed"\)\)/);
+});
+
+test("OAuth errors launch a real provider login command", () => {
+  const dash = readFileSync(new URL("../src/views/dash.ts", import.meta.url), "utf8");
+  assert.match(dash, /normalized\.action === "login"/);
+  assert.match(dash, /data-act="\$\{action\}" data-provider-id=/);
+  assert.match(main, /invokeCmd\("start_provider_login", \{ id: btn\.dataset\.providerId \}\)/);
 });

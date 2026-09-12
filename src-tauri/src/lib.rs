@@ -312,6 +312,7 @@ pub fn run() {
             commands::set_source_preference,
             commands::refresh_now,
             commands::refresh_provider,
+            commands::start_provider_login,
             commands::detect_providers,
             commands::get_app_config,
             commands::set_app_config,

@@ -150,6 +150,17 @@ function updatingBadge(id: string): string {
   return `<div class="provider-updating" role="status"><span class="loading-spinner" aria-hidden="true"></span><span data-loading-copy data-loading-start="${started}">${t("updating")}</span></div>`;
 }
 
+function relativeAge(timestamp: string | null | undefined): string {
+  const elapsed = timestamp ? elapsedLabel(timestamp) : null;
+  return elapsed?.unit === "minutes"
+    ? t("minutesShort").replace("{count}", String(elapsed.count))
+    : t("justNow");
+}
+
+function staleHint(provider: ProviderSnapshot): string {
+  return `<p class="hint">${escapeHtml(t("staleDataFrom").replace("{time}", relativeAge(provider.updatedAt)))}</p>`;
+}
+
 function providerLogo(id: string, name: string): string {
   const visual = providerVisual(id, name);
   return `<span class="provider-logo-wrap"><img class="provider-logo" src="${visual.icon}" alt="" />${visual.badge ? `<span class="provider-badge">${visual.badge}</span>` : ""}</span>`;
@@ -158,14 +169,18 @@ function providerLogo(id: string, name: string): string {
 function errorCard(provider: ProviderSnapshot, vendor: VendorInfo): string {
   const normalized = normalizeProviderError(provider, vendor);
   if (!normalized) return "";
-  const action = normalized.action === "retry" ? "refresh" : "settings";
+  const action = normalized.action === "retry"
+    ? "refresh"
+    : normalized.action === "login"
+      ? "provider-login"
+      : "settings";
   const details = normalized.technicalDetails
     ? `<details class="technical-details"><summary>${t("showDetails")}</summary><pre>${escapeHtml(normalized.technicalDetails)}</pre></details>`
     : "";
   return `<section class="provider-error severity-${normalized.severity}">
     <h3>${escapeHtml(normalized.title)}</h3>
     <p>${escapeHtml(normalized.message)}</p>
-    ${normalized.actionLabel ? `<button class="btn error-action" data-act="${action}">${escapeHtml(normalized.actionLabel)}</button>` : ""}
+    ${normalized.actionLabel ? `<button class="btn error-action" data-act="${action}" data-provider-id="${escapeHtml(vendor.id)}">${escapeHtml(normalized.actionLabel)}</button>` : ""}
     ${details}
   </section>`;
 }
@@ -253,11 +268,11 @@ function detailHtml(provider: ProviderSnapshot, vendor: VendorInfo, updating: bo
     body = errorCard(provider, vendor);
     if (provider.stale && main.length) {
       body += main.map(progressBlock).join("");
-      body += `<p class="hint">${t("stale")}</p>`;
+      body += staleHint(provider);
     }
   } else {
     body = `<div class="quota-grid">${main.map(progressBlock).join("")}</div>`;
-    if (provider.stale) body += `<p class="hint">${t("stale")}</p>`;
+    if (provider.stale) body += staleHint(provider);
   }
 
   const additionalQuotas = provider.quotas.slice(2).map((quota) => {
@@ -387,6 +402,11 @@ export function renderDash(dash: Dashboard | null, selectedId: string): string {
   $("empty-detect").textContent = t("detect");
   $("empty-add").textContent = t("addManual");
   $("btn-quit").textContent = t("quit");
+  document.querySelectorAll<HTMLButtonElement>('[data-act="refresh"]').forEach((button) => {
+    button.disabled = dash.refreshing;
+    button.classList.toggle("is-refreshing", dash.refreshing);
+    button.toggleAttribute("aria-busy", dash.refreshing);
+  });
   if (!enabled.find((vendor) => vendor.id === selectedId) && enabled.length) {
     selectedId = dash.primary && enabled.some((vendor) => vendor.id === dash.primary) ? dash.primary : enabled[0].id;
     localStorage.setItem("selected", selectedId);
@@ -443,10 +463,11 @@ export function renderDash(dash: Dashboard | null, selectedId: string): string {
   if (currentLoading) {
     $("updated").textContent = current ? t("updating") : t("updatingProvider").replace("{name}", currentVendor?.short || currentVendor?.name || "");
   } else if (stamp && !Number.isNaN(stamp.getTime())) {
-    const elapsed = elapsedLabel(current!.updatedAt);
-    const age = elapsed?.unit === "minutes" ? t("minutesShort").replace("{count}", String(elapsed.count)) : t("justNow");
+    const age = relativeAge(current!.updatedAt);
     $("updated").textContent = current?.stale
-      ? t("lastUpdatedAgo").replace("{time}", age)
+      ? current.error && current.lastAttemptAt
+        ? t("refreshFailedAttempt").replace("{time}", relativeAge(current.lastAttemptAt))
+        : t("lastUpdatedAgo").replace("{time}", age)
       : `${t("updated")} ${stamp.toLocaleTimeString(lang === "es" ? "es-ES" : "en-US", { hour: "numeric", minute: "2-digit" })}`;
   }
   if (!stamp || Number.isNaN(stamp.getTime())) $("updated").textContent = "";

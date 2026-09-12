@@ -125,15 +125,19 @@ fn fetch_kimi(token: &str) -> Result<ProviderSnapshot, FetchError> {
     )?;
     let mut lines = Vec::new();
     let weekly = body.get("weekly").or_else(|| body.get("subscription"));
-    if let Some(w) = weekly {
-        let pct = json_f64(w, &["utilization", "usedPercent", "percent"]).unwrap_or(0.0);
+    if let Some((w, pct)) = weekly.and_then(|value| {
+        json_f64(value, &["utilization", "usedPercent", "percent"]).map(|pct| (value, pct))
+    }) {
         let reset = json_str(w, &["resets_at", "resetAt"]);
         lines.push(progress_pct(
             "weekly", "Semanal", pct, reset, 604_800, "always",
         ));
     }
-    if let Some(w) = body.get("five_hour").or_else(|| body.get("rate_limit")) {
-        let pct = json_f64(w, &["utilization", "usedPercent", "percent"]).unwrap_or(0.0);
+    if let Some((w, pct)) = body
+        .get("five_hour")
+        .or_else(|| body.get("rate_limit"))
+        .and_then(|value| json_f64(value, &["utilization", "usedPercent", "percent"]).map(|pct| (value, pct)))
+    {
         let reset = json_str(w, &["resets_at", "resetAt"]);
         lines.push(progress_pct(
             "session",
@@ -165,8 +169,11 @@ fn fetch_supergrok(key: &str) -> Result<ProviderSnapshot, FetchError> {
         &[("Authorization", &format!("Bearer {key}"))],
     )?;
     let mut lines = Vec::new();
-    if let Some(w) = body.get("weekly").or_else(|| body.get("included")) {
-        let pct = json_f64(w, &["percent", "utilization", "usedPercent"]).unwrap_or(0.0);
+    if let Some((w, pct)) = body
+        .get("weekly")
+        .or_else(|| body.get("included"))
+        .and_then(|value| json_f64(value, &["percent", "utilization", "usedPercent"]).map(|pct| (value, pct)))
+    {
         let reset = json_str(w, &["resets_at", "resetAt"]);
         lines.push(progress_pct(
             "weekly", "Semanal", pct, reset, 604_800, "always",
@@ -181,8 +188,9 @@ fn fetch_supergrok(key: &str) -> Result<ProviderSnapshot, FetchError> {
         ));
     }
     if lines.is_empty() {
-        let pct = json_f64(&body, &["percent", "utilization"]).unwrap_or(0.0);
-        lines.push(progress_pct("usage", "Uso", pct, None, 604_800, "always"));
+        if let Some(pct) = json_f64(&body, &["percent", "utilization"]) {
+            lines.push(progress_pct("usage", "Uso", pct, None, 604_800, "always"));
+        }
     }
     Ok(snapshot_ok(VendorId::Supergrok, "SuperGrok", lines))
 }
@@ -208,9 +216,10 @@ fn fetch_commandcode(token: &str) -> Result<ProviderSnapshot, FetchError> {
         .get("fiveHour")
         .or_else(|| credits.pointer("/windowLimits/fiveHour"))
     {
-        let used = json_f64(w, &["used", "spent"]).unwrap_or(0.0);
-        let cap = json_f64(w, &["limit", "cap"]).unwrap_or(0.0);
-        if cap > 0.0 {
+        if let Some((used, cap)) = json_f64(w, &["used", "spent"])
+            .zip(json_f64(w, &["limit", "cap"]))
+            .filter(|(_, cap)| *cap > 0.0)
+        {
             lines.push(progress_pct(
                 "session",
                 "5h",
@@ -225,9 +234,10 @@ fn fetch_commandcode(token: &str) -> Result<ProviderSnapshot, FetchError> {
         .get("weekly")
         .or_else(|| credits.pointer("/windowLimits/weekly"))
     {
-        let used = json_f64(w, &["used", "spent"]).unwrap_or(0.0);
-        let cap = json_f64(w, &["limit", "cap"]).unwrap_or(0.0);
-        if cap > 0.0 {
+        if let Some((used, cap)) = json_f64(w, &["used", "spent"])
+            .zip(json_f64(w, &["limit", "cap"]))
+            .filter(|(_, cap)| *cap > 0.0)
+        {
             lines.push(progress_pct(
                 "weekly",
                 "Semanal",
@@ -263,28 +273,26 @@ fn fetch_nous(token: &str) -> Result<ProviderSnapshot, FetchError> {
         "https://portal.nousresearch.com/api/oauth/account",
         &[("Authorization", &format!("Bearer {token}"))],
     )?;
-    let monthly = json_f64(&body, &["monthly_credits", "subscription_credits"]).unwrap_or(0.0);
-    let remaining =
-        json_f64(&body, &["subscription_credits_remaining", "remaining"]).unwrap_or(0.0);
-    let pct = if monthly > 0.0 {
-        ((monthly - remaining) / monthly) * 100.0
-    } else {
-        0.0
-    };
-    let mut lines = vec![progress_pct(
-        "sub",
-        "Suscripción",
-        pct,
-        json_str(&body, &["renews_at", "renewal"]),
-        2_592_000,
-        "always",
-    )];
-    lines.push(values_line(
-        "credits",
-        "Créditos",
-        &format!("{remaining:.0} / {monthly:.0}"),
-        "demand",
-    ));
+    let mut lines = Vec::new();
+    if let Some((monthly, remaining)) = json_f64(&body, &["monthly_credits", "subscription_credits"])
+        .zip(json_f64(&body, &["subscription_credits_remaining", "remaining"]))
+        .filter(|(monthly, _)| *monthly > 0.0)
+    {
+        lines.push(progress_pct(
+            "sub",
+            "Suscripción",
+            ((monthly - remaining) / monthly) * 100.0,
+            json_str(&body, &["renews_at", "renewal"]),
+            2_592_000,
+            "always",
+        ));
+        lines.push(values_line(
+            "credits",
+            "Créditos",
+            &format!("{remaining:.0} / {monthly:.0}"),
+            "demand",
+        ));
+    }
     Ok(snapshot_ok(VendorId::Nous, "Nous", lines))
 }
 

@@ -87,6 +87,8 @@ export interface ProviderUsage {
   stale: boolean;
   error: string | null;
   hint: string | null;
+  /** Latest refresh attempt; unlike updatedAt, this moves even on failure. */
+  lastAttemptAt?: string | null;
   updatedAt: string;
   quotas: UsageQuota[];
   credits: CreditsSummary | null;
@@ -159,18 +161,27 @@ export function isTauri(): boolean {
   return !!(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 }
 
+/**
+ * Explicit command outcome. Rust `Result<(), String>` resolves to JavaScript
+ * `null` on success, so the payload itself must never be used as a success
+ * sentinel.
+ */
+export type CommandResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error?: string };
+
 export async function invokeCmd<T>(
   cmd: string,
   args?: Record<string, unknown>,
-): Promise<T | null> {
-  if (!isTauri()) return null;
+): Promise<CommandResult<T>> {
+  if (!isTauri()) return { ok: false };
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<T>(cmd, args);
+    return { ok: true, value: await invoke<T>(cmd, args) };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     window.dispatchEvent(new CustomEvent("app-command-error", { detail }));
-    return null;
+    return { ok: false, error: detail };
   }
 }
 

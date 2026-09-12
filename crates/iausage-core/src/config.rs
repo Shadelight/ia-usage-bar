@@ -144,6 +144,22 @@ impl AppConfig {
         if self.notify_thresholds.is_empty() {
             self.notify_thresholds = default_notify_thresholds();
         }
+        // Old builds could persist a strategy that a provider never actually
+        // implemented. Keep the provider enabled but fall back to Auto so the
+        // saved config remains executable after restart.
+        for id in VendorId::all().iter().copied() {
+            let Some(provider) = self.providers.get_mut(id.slug()) else {
+                continue;
+            };
+            if let Some(source) = provider.source {
+                if !crate::descriptor::descriptor(id)
+                    .strategies
+                    .contains(&source)
+                {
+                    provider.source = None;
+                }
+            }
+        }
     }
 
     /// `Ok(None)` = file absent (a normal first run). `Ok(Some)` = parsed.
@@ -403,6 +419,32 @@ mod tests {
         cfg.normalize();
         assert_eq!(cfg.refresh_minutes, 5);
         assert_eq!(cfg.notify_thresholds, vec![75, 95]);
+    }
+
+    #[test]
+    fn normalize_removes_a_source_that_is_not_implemented() {
+        let mut cfg = AppConfig::default();
+        cfg.set_source_preference(VendorId::Anthropic, Some(FetchStrategyKind::Api));
+        cfg.normalize();
+        assert_eq!(cfg.source_preference(VendorId::Anthropic), None);
+    }
+
+    #[test]
+    fn provider_enabled_and_source_preference_survive_reload() {
+        let dir = scratch_dir("provider-persistence");
+        let path = dir.join("config.toml");
+        let mut cfg = AppConfig::default();
+        cfg.set_enabled(VendorId::Anthropic, true);
+        cfg.set_source_preference(VendorId::Anthropic, Some(FetchStrategyKind::Oauth));
+        atomic_write(&path, toml::to_string_pretty(&cfg).unwrap().as_bytes()).unwrap();
+
+        let reloaded = AppConfig::load_from(&path);
+        assert!(reloaded.is_enabled(VendorId::Anthropic));
+        assert_eq!(
+            reloaded.source_preference(VendorId::Anthropic),
+            Some(FetchStrategyKind::Oauth)
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

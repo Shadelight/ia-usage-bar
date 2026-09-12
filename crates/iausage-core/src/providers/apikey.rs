@@ -80,6 +80,10 @@ fn money(id: VendorId, plan: &str, label: &str, amount: f64) -> ProviderSnapshot
     )
 }
 
+fn required_number(value: &Value, keys: &[&str], message: &str) -> Result<f64, FetchError> {
+    json_f64(value, keys).ok_or_else(|| FetchError::Parse(message.into()))
+}
+
 fn fetch_openrouter(key: &str) -> Result<ProviderSnapshot, FetchError> {
     let credits = http::get_json(
         "https://openrouter.ai/api/v1/credits",
@@ -91,8 +95,8 @@ fn fetch_openrouter(key: &str) -> Result<ProviderSnapshot, FetchError> {
     )
     .ok();
     let data = credits.get("data").unwrap_or(&credits);
-    let total = json_f64(data, &["total_credits", "total"]).unwrap_or(0.0);
-    let used = json_f64(data, &["total_usage", "usage"]).unwrap_or(0.0);
+    let total = required_number(data, &["total_credits", "total"], "OpenRouter: faltan créditos totales")?;
+    let used = required_number(data, &["total_usage", "usage"], "OpenRouter: falta uso de créditos")?;
     let remaining = total - used;
     let mut lines = vec![values_line(
         "balance",
@@ -138,8 +142,9 @@ fn fetch_zai(key: &str) -> Result<ProviderSnapshot, FetchError> {
     push_zai_window(
         &mut lines, data, "weekly", "weekly", "Semanal", 604_800, "always",
     );
-    if let Some(mcp) = data.get("mcp") {
-        let pct = json_f64(mcp, &["utilization", "usedPercent", "percent"]).unwrap_or(0.0);
+    if let Some(pct) = data.get("mcp").and_then(|value| {
+        json_f64(value, &["utilization", "usedPercent", "percent"])
+    }) {
         lines.push(progress_pct("mcp", "MCP", pct, None, 2_592_000, "demand"));
     }
     let plan = json_str(data, &["plan", "planName"]).unwrap_or_else(|| "GLM".into());
@@ -158,7 +163,9 @@ fn push_zai_window(
     let Some(w) = data.get(key).or_else(|| data.get(id)) else {
         return;
     };
-    let pct = json_f64(w, &["utilization", "usedPercent", "percent"]).unwrap_or(0.0);
+    let Some(pct) = json_f64(w, &["utilization", "usedPercent", "percent"]) else {
+        return;
+    };
     let reset = json_str(w, &["resets_at", "resetAt", "reset_at"]);
     lines.push(progress_pct(id, label, pct, reset, window, visible));
 }
@@ -174,12 +181,22 @@ fn fetch_deepseek(key: &str) -> Result<ProviderSnapshot, FetchError> {
         .cloned()
         .unwrap_or(body.clone());
     let mut total = 0.0;
+    let mut found = false;
     if let Some(arr) = infos.as_array() {
         for row in arr {
-            total += json_f64(row, &["total_balance", "balance"]).unwrap_or(0.0);
+            if let Some(balance) = json_f64(row, &["total_balance", "balance"]) {
+                total += balance;
+                found = true;
+            }
         }
     } else {
-        total = json_f64(&infos, &["total_balance", "balance"]).unwrap_or(0.0);
+        if let Some(balance) = json_f64(&infos, &["total_balance", "balance"]) {
+            total = balance;
+            found = true;
+        }
+    }
+    if !found {
+        return Err(FetchError::Parse("DeepSeek: respuesta sin saldo".into()));
     }
     Ok(money(VendorId::Deepseek, "DeepSeek", "Saldo", total))
 }
@@ -196,7 +213,7 @@ fn fetch_grok(key: &str, cfg: &AppConfig) -> Result<ProviderSnapshot, FetchError
     };
     let url = format!("https://management-api.x.ai/v1/billing/teams/{team}/prepaid/balance");
     let body = http::get_json(&url, &[("Authorization", &format!("Bearer {key}"))])?;
-    let bal = json_f64(&body, &["balance", "amount", "prepaid_balance"]).unwrap_or(0.0);
+    let bal = required_number(&body, &["balance", "amount", "prepaid_balance"], "xAI: respuesta sin saldo")?;
     Ok(money(
         VendorId::Grok,
         "xAI",
@@ -220,7 +237,7 @@ fn fetch_kilo(key: &str) -> Result<ProviderSnapshot, FetchError> {
         &[("Authorization", &format!("Bearer {key}"))],
     )?;
     let data = body.get("data").unwrap_or(&body);
-    let bal = json_f64(data, &["balance", "credits", "remaining"]).unwrap_or(0.0);
+    let bal = required_number(data, &["balance", "credits", "remaining"], "Kilo: respuesta sin saldo")?;
     Ok(money(VendorId::Kilo, "Kilo", "Saldo", bal))
 }
 
@@ -230,7 +247,7 @@ fn fetch_novita(key: &str) -> Result<ProviderSnapshot, FetchError> {
         &[("Authorization", &format!("Bearer {key}"))],
     )?;
     let data = body.get("data").unwrap_or(&body);
-    let bal = json_f64(data, &["balance", "credit_balance", "remaining"]).unwrap_or(0.0);
+    let bal = required_number(data, &["balance", "credit_balance", "remaining"], "Novita: respuesta sin saldo")?;
     Ok(money(VendorId::Novita, "Novita", "Saldo", bal))
 }
 
@@ -251,7 +268,7 @@ fn fetch_moonshot(key: &str, cfg: &AppConfig) -> Result<ProviderSnapshot, FetchE
         &[("Authorization", &format!("Bearer {key}"))],
     )?;
     let data = body.get("data").unwrap_or(&body);
-    let bal = json_f64(data, &["available_balance", "balance", "cash_balance"]).unwrap_or(0.0);
+    let bal = required_number(data, &["available_balance", "balance", "cash_balance"], "Moonshot: respuesta sin saldo")?;
     let label = if cn { "Saldo (¥)" } else { "Saldo" };
     let text = if cn {
         format!("¥{bal:.2}")
@@ -284,44 +301,47 @@ fn fetch_minimax(key: &str, cfg: &AppConfig) -> Result<ProviderSnapshot, FetchEr
     let data = body.get("data").unwrap_or(&body);
     let mut lines = Vec::new();
     if let Some(interval) = data.get("interval").or_else(|| data.get("rolling")) {
-        let pct = used_pct(interval);
-        let reset = json_str(interval, &["resets_at", "resetAt"]);
-        lines.push(progress_pct(
-            "interval",
-            "Intervalo",
-            pct,
-            reset,
-            18_000,
-            "always",
-        ));
+        if let Some(pct) = used_pct(interval) {
+            let reset = json_str(interval, &["resets_at", "resetAt"]);
+            lines.push(progress_pct(
+                "interval",
+                "Intervalo",
+                pct,
+                reset,
+                18_000,
+                "always",
+            ));
+        }
     }
     if let Some(weekly) = data.get("weekly") {
-        let pct = used_pct(weekly);
-        let reset = json_str(weekly, &["resets_at", "resetAt"]);
-        lines.push(progress_pct(
-            "weekly", "Semanal", pct, reset, 604_800, "always",
-        ));
+        if let Some(pct) = used_pct(weekly) {
+            let reset = json_str(weekly, &["resets_at", "resetAt"]);
+            lines.push(progress_pct(
+                "weekly", "Semanal", pct, reset, 604_800, "always",
+            ));
+        }
     }
     if lines.is_empty() {
-        let pct = json_f64(data, &["usedPercent", "utilization"]).unwrap_or(0.0);
-        lines.push(progress_pct(
-            "plan",
-            "Token Plan",
-            pct,
-            None,
-            604_800,
-            "always",
-        ));
+        if let Some(pct) = json_f64(data, &["usedPercent", "utilization"]) {
+            lines.push(progress_pct(
+                "plan",
+                "Token Plan",
+                pct,
+                None,
+                604_800,
+                "always",
+            ));
+        }
     }
     Ok(snapshot_ok(VendorId::Minimax, "MiniMax Token Plan", lines))
 }
 
-fn used_pct(v: &Value) -> f64 {
+fn used_pct(v: &Value) -> Option<f64> {
     if let Some(p) = json_f64(v, &["usedPercent", "utilization", "percent"]) {
-        return p;
+        return Some(p);
     }
     let remain = json_f64(v, &["remainPercent", "remaining_percent"]);
-    remain.map(|r| 100.0 - r).unwrap_or(0.0)
+    remain.map(|r| 100.0 - r)
 }
 
 fn fetch_anthropic_api(key: &str) -> Result<ProviderSnapshot, FetchError> {
@@ -335,16 +355,26 @@ fn fetch_anthropic_api(key: &str) -> Result<ProviderSnapshot, FetchError> {
         &[("x-api-key", key), ("anthropic-version", "2023-06-01")],
     )?;
     let mut total = 0.0;
+    let mut found = false;
     if let Some(arr) = body.get("data").and_then(|v| v.as_array()) {
         for row in arr {
             if let Some(results) = row.get("results").and_then(|v| v.as_array()) {
                 for r in results {
-                    total += json_f64(r, &["amount"]).unwrap_or(0.0);
+                    if let Some(amount) = json_f64(r, &["amount"]) {
+                        total += amount;
+                        found = true;
+                    }
                 }
             } else {
-                total += json_f64(row, &["amount"]).unwrap_or(0.0);
+                if let Some(amount) = json_f64(row, &["amount"]) {
+                    total += amount;
+                    found = true;
+                }
             }
         }
+    }
+    if !found {
+        return Err(FetchError::Parse("Anthropic API: respuesta sin importes".into()));
     }
     let usd = total / 100.0;
     Ok(snapshot_ok(
@@ -390,8 +420,9 @@ fn fetch_opencode_go(key: &str) -> Result<ProviderSnapshot, FetchError> {
         ("weekly", "Semanal", 604_800, "always"),
         ("monthly", "Mensual", 2_592_000, "demand"),
     ] {
-        if let Some(w) = body.get(key_name) {
-            let pct = json_f64(w, &["percent", "utilization"]).unwrap_or(0.0);
+        if let Some((w, pct)) = body.get(key_name).and_then(|value| {
+            json_f64(value, &["percent", "utilization"]).map(|pct| (value, pct))
+        }) {
             let reset = json_str(w, &["reset", "resets_at", "resetAt"]);
             lines.push(progress_pct(key_name, label, pct, reset, window, vis));
         }
