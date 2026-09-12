@@ -20,16 +20,12 @@ impl Provider for OpenaiAdmin {
 
     fn has_local_credentials(&self, cfg: &AppConfig) -> bool {
         cfg.api_key(VendorId::OpenaiAdmin)
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .filter(|s| !s.trim().is_empty())
             .is_some()
     }
 
     fn refresh(&self, cfg: &AppConfig) -> ProviderSnapshot {
-        let key = match cfg
-            .api_key(VendorId::OpenaiAdmin)
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-        {
+        let key = match cfg.api_key(VendorId::OpenaiAdmin) {
             Some(k) if !k.trim().is_empty() => k,
             _ => {
                 return snapshot_needs_auth(
@@ -40,12 +36,20 @@ impl Provider for OpenaiAdmin {
         };
         match fetch_costs(&key) {
             Ok(snap) => snap,
-            Err(e) => match fetch_legacy_grants(&key) {
+            // A permission response is authoritative. Retrying a legacy
+            // endpoint with the same key hides the actionable api.usage.read
+            // diagnosis behind a second, unrelated failure.
+            Err(error) if should_try_legacy(&error) => match fetch_legacy_grants(&key) {
                 Ok(snap) => snap,
-                Err(_) => super::map_fetch_err(VendorId::OpenaiAdmin, e),
+                Err(_) => super::map_fetch_err(VendorId::OpenaiAdmin, error),
             },
+            Err(error) => super::map_fetch_err(VendorId::OpenaiAdmin, error),
         }
     }
+}
+
+fn should_try_legacy(error: &FetchError) -> bool {
+    matches!(error, FetchError::Http(404 | 410, _))
 }
 
 fn fetch_costs(key: &str) -> Result<ProviderSnapshot, FetchError> {
@@ -117,4 +121,17 @@ fn fetch_legacy_grants(key: &str) -> Result<ProviderSnapshot, FetchError> {
 
 fn pick_money(v: &Value, keys: &[&str]) -> Option<f64> {
     json_f64(v, keys)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_removed_or_missing_cost_endpoints_use_legacy_fallback() {
+        assert!(should_try_legacy(&FetchError::Http(404, String::new())));
+        assert!(should_try_legacy(&FetchError::Http(410, String::new())));
+        assert!(!should_try_legacy(&FetchError::Http(403, String::new())));
+        assert!(!should_try_legacy(&FetchError::Http(401, String::new())));
+    }
 }

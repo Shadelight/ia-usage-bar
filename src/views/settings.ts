@@ -11,8 +11,8 @@ import { activeItemScrollDelta, horizontalWheelDelta } from "../layout";
 
 export type SettingsCategory = "general" | "providers" | "notifications" | "appearance" | "data" | "sync" | "about";
 
-// Local UI state that must survive full body re-renders (renderSettings
-// rebuilds innerHTML on every dashboard update).
+// Local UI state that survives explicit Settings renders. Dashboard events use
+// `patchSettings` below and deliberately do not rebuild the form.
 let expandedProvider: string | null = null;
 const credentialDrafts: Record<string, string> = {};
 let savingProvider: string | null = null;
@@ -164,8 +164,11 @@ function providerSourceDetail(vendor: VendorInfo, snapshot?: ProviderSnapshot): 
       (s) => `<option value="${escapeHtml(s)}" ${current === s ? "selected" : ""}>${escapeHtml(strategyLabel(s))}</option>`,
     ))
     .join("");
-  const active = snapshot?.activeSource ? `<p class="lede">${escapeHtml(t("usingNow"))}: <strong>${escapeHtml(sourceName(snapshot.activeSource))}</strong></p>` : "";
-  if (strategies.length <= 1 && !snapshot?.activeSource) return "";
+  const active = `<p class="lede${snapshot?.activeSource ? "" : " hidden"}" data-active-source>${escapeHtml(t("usingNow"))}: <strong>${escapeHtml(sourceName(snapshot?.activeSource))}</strong></p>`;
+  // A source selector is an operational promise, not a decoration. Providers
+  // with one implemented source show its observed value but cannot be
+  // configured to a source the backend does not actually execute.
+  if (strategies.length <= 1) return snapshot?.activeSource ? active : "";
   return `<label class="row">${escapeHtml(t("sourceLabel"))}
       <select data-source="${escapeHtml(vendor.id)}">${opts}</select>
     </label>${active}`;
@@ -342,7 +345,7 @@ export async function reloadSyncStatus(): Promise<void> {
 
 /**
  * Re-render de la categoría sync tras una acción explícita. Si el usuario
- * está escribiendo la passphrase, solo parchea estado.
+ * está escribiendo la passphrase, solo parchea estado (ver patchSettings).
  */
 export function refreshSyncView(): void {
   if (syncCategory !== "sync") return;
@@ -447,6 +450,37 @@ export function renderSettings(dash: Dashboard | null, category: SettingsCategor
   wireCategoryScroll(categoryChanged, previousCategoryScroll);
   if (category === "about") void paintAboutVersion();
   if (category === "sync") void reloadSyncStatus();
+}
+
+/**
+ * Apply volatile provider state without replacing any Settings controls.
+ *
+ * `dashboard-updated` can arrive while an OS-native select popup is open.
+ * Reassigning `innerHTML` there destroys that select (and its focused
+ * checkbox/input siblings), so this function is intentionally limited to
+ * text and class patches on stable nodes.
+ */
+export function patchSettings(dash: Dashboard | null, category: SettingsCategory): void {
+  if (!dash || category !== "providers") return;
+  for (const vendor of dash.catalog) {
+    const row = document.querySelector<HTMLElement>(`[data-provider-item="${vendor.id}"]`);
+    if (!row) continue;
+    const snapshot = dash.providers.find((provider) => provider.id === vendor.id);
+    const state = deriveProviderState(vendor, snapshot, dash.loadingProviders.includes(vendor.id));
+    const status = row.querySelector<HTMLElement>(".prov-sub");
+    if (status) status.textContent = formatStatusText(state);
+    const dot = row.querySelector<HTMLElement>(".provider-status-dot");
+    if (dot) dot.className = `provider-status-dot ${state.dotClass}`;
+    const active = row.querySelector<HTMLElement>("[data-active-source]");
+    if (active) {
+      if (snapshot?.activeSource) {
+        active.classList.remove("hidden");
+        active.innerHTML = `${escapeHtml(t("usingNow"))}: <strong>${escapeHtml(sourceName(snapshot.activeSource))}</strong>`;
+      } else {
+        active.classList.add("hidden");
+      }
+    }
+  }
 }
 
 export async function persistConfig(dash: Dashboard | null): Promise<void> {

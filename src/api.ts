@@ -26,6 +26,7 @@ export type ProviderStatus = "connected" | "needs_auth" | "needs_permission" | "
 export type ProviderStatusReason =
   | "missing_credential"
   | "invalid_credential"
+  | "oauth_expired"
   | "missing_permission"
   | "local_service_unavailable"
   | "network_unavailable"
@@ -154,7 +155,6 @@ export interface Dashboard {
 }
 
 export const $ = (id: string): HTMLElement => document.getElementById(id)!;
-
 export function isTauri(): boolean {
   return !!(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 }
@@ -178,7 +178,7 @@ export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
-// M5 sync con el tel├®fono (comandos sync_* del backend).
+// M5 sync con el teléfono (comandos sync_* del backend).
 export interface SyncExportInfo {
   path: string;
   bytes: number;

@@ -75,6 +75,16 @@ pub(crate) fn set_source_preference(
                 .ok_or_else(|| format!("Fuente desconocida: {source}"))?,
         )
     };
+    if let Some(strategy) = preferred {
+        let descriptor = crate::descriptor::descriptor(vid);
+        if !descriptor.strategies.contains(&strategy) {
+            return Err(format!(
+                "La fuente {} no está implementada para {}",
+                strategy.label(),
+                vid.display_name()
+            ));
+        }
+    }
     let mut cfg = lock_or_recover(&state.config).clone();
     cfg.set_source_preference(vid, preferred);
     cfg.save()?;
@@ -170,8 +180,7 @@ pub(crate) fn set_app_config(
     state
         .notifications_enabled
         .store(incoming.notifications, Ordering::Relaxed);
-    *lock_or_recover(&state.config) = incoming;
-    let current = lock_or_recover(&state.config).clone();
+    *lock_or_recover(&state.config) = incoming;    let current = lock_or_recover(&state.config).clone();
     refresh_catalog_and_tray(&app, &state, &current);
     do_refresh(&app, None);
     Ok(())
@@ -541,7 +550,7 @@ pub(crate) fn sync_set_passphrase(
 ) -> Result<(), String> {
     crate::sync::store_passphrase(passphrase.trim())?;
     if passphrase.trim().is_empty() {
-        // Olvidar la passphrase con sync activo dejar├¡a el servidor cifrando
+        // Olvidar la passphrase con sync activo dejaría el servidor cifrando
         // con una clave que ya no existe: se apaga y se pide reactivar.
         let mut cfg = lock_or_recover(&state.config).clone();
         cfg.sync_enabled = false;

@@ -277,6 +277,9 @@ function detailHtml(provider: ProviderSnapshot, vendor: VendorInfo, updating: bo
     ? `<div class="kv"><span>${t("credits")}</span><span>${provider.credits.remaining.toLocaleString(lang === "es" ? "es-ES" : "en-US", { maximumFractionDigits: 0 })}</span></div>
        ${provider.credits.resetsAvailable == null ? "" : `<div class="kv"><span>${t("resetsAvailable")}</span><span>${provider.credits.resetsAvailable}</span></div>`}`
     : "";
+  const redeemReset = provider.id === "openai" && (provider.credits?.resetsAvailable ?? 0) > 0 && vendor.links.usageUrl
+    ? `<button class="btn ghost" data-redeem-reset="${escapeHtml(provider.id)}" data-reset-url="${escapeHtml(vendor.links.usageUrl)}">${escapeHtml(t("redeemReset"))}</button>`
+    : "";
   const breakdown = provider.productBreakdown.length
     ? `<section class="details breakdown">
         <h3>${t("productUsage")}</h3>
@@ -294,6 +297,7 @@ function detailHtml(provider: ProviderSnapshot, vendor: VendorInfo, updating: bo
       ${creditRows}
       ${additionalQuotas}
       ${legacyRows}
+      ${redeemReset}
     </section>
     ${breakdown}
     ${actionsSectionHtml(provider, vendor)}

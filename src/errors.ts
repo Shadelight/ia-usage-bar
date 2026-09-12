@@ -32,6 +32,7 @@ export const STATUS_COPY: Record<Exclude<ProviderStatus, "connected">, Partial<R
   needs_auth: {
     missing_credential: { title: "errorMissingCredentialTitle", message: "errorMissingCredentialMessage", severity: "warning", action: "configure_credentials", actionLabel: "actionConfigureCredentials" },
     invalid_credential: { title: "errorInvalidCredentialTitle", message: "errorInvalidCredentialMessage", severity: "warning", action: "login", actionLabel: "actionLogin" },
+    oauth_expired: { title: "errorOAuthExpiredTitle", message: "errorOAuthExpiredMessage", severity: "warning", action: "login", actionLabel: "actionLogin" },
   },
   needs_permission: {
     missing_permission: { title: "errorMissingPermissionTitle", message: "errorMissingPermissionMessage", severity: "warning", action: "open_settings", actionLabel: "actionOpenSettings" },

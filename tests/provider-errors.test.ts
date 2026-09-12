@@ -23,6 +23,7 @@ const vendor: VendorInfo = {
 const emitted: Array<[Exclude<ProviderStatus, "connected">, ProviderStatusReason]> = [
   ["needs_auth", "missing_credential"],
   ["needs_auth", "invalid_credential"],
+  ["needs_auth", "oauth_expired"],
   ["needs_permission", "missing_permission"],
   ["unavailable", "local_service_unavailable"],
   ["unavailable", "network_unavailable"],

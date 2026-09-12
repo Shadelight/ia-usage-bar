@@ -389,6 +389,10 @@ pub enum ProviderStatus {
 pub enum ProviderStatusReason {
     MissingCredential,
     InvalidCredential,
+    /// An OAuth session was valid but can no longer be refreshed by this app.
+    /// This is distinct from a mistyped API key because the right recovery is
+    /// to reauthenticate with the provider's client.
+    OAuthExpired,
     MissingPermission,
     LocalServiceUnavailable,
     NetworkUnavailable,

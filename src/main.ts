@@ -6,7 +6,7 @@ import { sanitizeTechnicalDetails, shouldShowRecoveryToast } from "./errors";
 import { setLang, t } from "./i18n";
 import { buildSanitizedDiagnosis, renderDash, updateLoadingClocks, updateResetClocks } from "./views/dash";
 import { actionIconSvg } from "./provider-actions";
-import { checkForUpdates, clearCredentialDraft, clearSyncPassphraseDraft, focusProviderInSettings, persistConfig, refreshSyncView, renderSettings, setCredentialDraft, setExpandedProvider, setSavingProvider, setSyncPairing, setSyncPassphraseDraft } from "./views/settings";
+import { checkForUpdates, clearCredentialDraft, clearSyncPassphraseDraft, focusProviderInSettings, patchSettings, persistConfig, refreshSyncView, renderSettings, setCredentialDraft, setExpandedProvider, setSavingProvider, setSyncPairing, setSyncPassphraseDraft } from "./views/settings";
 import type { SettingsCategory } from "./views/settings";
 import { previewDashboard, renderSpend } from "./views/spend";
 
@@ -17,6 +17,7 @@ let view: "dash" | "spend" | "settings" = "dash";
 const previousStatuses = new Map<string, ProviderStatus>();
 let toastTimer: number | undefined;
 const uiStarted = performance.now();
+let refreshWhenFocused: string | null = null;
 
 type AppTheme = "system" | "light" | "dark";
 
@@ -139,23 +140,9 @@ async function applyDashboard(d: Dashboard) {
   watchRecoveries(d);
   dash = d;
   if (view === "settings") {
-    // Never yank the body away while the user is typing a credential:
-    // drafts are preserved, but focus would be lost on every refresh.
-    const active = document.activeElement as HTMLElement | null;
-    const typingKey = !!active?.matches?.("input[data-key]");
-    if (!typingKey) {
-      const draft = Object.fromEntries(
-        [...document.querySelectorAll<HTMLInputElement>("input[data-key]")].map((i) => [
-          i.dataset.key!,
-          i.value,
-        ]),
-      );
-      renderSettings(dash, settingsCategory);
-      for (const [id, val] of Object.entries(draft)) {
-        const el = document.querySelector<HTMLInputElement>(`[data-key="${id}"]`);
-        if (el && document.activeElement !== el) el.value = val;
-      }
-    }
+    // Never replace Settings as a side effect of a background refresh. In
+    // particular, Windows closes an open <select> when its node is removed.
+    patchSettings(dash, settingsCategory);
   }
   if (view === "spend") renderSpend(dash);
   paintDash();
@@ -285,6 +272,12 @@ async function main() {
   window.addEventListener("app-command-error", (event) => {
     showCommandError((event as CustomEvent<string>).detail || "unknown command error");
   });
+  window.addEventListener("focus", () => {
+    const id = refreshWhenFocused;
+    if (!id) return;
+    refreshWhenFocused = null;
+    void invokeCmd("refresh_provider", { id });
+  });
   if (isTauri()) {
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -298,7 +291,7 @@ async function main() {
 
   document.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
-    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-savesyncpass],[data-forgetsyncpass],[data-syncqr],[data-syncexport]");
+    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-redeem-reset],[data-savesyncpass],[data-forgetsyncpass],[data-syncqr],[data-syncexport]");
     if (!btn) {
       if (!target.closest("#head-menu, #btn-menu")) closeHeadMenu();
       return;
@@ -434,6 +427,12 @@ async function main() {
       else showCommandError(t("commandFailed"));
       if (view === "settings") refreshSyncView();
     }
+    if (btn.dataset.redeemReset && btn.dataset.resetUrl) {
+      // The reset is owned by ChatGPT's Usage screen. Do not depend on a
+      // private mutation endpoint; refresh the observed quota on return.
+      refreshWhenFocused = btn.dataset.redeemReset;
+      await openExternal(btn.dataset.resetUrl);
+    }
   });
 
   document.addEventListener("input", (e) => {
@@ -443,9 +442,6 @@ async function main() {
     const el = e.target as HTMLElement;
     const keyInput = (el as HTMLInputElement).dataset?.key;
     if (keyInput && el instanceof HTMLInputElement) setCredentialDraft(keyInput, el.value);
-    if ((el as HTMLInputElement).dataset?.syncPass !== undefined && el instanceof HTMLInputElement) {
-      setSyncPassphraseDraft(el.value);
-    }
     if ((el as HTMLInputElement).dataset?.syncPass !== undefined && el instanceof HTMLInputElement) {
       setSyncPassphraseDraft(el.value);
     }
@@ -467,14 +463,13 @@ async function main() {
       // input) paints without waiting for the backend round-trip.
       const vendor = dash?.catalog.find((v) => v.id === id);
       if (vendor) vendor.enabled = enabled;
-      if (enabled) setExpandedProvider(id);
-      if (view === "settings") renderSettings(dash, settingsCategory);
+      // Preserve the checkbox node that was just changed. The next dashboard
+      // event patches status text only; it never replaces this form.
       const ok = (await invokeCmd("set_provider_enabled", { id, enabled })) !== null;
       if (!ok && isTauri()) {
-        // Backend rejected: revert model AND form so the UI never lies checked.
+        // Backend rejected: revert model AND node so the UI never lies checked.
         if (vendor) vendor.enabled = !enabled;
-        setExpandedProvider(null);
-        if (view === "settings") renderSettings(dash, settingsCategory);
+        input.checked = !enabled;
         showCommandError(t("commandFailed"));
       }
     }

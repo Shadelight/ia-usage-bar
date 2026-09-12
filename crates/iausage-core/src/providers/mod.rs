@@ -62,7 +62,12 @@ pub fn catalog(cfg: &AppConfig) -> Vec<VendorInfo> {
                 has_credential: cfg.api_key(id).is_some() || detected.contains(id.slug()),
                 links: id.links(),
                 strategies: desc.strategies.iter().map(|s| s.slug().to_string()).collect(),
-                source_preference: cfg.source_preference(id).map(|s| s.slug().to_string()),
+                // Do not surface stale preferences saved by pre-router builds:
+                // if the fetcher cannot execute it, it is not a selectable source.
+                source_preference: cfg
+                    .source_preference(id)
+                    .filter(|source| desc.strategies.contains(source))
+                    .map(|s| s.slug().to_string()),
             }
         })
         .collect()

@@ -96,15 +96,17 @@ macro_rules! desc {
     };
 }
 
-use FetchStrategyKind::{Api, Cli, Local, Oauth, Web};
+use FetchStrategyKind::{Api, Cli, Local, Oauth};
 
-/// Tabla curada a mano desde lo que cada fetcher produce realmente
-/// (ver `providers/*`). `service_status/dashboard` derivan de que existan
-/// URLs oficiales verificadas (`VendorId::links`), nunca adivinadas.
+/// Tabla curada a mano desde lo que cada fetcher ejecuta realmente
+/// (ver `providers/*`). Una estrategia aquí es una promesa de ejecución, no
+/// una fuente que el producto podría llegar a soportar. `service_status` y
+/// `dashboard` derivan de que existan URLs oficiales verificadas
+/// (`VendorId::links`), nunca adivinadas.
 pub static DESCRIPTORS: &[ProviderDescriptor] = &[
     desc!(
         VendorId::Anthropic,
-        &[Oauth, Cli, Web],
+        &[Oauth],
         Oauth,
         ProviderCapabilities {
             quotas: true,
@@ -129,7 +131,7 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
     ),
     desc!(
         VendorId::Openai,
-        &[Oauth, Cli],
+        &[Oauth],
         Oauth,
         ProviderCapabilities {
             quotas: true,
@@ -152,7 +154,7 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
     ),
     desc!(
         VendorId::Copilot,
-        &[Cli, Api],
+        &[Cli],
         Cli,
         ProviderCapabilities {
             quotas: true,
@@ -184,7 +186,7 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
     }),
     desc!(
         VendorId::Kimi,
-        &[Api, Cli],
+        &[Api],
         Api,
         ProviderCapabilities {
             quotas: true,
@@ -222,8 +224,8 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
     ),
     desc!(
         VendorId::Supergrok,
-        &[Cli, Web],
-        Cli,
+        &[Local],
+        Local,
         ProviderCapabilities {
             quotas: true,
             credits: true,
@@ -231,10 +233,10 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
             ..Q
         }
     ),
-    desc!(VendorId::Antigravity, &[Local, Web], Local, Q),
+    desc!(VendorId::Antigravity, &[Local], Local, Q),
     desc!(
         VendorId::Cursor,
-        &[Local, Web],
+        &[Local],
         Local,
         ProviderCapabilities {
             quotas: true,
@@ -251,7 +253,7 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
     }),
     desc!(
         VendorId::Kiro,
-        &[Local, Cli],
+        &[Local],
         Local,
         ProviderCapabilities {
             quotas: true,
@@ -261,7 +263,7 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
     ),
     desc!(
         VendorId::Nous,
-        &[Oauth, Local],
+        &[Oauth],
         Oauth,
         ProviderCapabilities {
             quotas: true,
@@ -277,8 +279,8 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
     }),
     desc!(
         VendorId::CommandCode,
-        &[Cli, Api],
-        Cli,
+        &[Local],
+        Local,
         ProviderCapabilities {
             quotas: true,
             credits: true,
@@ -295,8 +297,8 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
     }),
     desc!(
         VendorId::Windsurf,
-        &[Web, Local],
-        Web,
+        &[Local],
+        Local,
         ProviderCapabilities {
             quotas: true,
             service_status: true,
@@ -307,8 +309,8 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
 ];
 
 /// Resuelve la estrategia efectiva: preferencia explícita o `default`.
-/// El probing de disponibilidad en vivo llega en 0.3.x; hoy la selección
-/// `Auto` equivale al default documentado.
+/// Las preferencias inválidas de versiones antiguas caen al valor implementado
+/// para que una configuración guardada no pueda falsear la fuente activa.
 pub fn resolve_strategy(
     descriptor: &ProviderDescriptor,
     preferred: Option<FetchStrategyKind>,
@@ -377,7 +379,7 @@ mod tests {
 
     #[test]
     fn strategy_parse_round_trips() {
-        for s in [Oauth, Cli, Api, Web, Local] {
+        for s in [Oauth, Cli, Api, FetchStrategyKind::Web, Local] {
             assert_eq!(FetchStrategyKind::parse(s.slug()), Some(s));
         }
         assert_eq!(FetchStrategyKind::parse("auto"), None);
@@ -388,9 +390,9 @@ mod tests {
     fn resolve_prefers_explicit_when_supported() {
         let claude = descriptor(VendorId::Anthropic);
         assert_eq!(resolve_strategy(claude, None), Oauth);
-        assert_eq!(resolve_strategy(claude, Some(Web)), Web);
+        assert_eq!(resolve_strategy(claude, Some(FetchStrategyKind::Web)), Oauth);
         // Kimi no declara Web: cae al default.
         let kimi = descriptor(VendorId::Kimi);
-        assert_eq!(resolve_strategy(kimi, Some(Web)), Api);
+        assert_eq!(resolve_strategy(kimi, Some(FetchStrategyKind::Web)), Api);
     }
 }

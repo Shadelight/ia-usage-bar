@@ -7,8 +7,8 @@ use crate::config::AppConfig;
 use crate::cost;
 use crate::http::{self, FetchError};
 use crate::model::{
-    json_f64, json_str, progress_pct, snapshot_needs_auth, snapshot_ok, values_line, ProductUsage,
-    ProviderSnapshot, UsageCost, VendorId,
+    json_f64, json_str, progress_pct, snapshot_needs_auth, snapshot_ok, snapshot_with_status, values_line, ProductUsage,
+    ProviderSnapshot, ProviderStatus, ProviderStatusReason, UsageCost, VendorId,
 };
 use crate::paths::claude_dir;
 
@@ -40,6 +40,15 @@ impl Provider for Claude {
                 append_cost(&mut snap);
                 snap
             }
+            // Claude Code owns token renewal. A 401 from its OAuth usage
+            // endpoint means the local session needs `claude` to sign in
+            // again; presenting it as a generic bad credential is misleading.
+            Err(FetchError::Http(401, detail)) => snapshot_with_status(
+                VendorId::Anthropic,
+                ProviderStatus::NeedsAuth,
+                ProviderStatusReason::OAuthExpired,
+                &format!("La sesión OAuth de Claude Code venció. Ejecuta `claude` para volver a iniciar sesión. {detail}"),
+            ),
             Err(e) => super::map_fetch_err(VendorId::Anthropic, e),
         }
     }

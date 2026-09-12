@@ -15,6 +15,7 @@ use super::Provider;
 
 const TOKEN_KEY: &str = "cursorAuth/accessToken";
 const USAGE_URL: &str = "https://cursor.com/api/usage-summary";
+const SAND_USAGE_URL: &str = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus";
 const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 pub struct Cursor;
@@ -41,7 +42,15 @@ impl Provider for Cursor {
             );
         };
         match fetch_summary(&cookie) {
-            Ok(body) => snapshot_from_json(&body).unwrap_or_else(|e| {
+            Ok(body) => snapshot_from_json(&body).map(|mut snapshot| {
+                // Grok Bot has a separate weekly allowance. This endpoint is
+                // supplementary: failure must not discard the normal Cursor
+                // quota that was already fetched successfully.
+                if let Ok(sand) = fetch_sand_usage(&token) {
+                    append_grok_bot(&mut snapshot, &sand);
+                }
+                snapshot
+            }).unwrap_or_else(|e| {
                 snapshot_with_status(
                     VendorId::Cursor,
                     ProviderStatus::Error,
@@ -119,6 +128,18 @@ fn fetch_summary(cookie: &str) -> Result<Value, FetchError> {
             ("Referer", "https://cursor.com/dashboard"),
             ("User-Agent", BROWSER_UA),
         ],
+    )
+}
+
+fn fetch_sand_usage(token: &str) -> Result<Value, FetchError> {
+    http::post_json(
+        SAND_USAGE_URL,
+        &[
+            ("Authorization", &format!("Bearer {token}")),
+            ("Content-Type", "application/json"),
+            ("Connect-Protocol-Version", "1"),
+        ],
+        &Value::Object(Default::default()),
     )
 }
 
@@ -222,6 +243,70 @@ pub fn snapshot_from_json(body: &Value) -> Result<ProviderSnapshot, String> {
     Ok(snapshot_ok(VendorId::Cursor, &plan, lines))
 }
 
+/// Add Cursor's independent Grok Bot weekly allowance when the user has it.
+/// `GetSandUsageStatus` has appeared both as a direct object and nested under
+/// `response`, so tolerate both representations without guessing from HTML.
+fn append_grok_bot(snapshot: &mut ProviderSnapshot, body: &Value) {
+    let status = body.get("response").unwrap_or(body);
+    let Some(used) = json_f64(status, &["usagePercent"]) else {
+        return;
+    };
+    let reset = json_str(status, &["nextResetTimestampUtc"])
+        .or_else(|| unix_reset(status.get("nextResetTimestampUtc")));
+    let line = progress_pct(
+        "grok_bot",
+        "Grok Bot",
+        used,
+        reset,
+        604_800,
+        "always",
+    );
+    snapshot.quotas.extend(line_to_quota(&line, snapshot));
+    snapshot.lines.push(line);
+}
+
+fn unix_reset(value: Option<&Value>) -> Option<String> {
+    let seconds = value?.as_i64().or_else(|| value?.as_f64().map(|n| n as i64))?;
+    let seconds = if seconds > 10_000_000_000 { seconds / 1_000 } else { seconds };
+    chrono::DateTime::from_timestamp(seconds, 0).map(|time| time.to_rfc3339())
+}
+
+// `snapshot_ok` normally performs this conversion. This small adapter keeps
+// the Grok line consistent with the rest of a already-normalized snapshot.
+fn line_to_quota(line: &crate::model::MetricLine, snapshot: &ProviderSnapshot) -> Vec<crate::model::UsageQuota> {
+    let crate::model::MetricLine::Progress {
+        id, label, used, remaining, resets_at, ..
+    } = line else { return Vec::new() };
+    let reset_in_seconds = resets_at.as_deref().and_then(|iso| {
+        chrono::DateTime::parse_from_rfc3339(iso).ok().map(|time| {
+            (time.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds().max(0)
+        })
+    });
+    vec![crate::model::UsageQuota {
+        id: id.clone(),
+        label: label.clone(),
+        window_type: crate::model::WindowType::Weekly,
+        used_percent: Some(*used),
+        remaining_percent: Some(*remaining),
+        used_amount: None,
+        limit_amount: None,
+        unit: Some(crate::model::UsageUnit::Percent),
+        reset_at: resets_at.clone(),
+        reset_in_seconds,
+        reset_status: if resets_at.is_some() && reset_in_seconds.is_some() {
+            crate::model::ResetStatus::Known
+        } else {
+            crate::model::ResetStatus::NotProvided
+        },
+        temporary_multiplier: None,
+        temporary_expires_at: None,
+        source: snapshot.active_source.unwrap_or(crate::model::UsageSource::LocalSession),
+        fetched_at: snapshot.updated_at.clone(),
+        stale: snapshot.stale,
+        confidence: crate::model::DataConfidence::Exact,
+    }]
+}
+
 fn parse_display_pct(msg: Option<&str>) -> Option<f64> {
     let msg = msg?;
     let digits: String = msg
@@ -230,4 +315,26 @@ fn parse_display_pct(msg: Option<&str>) -> Option<f64> {
         .take_while(|c| c.is_ascii_digit() || *c == '.')
         .collect();
     digits.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adds_grok_bot_weekly_allowance() {
+        let summary = serde_json::json!({
+            "membershipType": "pro",
+            "individualUsage": { "plan": { "totalPercentUsed": 8.0 } }
+        });
+        let mut snapshot = snapshot_from_json(&summary).unwrap();
+        let sand = serde_json::json!({
+            "usagePercent": 25.0,
+            "nextResetTimestampUtc": "2099-01-08T00:00:00Z"
+        });
+        append_grok_bot(&mut snapshot, &sand);
+        let quota = snapshot.quotas.iter().find(|quota| quota.id == "grok_bot").unwrap();
+        assert_eq!(quota.window_type, crate::model::WindowType::Weekly);
+        assert_eq!(quota.used_percent, Some(25.0));
+    }
 }
