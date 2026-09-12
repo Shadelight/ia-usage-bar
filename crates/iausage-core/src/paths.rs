@@ -37,3 +37,9 @@ pub fn detect_path() -> PathBuf {
 pub fn snapshot_cache_path() -> PathBuf {
     app_config_dir().join("provider-snapshots.json")
 }
+
+/// Identificador estable de este colector para el protocolo sync (M5).
+/// Se genera una vez y nunca contiene secretos.
+pub fn sync_device_path() -> PathBuf {
+    app_config_dir().join("device-id")
+}
