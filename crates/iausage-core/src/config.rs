@@ -11,6 +11,7 @@ use crate::model::VendorId;
 use crate::paths::{app_config_dir, config_path, detect_path};
 
 const CREDENTIAL_SERVICE: &str = "com.alberth.iausagebar";
+pub(crate) const SYNC_PASSPHRASE_ACCOUNT: &str = "sync-passphrase";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -35,6 +36,13 @@ pub struct AppConfig {
     pub always_on_top: bool,
     #[serde(default)]
     pub compact_mode: bool,
+    /// M5 sync con el teléfono: escribe el blob cifrado tras cada refresh.
+    #[serde(default)]
+    pub sync_enabled: bool,
+    /// Carpeta del blob `ia-sync/<device>.json`. Vacía = carpeta por defecto
+    /// dentro del config dir. La passphrase vive en keyring, nunca aquí.
+    #[serde(default)]
+    pub sync_export_dir: Option<String>,
     /// True when `load()` could not parse `config.toml` and fell back to
     /// defaults after backing the bad file aside. Never persisted; callers
     /// must not overwrite `config.toml` while this is set.
@@ -85,6 +93,8 @@ impl Default for AppConfig {
             providers: HashMap::new(),
             always_on_top: true,
             compact_mode: false,
+            sync_enabled: false,
+            sync_export_dir: None,
             load_recovered: false,
         }
     }

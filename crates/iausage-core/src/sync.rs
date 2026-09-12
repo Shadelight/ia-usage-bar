@@ -18,8 +18,8 @@ use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::config::atomic_write;
-use crate::paths::sync_device_path;
+use crate::config::{atomic_write, AppConfig, SYNC_PASSPHRASE_ACCOUNT};
+use crate::paths::{app_config_dir, sync_device_path};
 use crate::snapshot_v1::DashboardSnapshotV1;
 use crate::SNAPSHOT_SCHEMA_VERSION;
 
@@ -177,6 +177,108 @@ pub fn decrypt_blob(blob: &EncryptedBlob, passphrase: &str) -> Result<SyncPayloa
     decode_payload(&plaintext)
 }
 
+fn sync_entry() -> Result<keyring::Entry, String> {
+    // El servicio es el mismo que el de las API keys; la cuenta distingue.
+    let service = "com.alberth.iausagebar";
+    keyring::Entry::new(service, SYNC_PASSPHRASE_ACCOUNT).map_err(|e| e.to_string())
+}
+
+/// Guarda la passphrase de sync en el Credential Manager. Vacía = olvidar.
+pub fn store_passphrase(value: &str) -> Result<(), String> {
+    let entry = sync_entry()?;
+    if value.trim().is_empty() {
+        if entry.get_password().is_ok() {
+            entry.delete_credential().map_err(|e| e.to_string())?;
+        }
+    } else {
+        entry.set_password(value).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Solo responde si hay passphrase guardada, nunca su valor.
+pub fn has_passphrase() -> bool {
+    sync_entry()
+        .and_then(|e| e.get_password().map_err(|e| e.to_string()))
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+}
+
+pub fn load_passphrase() -> Result<String, String> {
+    let pw = sync_entry()?.get_password().map_err(|e| e.to_string())?;
+    if pw.trim().is_empty() {
+        return Err("sync: no hay passphrase guardada".into());
+    }
+    Ok(pw)
+}
+
+/// Carpeta del blob. Por defecto `<config-dir>/ia-sync`; el usuario la
+/// apunta a su Syncthing/OneDrive o la deja local.
+pub fn default_export_dir() -> std::path::PathBuf {
+    app_config_dir().join("ia-sync")
+}
+
+pub fn resolve_export_dir(cfg: &AppConfig) -> std::path::PathBuf {
+    match cfg.sync_export_dir.as_deref().map(str::trim) {
+        Some(dir) if !dir.is_empty() => std::path::PathBuf::from(dir),
+        _ => default_export_dir(),
+    }
+}
+
+fn blob_name(device_id: &str) -> String {
+    format!("{device_id}.json")
+}
+
+/// Cifra y escribe el blob de forma atómica. Devuelve la ruta escrita.
+pub fn export_blob_to_dir(
+    dir: &std::path::Path,
+    device_id: &str,
+    payload: &SyncPayload,
+    passphrase: &str,
+) -> Result<std::path::PathBuf, String> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let blob = encrypt_payload(payload, passphrase)?;
+    let body = serde_json::to_vec_pretty(&blob).map_err(|e| e.to_string())?;
+    let path = dir.join(blob_name(device_id));
+    atomic_write(&path, &body)?;
+    Ok(path)
+}
+
+/// Exporta el snapshot actual si sync está activo (`None` = desactivado,
+/// no es error). Lee device-id y passphrase del sistema.
+pub fn export_current_snapshot(
+    cfg: &AppConfig,
+    snaps: &std::collections::HashMap<String, crate::model::ProviderSnapshot>,
+    app_version: Option<String>,
+) -> Result<Option<std::path::PathBuf>, String> {
+    if !cfg.sync_enabled {
+        return Ok(None);
+    }
+    if cfg.load_recovered {
+        return Err("sync: config en recuperación, no se exporta hasta revisar config.toml".into());
+    }
+    let passphrase = load_passphrase().map_err(|_| {
+        "sync: activado sin passphrase; usa `iausage sync set-passphrase` o la pantalla Sync"
+            .to_string()
+    })?;
+    let device_id = load_or_create_device_id()?;
+    let catalog = crate::providers::catalog(cfg);
+    let snapshot = crate::snapshot_v1::build(snaps, &catalog, crate::model::now_iso(), app_version);
+    let payload = build_payload(device_id.clone(), crate::model::now_iso(), snapshot);
+    let path = export_blob_to_dir(&resolve_export_dir(cfg), &device_id, &payload, &passphrase)?;
+    Ok(Some(path))
+}
+
+/// Lee y valida un blob de disco (sin descifrar).
+pub fn read_blob_file(path: &std::path::Path) -> Result<EncryptedBlob, String> {
+    let raw = std::fs::read(path).map_err(|e| e.to_string())?;
+    let blob: EncryptedBlob = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
+    if blob.v != SYNC_BLOB_VERSION {
+        return Err(format!("sync: blob v{} no soportado", blob.v));
+    }
+    Ok(blob)
+}
+
 /// Lee el id estable del colector o lo genera (hex aleatorio, sin secretos).
 pub fn load_or_create_device_id() -> Result<String, String> {
     load_or_create_device_id_in(&sync_device_path())
@@ -219,6 +321,7 @@ pub fn pairing_fingerprint(device_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::AppConfig;
     use crate::model::{progress_pct, snapshot_ok, VendorId};
 
     fn sample_payload() -> SyncPayload {
@@ -386,5 +489,53 @@ mod tests {
         let second = load_or_create_device_id_in(&path).unwrap();
         assert_eq!(first, second);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_escribe_blob_legible() {
+        let dir = std::env::temp_dir().join(format!("sync-exp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let payload = sample_payload();
+        let path = export_blob_to_dir(&dir, "abc123", &payload, "clave").unwrap();
+        assert_eq!(path, dir.join("abc123.json"));
+        let blob = read_blob_file(&path).unwrap();
+        assert_eq!(blob.v, SYNC_BLOB_VERSION);
+        let back = decrypt_blob(&blob, "clave").unwrap();
+        assert_eq!(back.snapshot.providers.len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_rechaza_blob_malo() {
+        let dir = std::env::temp_dir().join(format!("sync-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("roto.json");
+        std::fs::write(&path, b"no es json").unwrap();
+        assert!(read_blob_file(&path).is_err());
+        assert!(read_blob_file(&dir.join("ausente.json")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_current_respeta_desactivado() {
+        let cfg = AppConfig::default();
+        assert!(!cfg.sync_enabled);
+        let snaps = std::collections::HashMap::new();
+        let out = export_current_snapshot(&cfg, &snaps, None).unwrap();
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn export_dir_por_defecto_y_personalizado() {
+        let mut cfg = AppConfig::default();
+        assert!(resolve_export_dir(&cfg).ends_with("ia-sync"));
+        cfg.sync_export_dir = Some("  ".into());
+        assert!(resolve_export_dir(&cfg).ends_with("ia-sync"));
+        cfg.sync_export_dir = Some("D:/sync-mio".into());
+        assert_eq!(
+            resolve_export_dir(&cfg),
+            std::path::PathBuf::from("D:/sync-mio")
+        );
     }
 }

@@ -18,7 +18,7 @@ use iausage_core::descriptor::{descriptor, FetchStrategyKind};
 use iausage_core::doctor;
 use iausage_core::guard;
 use iausage_core::model::{most_headroom, now_iso, ProviderSnapshot, VendorId};
-use iausage_core::{providers, snapshot_v1};
+use iausage_core::{providers, snapshot_v1, sync};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -34,8 +34,9 @@ fn usage_help() -> String {
           iausage refresh [--provider ID]\n  \
           iausage guard --provider ID [--window W] [--min-remaining N]\n  \
           iausage enable <provider> | iausage disable <provider>\n  \
-          iausage config validate\n  \
-          iausage version\n\
+            iausage config validate\n  \
+            iausage sync <export|verify|status|set-passphrase|enable|disable>\n  \
+            iausage version\n\
         \n\
         --json emite DashboardSnapshotV1 (schemaVersion 1), el mismo contrato\n\
         que consumen la GUI, la futura API y los widgets.\n\
@@ -288,7 +289,11 @@ fn cmd_refresh(args: &[String]) -> ExitCode {
     }
     let (cfg, snaps) = load_state(true, only.as_deref());
     println!("Actualizados {} providers.", snaps.len());
-    let _ = cfg;
+    match sync::export_current_snapshot(&cfg, &snaps, Some(VERSION.into())) {
+        Ok(Some(path)) => println!("Sync exportado a {}.", path.display()),
+        Ok(None) => {}
+        Err(e) => eprintln!("aviso sync: {e}"),
+    }
     ExitCode::SUCCESS
 }
 
@@ -391,6 +396,175 @@ fn cmd_enable(args: &[String], enabled: bool) -> ExitCode {
     }
 }
 
+fn cmd_sync(args: &[String]) -> ExitCode {
+    let Some((sub, rest)) = args.split_first() else {
+        return fail(
+            "sync: uso `iausage sync <export|verify|status|set-passphrase|enable|disable>`",
+        );
+    };
+    match sub.as_str() {
+        "export" => cmd_sync_export(rest),
+        "verify" => cmd_sync_verify(rest),
+        "status" => cmd_sync_status(rest),
+        "set-passphrase" => cmd_sync_set_passphrase(rest),
+        "enable" => cmd_sync_enable(rest, true),
+        "disable" => cmd_sync_enable(rest, false),
+        s => fail(&format!("sync: subcomando desconocido {s}")),
+    }
+}
+
+fn cmd_sync_export(args: &[String]) -> ExitCode {
+    let mut out: Option<String> = None;
+    let mut refresh = false;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--out" => {
+                i += 1;
+                out = args.get(i).cloned();
+                if out.is_none() {
+                    return fail("sync export: falta valor para --out");
+                }
+            }
+            "--refresh" => refresh = true,
+            s => return fail(&format!("sync export: argumento desconocido {s}")),
+        }
+        i += 1;
+    }
+    let (mut cfg, snaps) = load_state(refresh, None);
+    if !cfg.sync_enabled {
+        return fail("sync desactivado; usa `iausage sync enable` primero");
+    }
+    if let Some(dir) = out {
+        cfg.sync_export_dir = Some(dir);
+    }
+    match sync::export_current_snapshot(&cfg, &snaps, Some(VERSION.into())) {
+        Ok(Some(path)) => {
+            println!("Sync exportado a {}.", path.display());
+            ExitCode::SUCCESS
+        }
+        Ok(None) => fail("sync desactivado; usa `iausage sync enable` primero"),
+        Err(e) => {
+            eprintln!("iausage: {e}");
+            ExitCode::from(guard::EXIT_UNAVAILABLE as u8)
+        }
+    }
+}
+
+fn cmd_sync_verify(args: &[String]) -> ExitCode {
+    if args.len() != 1 {
+        return fail("sync verify: uso `iausage sync verify <archivo>`");
+    }
+    let path = std::path::Path::new(&args[0]);
+    let blob = match sync::read_blob_file(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("iausage: {e}");
+            return ExitCode::from(guard::EXIT_UNAVAILABLE as u8);
+        }
+    };
+    let passphrase = match sync::load_passphrase() {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("iausage: sin passphrase guardada; usa `iausage sync set-passphrase`.");
+            return ExitCode::from(guard::EXIT_UNAVAILABLE as u8);
+        }
+    };
+    match sync::decrypt_blob(&blob, &passphrase) {
+        Ok(payload) => {
+            println!(
+                "OK: blob v{} · dispositivo {} · generado {} · {} providers.",
+                blob.v,
+                payload.device_id,
+                payload.generated_at,
+                payload.snapshot.providers.len()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("iausage: {e}");
+            ExitCode::from(guard::EXIT_UNAVAILABLE as u8)
+        }
+    }
+}
+
+fn cmd_sync_status(args: &[String]) -> ExitCode {
+    if !args.is_empty() {
+        return fail("sync status: no admite argumentos");
+    }
+    let cfg = AppConfig::load();
+    let device_id = sync::load_or_create_device_id().unwrap_or_else(|_| "—".into());
+    println!(
+        "sync: {}",
+        if cfg.sync_enabled {
+            "activado"
+        } else {
+            "desactivado"
+        }
+    );
+    println!(
+        "dispositivo: {device_id} ({})",
+        sync::pairing_fingerprint(&device_id)
+    );
+    println!("carpeta: {}", sync::resolve_export_dir(&cfg).display());
+    println!(
+        "passphrase: {}",
+        if sync::has_passphrase() {
+            "guardada"
+        } else {
+            "ausente"
+        }
+    );
+    let blob = sync::resolve_export_dir(&cfg).join(format!("{device_id}.json"));
+    match std::fs::metadata(&blob) {
+        Ok(meta) => println!("último export: {} ({} bytes)", blob.display(), meta.len()),
+        Err(_) => println!("último export: ninguno"),
+    }
+    ExitCode::SUCCESS
+}
+
+fn cmd_sync_set_passphrase(args: &[String]) -> ExitCode {
+    if !args.is_empty() {
+        return fail("sync set-passphrase: lee de stdin, sin argumentos");
+    }
+    eprintln!("Escribe la passphrase y pulsa Enter (vacía = olvidar):");
+    let mut line = String::new();
+    if std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut line).is_err() {
+        return fail("sync set-passphrase: no se pudo leer stdin");
+    }
+    match sync::store_passphrase(line.trim()) {
+        Ok(()) => {
+            println!("passphrase actualizada.");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("iausage: {e}");
+            ExitCode::from(guard::EXIT_UNAVAILABLE as u8)
+        }
+    }
+}
+
+fn cmd_sync_enable(args: &[String], enabled: bool) -> ExitCode {
+    if !args.is_empty() {
+        return fail("sync enable|disable: sin argumentos");
+    }
+    if enabled && !sync::has_passphrase() {
+        return fail("sync: primero `iausage sync set-passphrase`");
+    }
+    let mut cfg = AppConfig::load();
+    cfg.sync_enabled = enabled;
+    match cfg.save() {
+        Ok(()) => {
+            println!("sync {}.", if enabled { "activado" } else { "desactivado" });
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("iausage: no se pudo guardar la config: {e}");
+            ExitCode::from(guard::EXIT_UNAVAILABLE as u8)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     if argv.is_empty() || argv[0] == "--help" || argv[0] == "-h" || argv[0] == "help" {
@@ -407,6 +581,7 @@ fn main() -> ExitCode {
         "enable" => cmd_enable(&argv[1..], true),
         "disable" => cmd_enable(&argv[1..], false),
         "config" => cmd_config(&argv[1..]),
+        "sync" => cmd_sync(&argv[1..]),
         "version" | "--version" | "-V" => {
             println!("iausage {VERSION} (snapshot v{})", iausage_core::SNAPSHOT_SCHEMA_VERSION);
             ExitCode::SUCCESS
