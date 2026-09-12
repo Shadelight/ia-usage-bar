@@ -167,10 +167,16 @@ jobs:
       - name: Rename Android and VSIX assets
         shell: pwsh
         run: |
+          # actions/upload-artifact preserves the common ancestor of the
+          # uploaded paths, so the APK/AAB land nested (apk/release/*.apk,
+          # bundle/release/*.aab) rather than flat in android-release/.
           $version = $env:GITHUB_REF_NAME.TrimStart("v")
-          Copy-Item android-release/app-release.apk "android-release/IA-Usage-Android-$version.apk" -Force
-          Copy-Item android-release/app-release.aab "android-release/IA-Usage-Android-$version.aab" -Force
-          $vsix = Get-Item vscode-release/*.vsix
+          $apk = Get-ChildItem -Recurse android-release -Filter *.apk | Select-Object -First 1
+          $aab = Get-ChildItem -Recurse android-release -Filter *.aab | Select-Object -First 1
+          $vsix = Get-ChildItem -Recurse vscode-release -Filter *.vsix | Select-Object -First 1
+          if (-not $apk -or -not $aab -or -not $vsix) { throw "Missing downloaded Android or VSIX asset (apk=$apk aab=$aab vsix=$vsix)" }
+          Copy-Item $apk.FullName "android-release/IA-Usage-Android-$version.apk" -Force
+          Copy-Item $aab.FullName "android-release/IA-Usage-Android-$version.aab" -Force
           Copy-Item $vsix.FullName "vscode-release/IA-Usage-VSCode-$version.vsix" -Force
 
       - name: Checksum all release assets
