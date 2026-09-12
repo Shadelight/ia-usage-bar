@@ -102,7 +102,10 @@ export function deriveProviderState(
     default: {
       const reason = snapshot.statusReason ?? null;
       if (reason === "invalid_credential") {
-        return { enabled: true, configured, via, connection: "needs_auth", dotClass: dotFor("needs_auth"), statusKey: "statusSessionInvalid", sessionInvalid: true };
+        // An API key rejection is not an expired "session": OAuth vendors
+        // keep the session wording, key vendors name the credential.
+        const apiCredential = vendor.needsKey || vendor.authKind === "apikey";
+        return { enabled: true, configured, via, connection: "needs_auth", dotClass: dotFor("needs_auth"), statusKey: apiCredential ? "statusCredentialInvalid" : "statusSessionInvalid", sessionInvalid: !apiCredential };
       }
       if (reason === "missing_credential" || reason == null) {
         // Missing credential with no stored key and a key-based vendor:

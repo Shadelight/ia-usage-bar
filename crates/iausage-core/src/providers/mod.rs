@@ -10,12 +10,14 @@ mod kiro;
 mod local;
 mod openai_admin;
 
+use std::collections::HashSet;
+
 use crate::config::AppConfig;
 use crate::descriptor::descriptor;
 use crate::http::FetchError;
 use crate::model::{
     snapshot_needs_auth, snapshot_with_status, ProviderSnapshot, ProviderStatus,
-    ProviderStatusReason, VendorId, VendorInfo,
+    ProviderStatusReason, AuthKind, VendorId, VendorInfo,
 };
 
 pub trait Provider {
@@ -40,6 +42,13 @@ pub fn refresh(id: VendorId, cfg: &AppConfig) -> ProviderSnapshot {
     snapshot
 }
 
+/// Actualización local de Codex, usada por el watcher persistente. Mantiene
+/// las sesiones como optimización de eventos; `refresh` sigue siendo la ruta
+/// autoritativa que consulta el endpoint remoto en el intervalo controlado.
+pub fn codex_snapshot_from_sessions() -> Option<ProviderSnapshot> {
+    codex::snapshot_from_sessions()
+}
+
 pub fn catalog(cfg: &AppConfig) -> Vec<VendorInfo> {
     // Startup must not synchronously probe every CLI/account. `run_detect`
     // refreshes this small persisted set in the background.
@@ -49,6 +58,7 @@ pub fn catalog(cfg: &AppConfig) -> Vec<VendorInfo> {
         .copied()
         .map(|id| {
             let desc = descriptor(id);
+            let has_credential = credential_present(id, cfg, &detected);
             VendorInfo {
                 id: id.slug().to_string(),
                 name: id.display_name().to_string(),
@@ -59,7 +69,7 @@ pub fn catalog(cfg: &AppConfig) -> Vec<VendorInfo> {
                 needs_key: id.needs_api_key_ui(),
                 enabled: cfg.is_enabled(id),
                 detected: detected.contains(id.slug()),
-                has_credential: cfg.api_key(id).is_some() || detected.contains(id.slug()),
+                has_credential,
                 links: id.links(),
                 strategies: desc.strategies.iter().map(|s| s.slug().to_string()).collect(),
                 // Do not surface stale preferences saved by pre-router builds:
@@ -71,6 +81,17 @@ pub fn catalog(cfg: &AppConfig) -> Vec<VendorInfo> {
             }
         })
         .collect()
+}
+
+/// Whether the UI may claim a usable credential exists. `detected` records a
+/// locally observed login/session and must never resurrect a deleted API key:
+/// pure key vendors derive presence from the secret store (env/keyring) only.
+fn credential_present(id: VendorId, cfg: &AppConfig, detected: &HashSet<String>) -> bool {
+    match id.auth_kind() {
+        AuthKind::ApiKey => cfg.api_key(id).is_some(),
+        AuthKind::Mixed => cfg.api_key(id).is_some() || detected.contains(id.slug()),
+        AuthKind::Oauth | AuthKind::Local => detected.contains(id.slug()),
+    }
 }
 
 fn dispatch(id: VendorId) -> Box<dyn Provider> {
@@ -328,5 +349,91 @@ mod tests {
             !serialized.contains("sk-test-must-never-serialize"),
             "the secret itself must never reach the frontend"
         );
+    }
+
+    #[test]
+    fn stale_detected_entry_never_resurrects_a_deleted_api_key() {
+        // KILO_API_KEY is unique to this test; no other test reads it.
+        std::env::remove_var("KILO_API_KEY");
+        let cfg = AppConfig::default();
+        let detected: HashSet<String> = ["kilo".into()].iter().cloned().collect();
+        assert!(
+            !credential_present(VendorId::Kilo, &cfg, &detected),
+            "a stale detected.json entry must not fake an ApiKey credential"
+        );
+        std::env::set_var("KILO_API_KEY", "sk-test-kilo-present");
+        assert!(
+            credential_present(VendorId::Kilo, &cfg, &HashSet::new()),
+            "a stored key alone must count for ApiKey vendors"
+        );
+        std::env::remove_var("KILO_API_KEY");
+    }
+
+    #[test]
+    fn mixed_vendors_accept_either_secret_or_local_login() {
+        std::env::remove_var("GITHUB_COPILOT_TOKEN");
+        let cfg = AppConfig::default();
+        let detected: HashSet<String> = ["copilot".into()].iter().cloned().collect();
+        assert!(credential_present(VendorId::Copilot, &cfg, &detected));
+        assert!(!credential_present(
+            VendorId::Copilot,
+            &cfg,
+            &HashSet::new()
+        ));
+    }
+
+    #[test]
+    fn oauth_and_local_vendors_derive_presence_from_detection_only() {
+        let cfg = AppConfig::default();
+        let detected: HashSet<String> = ["anthropic".into(), "cursor".into()]
+            .iter()
+            .cloned()
+            .collect();
+        assert!(credential_present(VendorId::Anthropic, &cfg, &detected));
+        assert!(credential_present(VendorId::Cursor, &cfg, &detected));
+        assert!(!credential_present(
+            VendorId::Anthropic,
+            &cfg,
+            &HashSet::new()
+        ));
+        assert!(!credential_present(VendorId::Openai, &cfg, &detected));
+    }
+
+    #[test]
+    fn credential_links_are_official_https_or_absent() {
+        for id in VendorId::all().iter().copied() {
+            let links = id.links();
+            for url in [links.api_key_url.as_deref(), links.signup_url.as_deref()]
+                .into_iter()
+                .flatten()
+            {
+                assert!(
+                    url.starts_with("https://"),
+                    "{} credential link must be https: {url}",
+                    id.slug()
+                );
+            }
+            let is_key_vendor = matches!(
+                id.auth_kind(),
+                crate::model::AuthKind::ApiKey | crate::model::AuthKind::Mixed
+            ) && id.env_key().is_some();
+            if !is_key_vendor {
+                assert!(
+                    links.api_key_url.is_none() && links.signup_url.is_none(),
+                    "{} is not a key vendor and must not show credential links",
+                    id.slug()
+                );
+            }
+        }
+        // The reported cases stay covered end to end.
+        let openrouter = VendorId::Openrouter.links();
+        assert_eq!(
+            openrouter.api_key_url.as_deref(),
+            Some("https://openrouter.ai/settings/keys")
+        );
+        assert!(openrouter.signup_url.is_some());
+        let go = VendorId::OpenCodeGo.links();
+        assert_eq!(go.api_key_url.as_deref(), Some("https://opencode.ai/auth"));
+        assert!(go.signup_url.is_some());
     }
 }

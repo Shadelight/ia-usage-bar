@@ -217,6 +217,8 @@ impl VendorId {
                         .into(),
                 ),
                 app_url: Some("https://claude.ai".into()),
+                api_key_url: None,
+                signup_url: None,
             },
             VendorId::AnthropicApi => VendorLinks {
                 usage_url: Some("https://console.anthropic.com/settings/usage".into()),
@@ -224,6 +226,8 @@ impl VendorId {
                 status_url: Some("https://status.anthropic.com".into()),
                 docs_url: Some("https://docs.anthropic.com".into()),
                 app_url: Some("https://console.anthropic.com".into()),
+                api_key_url: Some("https://console.anthropic.com/settings/keys".into()),
+                signup_url: Some("https://console.anthropic.com/".into()),
             },
             VendorId::Openai => VendorLinks {
                 usage_url: Some("https://chatgpt.com/#settings".into()),
@@ -231,6 +235,8 @@ impl VendorId {
                 status_url: Some("https://status.openai.com".into()),
                 docs_url: Some("https://help.openai.com".into()),
                 app_url: Some("https://chatgpt.com".into()),
+                api_key_url: None,
+                signup_url: None,
             },
             VendorId::OpenaiAdmin => VendorLinks {
                 usage_url: Some("https://platform.openai.com/usage".into()),
@@ -240,6 +246,8 @@ impl VendorId {
                 status_url: Some("https://status.openai.com".into()),
                 docs_url: Some("https://platform.openai.com/docs".into()),
                 app_url: Some("https://platform.openai.com".into()),
+                api_key_url: Some("https://platform.openai.com/api-keys".into()),
+                signup_url: Some("https://platform.openai.com/signup".into()),
             },
             VendorId::Copilot => VendorLinks {
                 usage_url: Some("https://github.com/settings/copilot".into()),
@@ -247,6 +255,8 @@ impl VendorId {
                 status_url: Some("https://www.githubstatus.com".into()),
                 docs_url: Some("https://docs.github.com/copilot".into()),
                 app_url: Some("https://github.com/copilot".into()),
+                api_key_url: Some("https://github.com/settings/tokens".into()),
+                signup_url: Some("https://github.com/signup".into()),
             },
             VendorId::Cursor => VendorLinks {
                 usage_url: Some("https://cursor.com/dashboard".into()),
@@ -254,6 +264,8 @@ impl VendorId {
                 status_url: None,
                 docs_url: Some("https://docs.cursor.com".into()),
                 app_url: Some("https://cursor.com".into()),
+                api_key_url: None,
+                signup_url: None,
             },
             VendorId::Openrouter => VendorLinks {
                 usage_url: Some("https://openrouter.ai/activity".into()),
@@ -261,6 +273,8 @@ impl VendorId {
                 status_url: None,
                 docs_url: Some("https://openrouter.ai/docs".into()),
                 app_url: Some("https://openrouter.ai".into()),
+                api_key_url: Some("https://openrouter.ai/settings/keys".into()),
+                signup_url: Some("https://openrouter.ai/auth".into()),
             },
             VendorId::Deepseek => VendorLinks {
                 usage_url: Some("https://platform.deepseek.com/usage".into()),
@@ -268,6 +282,8 @@ impl VendorId {
                 status_url: None,
                 docs_url: Some("https://api-docs.deepseek.com".into()),
                 app_url: Some("https://chat.deepseek.com".into()),
+                api_key_url: Some("https://platform.deepseek.com/api_keys".into()),
+                signup_url: Some("https://platform.deepseek.com/sign_up".into()),
             },
             VendorId::Groq => VendorLinks {
                 usage_url: Some("https://console.groq.com/dashboard/usage".into()),
@@ -275,6 +291,8 @@ impl VendorId {
                 status_url: Some("https://status.groq.com".into()),
                 docs_url: Some("https://console.groq.com/docs".into()),
                 app_url: Some("https://console.groq.com".into()),
+                api_key_url: Some("https://console.groq.com/keys".into()),
+                signup_url: Some("https://console.groq.com/".into()),
             },
             VendorId::Windsurf => VendorLinks {
                 usage_url: Some("https://codeium.com/profile".into()),
@@ -282,6 +300,8 @@ impl VendorId {
                 status_url: Some("https://status.codeium.com".into()),
                 docs_url: Some("https://docs.codeium.com/windsurf".into()),
                 app_url: Some("https://codeium.com/windsurf".into()),
+                api_key_url: None,
+                signup_url: None,
             },
             VendorId::Zai => VendorLinks {
                 usage_url: Some("https://open.bigmodel.cn/usercenter/apikeys".into()),
@@ -289,7 +309,10 @@ impl VendorId {
                 status_url: None,
                 docs_url: Some("https://open.bigmodel.cn/dev/api".into()),
                 app_url: None,
+                api_key_url: Some("https://open.bigmodel.cn/usercenter/apikeys".into()),
+                signup_url: Some("https://open.bigmodel.cn/".into()),
             },
+            // No verified standalone API-key page: keep None rather than guess.
             VendorId::Minimax => VendorLinks {
                 usage_url: Some(
                     "https://platform.minimaxi.com/user-center/basic-information".into(),
@@ -298,6 +321,8 @@ impl VendorId {
                 status_url: None,
                 docs_url: Some("https://platform.minimaxi.com/document/guides".into()),
                 app_url: None,
+                api_key_url: None,
+                signup_url: None,
             },
             VendorId::Kimi => VendorLinks {
                 usage_url: Some("https://platform.moonshot.cn/console/info".into()),
@@ -305,6 +330,8 @@ impl VendorId {
                 status_url: None,
                 docs_url: Some("https://platform.moonshot.cn/docs".into()),
                 app_url: Some("https://kimi.moonshot.cn".into()),
+                api_key_url: Some("https://platform.moonshot.cn/console/api-keys".into()),
+                signup_url: Some("https://platform.moonshot.cn/".into()),
             },
             VendorId::Moonshot => VendorLinks {
                 usage_url: Some("https://platform.moonshot.cn/console/info".into()),
@@ -312,6 +339,8 @@ impl VendorId {
                 status_url: None,
                 docs_url: Some("https://platform.moonshot.cn/docs".into()),
                 app_url: None,
+                api_key_url: Some("https://platform.moonshot.ai/console/api-keys".into()),
+                signup_url: Some("https://platform.moonshot.ai/".into()),
             },
             VendorId::Novita => VendorLinks {
                 usage_url: Some("https://novita.ai/dashboard".into()),
@@ -319,13 +348,38 @@ impl VendorId {
                 status_url: None,
                 docs_url: Some("https://novita.ai/docs".into()),
                 app_url: None,
+                api_key_url: Some("https://novita.ai/settings/key-management".into()),
+                signup_url: Some("https://novita.ai/".into()),
             },
-            VendorId::Grok | VendorId::Supergrok => VendorLinks {
+            VendorId::Grok => VendorLinks {
                 usage_url: Some("https://console.x.ai/".into()),
                 billing_url: Some("https://console.x.ai/billing".into()),
                 status_url: None,
                 docs_url: Some("https://docs.x.ai/".into()),
                 app_url: Some("https://x.ai/grok".into()),
+                api_key_url: Some("https://console.x.ai/team/api-keys".into()),
+                signup_url: Some("https://console.x.ai/".into()),
+            },
+            // Local login: no API-key page by definition.
+            VendorId::Supergrok => VendorLinks {
+                usage_url: Some("https://console.x.ai/".into()),
+                billing_url: Some("https://console.x.ai/billing".into()),
+                status_url: None,
+                docs_url: Some("https://docs.x.ai/".into()),
+                app_url: Some("https://x.ai/grok".into()),
+                api_key_url: None,
+                signup_url: None,
+            },
+            // Keys are issued from the OpenCode console auth page
+            // (per https://opencode.ai/docs/go/ and /docs/providers/).
+            VendorId::OpenCodeGo => VendorLinks {
+                usage_url: None,
+                billing_url: None,
+                status_url: None,
+                docs_url: Some("https://opencode.ai/docs/go/".into()),
+                app_url: Some("https://opencode.ai/".into()),
+                api_key_url: Some("https://opencode.ai/auth".into()),
+                signup_url: Some("https://opencode.ai/".into()),
             },
             _ => VendorLinks::default(),
         }
@@ -340,6 +394,14 @@ pub struct VendorLinks {
     pub status_url: Option<String>,
     pub docs_url: Option<String>,
     pub app_url: Option<String>,
+    /// Official page where an API key is created/copied. `None` for
+    /// OAuth/local vendors and for key vendors without a verified page —
+    /// never a guessed link.
+    #[serde(default)]
+    pub api_key_url: Option<String>,
+    /// Official signup/login page. Same no-guessing rule as above.
+    #[serde(default)]
+    pub signup_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

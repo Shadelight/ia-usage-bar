@@ -16,6 +16,31 @@ export type SettingsCategory = "general" | "providers" | "notifications" | "appe
 let expandedProvider: string | null = null;
 const credentialDrafts: Record<string, string> = {};
 let savingProvider: string | null = null;
+// Providers with a credential validation in flight (set after a successful
+// save, cleared when the scoped refresh leaves `loadingProviders`). Lives
+// here — not in main.ts — so render code can read it without a cycle.
+const validatingCredentials = new Set<string>();
+const revealedCredentials = new Set<string>();
+
+export function setCredentialValidating(id: string, validating: boolean): void {
+  if (validating) validatingCredentials.add(id);
+  else validatingCredentials.delete(id);
+}
+export function isCredentialValidating(id: string): boolean {
+  return validatingCredentials.has(id);
+}
+/** Flip the eye state; returns true when the secret is now visible. */
+export function toggleCredentialRevealed(id: string): boolean {
+  if (revealedCredentials.has(id)) {
+    revealedCredentials.delete(id);
+    return false;
+  }
+  revealedCredentials.add(id);
+  return true;
+}
+export function isCredentialRevealed(id: string): boolean {
+  return revealedCredentials.has(id);
+}
 
 export function setExpandedProvider(id: string | null): void {
   expandedProvider = id;
@@ -28,6 +53,7 @@ export function setCredentialDraft(id: string, value: string): void {
 }
 export function clearCredentialDraft(id: string): void {
   delete credentialDrafts[id];
+  revealedCredentials.delete(id);
 }
 
 const CATEGORIES: SettingsCategory[] = ["general", "providers", "notifications", "appearance", "data", "sync", "about"];
@@ -119,19 +145,52 @@ function providerLinks(vendor: VendorInfo): string {
     .join("")}</div>`;
 }
 
+function credentialLinks(vendor: VendorInfo): string {
+  const keyUrl = vendor.links.apiKeyUrl ?? null;
+  const signupUrl = vendor.links.signupUrl ?? null;
+  if (!keyUrl && !signupUrl) return "";
+  return `<div class="credential-links">${
+    keyUrl
+      ? `<button type="button" class="link-btn" data-open-url="${escapeHtml(keyUrl)}">${escapeHtml(t("getApiKey"))}</button>`
+      : ""
+  }${
+    keyUrl && signupUrl ? `<span class="link-separator" aria-hidden="true">|</span>` : ""
+  }${
+    signupUrl
+      ? `<button type="button" class="link-btn" data-open-url="${escapeHtml(signupUrl)}">${escapeHtml(t("signUp"))}</button>`
+      : ""
+  }</div>`;
+}
+
 function providerKeyDetail(vendor: VendorInfo): string {
   const draft = credentialDrafts[vendor.id] ?? "";
   const busy = savingProvider === vendor.id;
   // Golden rule (see isKeyInputDisabled): editable as soon as enabled.
   const disabled = isKeyInputDisabled(vendor.enabled, busy);
+  const revealed = revealedCredentials.has(vendor.id);
+  const placeholder = vendor.hasCredential
+    ? t("replaceKeyPlaceholder")
+    : vendor.envKey || t("apiKey");
+  const saveLabel = busy ? t("saving") : vendor.hasCredential ? t("replaceCredential") : t("saveCredential");
+  // The eye can only reveal what the user just typed: with an empty input
+  // and a stored (server-side only) credential there is nothing to show.
+  const eye = draft
+    ? `<button type="button" class="credential-eye" data-toggle-key="${escapeHtml(vendor.id)}" aria-label="${escapeHtml(t(revealed ? "hideCredential" : "showCredential"))}" aria-pressed="${revealed ? "true" : "false"}">${actionIconSvg(revealed ? "eye-off" : "eye", 16)}</button>`
+    : "";
   return `
+    <div class="credential-head">
+      <label class="key-label" for="key-${escapeHtml(vendor.id)}">${escapeHtml(t("apiKey"))}</label>
+      ${credentialLinks(vendor)}
+    </div>
     ${vendor.hasCredential ? `<p class="cred-state"><span aria-hidden="true">✓</span> ${escapeHtml(t("keyConfigured"))}</p>` : ""}
-    <label class="key-label" for="key-${escapeHtml(vendor.id)}">${escapeHtml(t("apiKey"))}</label>
     <div class="key-row">
-      <input id="key-${escapeHtml(vendor.id)}" data-key="${escapeHtml(vendor.id)}" type="password"
-        placeholder="${escapeHtml(vendor.envKey || t("apiKey"))}" value="${escapeHtml(draft)}"
-        autocomplete="off" spellcheck="false" ${disabled ? "disabled" : ""} />
-      <button type="button" data-savekey="${escapeHtml(vendor.id)}" ${disabled ? "disabled" : ""}>${escapeHtml(busy ? t("saving") : t("saveCredential"))}</button>
+      <div class="credential-input-wrap">
+        <input id="key-${escapeHtml(vendor.id)}" data-key="${escapeHtml(vendor.id)}" type="${revealed ? "text" : "password"}"
+          placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(draft)}"
+          autocomplete="off" spellcheck="false" ${disabled ? "disabled" : ""} />
+        ${eye}
+      </div>
+      <button type="button" data-savekey="${escapeHtml(vendor.id)}" ${disabled ? "disabled" : ""}>${escapeHtml(saveLabel)}</button>
       ${vendor.hasCredential ? `<button type="button" class="ghost" data-delkey="${escapeHtml(vendor.id)}" ${busy ? "disabled" : ""}>${escapeHtml(t("deleteCredential"))}</button>` : ""}
     </div>`;
 }
@@ -191,6 +250,9 @@ function providerDetail(vendor: VendorInfo, snapshot?: ProviderSnapshot): string
 
 function providerRow(vendor: VendorInfo, snapshot: ProviderSnapshot | undefined, loading: boolean): string {
   const d = deriveProviderState(vendor, snapshot, loading);
+  const validating = isCredentialValidating(vendor.id);
+  const sub = validating ? t("validatingCredential") : formatStatusText(d);
+  const dot = validating ? "status-loading" : d.dotClass;
   const expanded = expandedProvider === vendor.id;
   const visual = providerVisual(vendor.id, vendor.name);
   const expandLabel = expanded ? t("collapseProvider") : t("expandProvider");
@@ -202,9 +264,9 @@ function providerRow(vendor: VendorInfo, snapshot: ProviderSnapshot | undefined,
       <button type="button" class="prov-main" data-expand="${escapeHtml(vendor.id)}" aria-expanded="${expanded ? "true" : "false"}"
         aria-controls="prov-detail-${escapeHtml(vendor.id)}" aria-label="${escapeHtml(vendor.name)} — ${escapeHtml(expandLabel)}">
         <span class="prov-name">${escapeHtml(vendor.name)}</span>
-        <span class="prov-sub">${escapeHtml(formatStatusText(d))}</span>
+        <span class="prov-sub">${escapeHtml(sub)}</span>
       </button>
-      <span class="provider-status-dot ${d.dotClass}" aria-hidden="true"></span>
+      <span class="provider-status-dot ${dot}" aria-hidden="true"></span>
       <span class="prov-chev${expanded ? " open" : ""}" aria-hidden="true">${actionIconSvg("chevron-right", 14)}</span>
     </div>
     ${expanded ? providerDetail(vendor, snapshot) : ""}
@@ -467,10 +529,13 @@ export function patchSettings(dash: Dashboard | null, category: SettingsCategory
     if (!row) continue;
     const snapshot = dash.providers.find((provider) => provider.id === vendor.id);
     const state = deriveProviderState(vendor, snapshot, dash.loadingProviders.includes(vendor.id));
+    // A validation in flight owns the subtitle: the previous snapshot stays
+    // visible only as data, never as the connection state.
+    const validating = isCredentialValidating(vendor.id);
     const status = row.querySelector<HTMLElement>(".prov-sub");
-    if (status) status.textContent = formatStatusText(state);
+    if (status) status.textContent = validating ? t("validatingCredential") : formatStatusText(state);
     const dot = row.querySelector<HTMLElement>(".provider-status-dot");
-    if (dot) dot.className = `provider-status-dot ${state.dotClass}`;
+    if (dot) dot.className = `provider-status-dot ${validating ? "status-loading" : state.dotClass}`;
     const active = row.querySelector<HTMLElement>("[data-active-source]");
     if (active) {
       if (snapshot?.activeSource) {

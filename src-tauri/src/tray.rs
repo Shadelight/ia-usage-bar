@@ -498,6 +498,8 @@ mod tests {
                 status_url: None,
                 docs_url: None,
                 app_url: None,
+                api_key_url: None,
+                signup_url: None,
             },
         }
     }
