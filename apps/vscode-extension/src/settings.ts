@@ -5,6 +5,7 @@ export interface Settings {
   providers: string[];
   display: "compact" | "full";
   remotePollSeconds: number;
+  showAllMetrics: boolean;
 }
 
 export function settings(): Settings {
@@ -15,5 +16,6 @@ export function settings(): Settings {
     providers: config.get<string[]>("providers", ["anthropic", "openai", "cursor"]),
     display: config.get<"compact" | "full">("display", "compact"),
     remotePollSeconds: interval,
+    showAllMetrics: config.get<boolean>("showAllMetrics", false),
   };
 }

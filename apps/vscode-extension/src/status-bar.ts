@@ -18,9 +18,10 @@ export class StatusBar implements vscode.Disposable {
     this.snapshot = snapshot;
     const config = settings();
     const providers = visible(snapshot, config.providers);
-    this.item.text = providers.length ? `$(pulse) ${providers.map((provider) => label(provider, config.display)).join("  ")}` : "$(pulse) IA Usage";
+    const icon = providers.length === 0 ? "pulse" : providers.every((provider) => provider.stale) ? "clock" : "check";
+    this.item.text = providers.length ? `$(${icon}) ${providers.map((provider) => label(provider, config.display)).join("  ")}` : "$(pulse) IA Usage";
     this.item.tooltip = tooltip(snapshot, providers);
-    this.item.backgroundColor = providers.some((provider) => provider.stale) ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
+    this.item.backgroundColor = providers.length > 0 && providers.every((provider) => provider.stale) ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
   }
 
   showMenu(onRefresh: () => void, onReconnect: () => void): void {
@@ -47,28 +48,49 @@ function visible(snapshot: DashboardSnapshot, ids: string[]): Provider[] {
   return enabled.filter((provider) => order.has(provider.id)).sort((a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99));
 }
 
+const SHORT_CODES: Record<string, string> = { anthropic: "CLD", openai: "CDX", cursor: "CUR" };
+
 function label(provider: Provider, mode: "compact" | "full"): string {
-  const code = provider.id === "anthropic" ? "C" : provider.id === "openai" ? "O" : provider.id === "cursor" ? "U" : provider.name.slice(0, 2).toUpperCase();
-  return mode === "compact" ? `${code}${percent(provider)}` : `${provider.name} ${percent(provider)}`;
+  const code = SHORT_CODES[provider.id] ?? provider.name.slice(0, 3).toUpperCase();
+  return mode === "compact" ? `${code} ${percent(provider)}` : `${provider.name} ${percent(provider)}`;
 }
 
 function percent(provider: Provider): string { return provider.quotas[0]?.usedPercent?.toFixed(0).concat("%") ?? "—"; }
 
 function tooltip(snapshot: DashboardSnapshot, providers: Provider[]): vscode.MarkdownString {
+  const showAll = settings().showAllMetrics;
   const content = new vscode.MarkdownString(undefined, true);
   content.appendMarkdown("### IA Usage\n\n");
   for (const provider of providers) {
-    content.appendMarkdown(`**${provider.name}**${provider.stale ? " · datos antiguos" : ""}\n\n`);
-    for (const quota of provider.quotas) {
-      content.appendMarkdown(`${quota.label}: **${quota.usedPercent?.toFixed(0) ?? "—"}% usado**${quota.resetInSeconds ? ` · reinicia ${formatDuration(quota.resetInSeconds)}` : ""}\n\n`);
+    content.appendMarkdown(`**${provider.name}**  ${statusBadge(provider)}\n\n`);
+    const quotas = showAll ? provider.quotas : provider.quotas.filter((quota, index) => index === 0 || (quota.usedPercent ?? 0) > 0);
+    for (const quota of quotas) {
+      content.appendMarkdown(`${quota.label}: **${quota.usedPercent?.toFixed(0) ?? "—"}% usado**${quota.resetInSeconds ? ` · reinicia en ${formatDuration(quota.resetInSeconds)}` : ""}\n\n`);
     }
   }
   content.appendMarkdown(`Actualizado: ${new Date(snapshot.generatedAt).toLocaleString()}`);
   return content;
 }
 
+function statusBadge(provider: Provider): string {
+  if (provider.stale) return `⚠ Datos antiguos${provider.updatedAt ? ` · hace ${formatAge(provider.updatedAt)}` : ""}`;
+  return `● Actualizado${provider.updatedAt ? ` hace ${formatAge(provider.updatedAt)}` : " ahora"}`;
+}
+
+function formatAge(updatedAt: string): string {
+  const seconds = Math.max(0, (Date.now() - new Date(updatedAt).getTime()) / 1000);
+  if (seconds < 60) return "un momento";
+  return formatDuration(seconds);
+}
+
 function formatDuration(seconds: number): string {
   if (seconds < 3_600) return `${Math.max(1, Math.floor(seconds / 60))} min`;
-  if (seconds < 86_400) return `${Math.floor(seconds / 3_600)} h`;
-  return `${Math.floor(seconds / 86_400)} d`;
+  if (seconds < 86_400) {
+    const hours = Math.floor(seconds / 3_600);
+    const minutes = Math.floor((seconds % 3_600) / 60);
+    return minutes > 0 ? `${hours} h ${minutes} min` : `${hours} h`;
+  }
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3_600);
+  return hours > 0 ? `${days} d ${hours} h` : `${days} d`;
 }

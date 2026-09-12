@@ -164,6 +164,15 @@ jobs:
           name: ia-usage-vscode-extension
           path: vscode-release
 
+      - name: Rename Android and VSIX assets
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          Copy-Item android-release/app-release.apk "android-release/IA-Usage-Android-$version.apk" -Force
+          Copy-Item android-release/app-release.aab "android-release/IA-Usage-Android-$version.aab" -Force
+          $vsix = Get-Item vscode-release/*.vsix
+          Copy-Item $vsix.FullName "vscode-release/IA-Usage-VSCode-$version.vsix" -Force
+
       - name: Checksum all release assets
         shell: pwsh
         run: |
@@ -171,12 +180,11 @@ jobs:
           # target/release/bundle (no en src-tauri/target).
           # La release la crea una sola vez el job Windows vía tauri-action;
           # aquí solo se suben assets a esa misma release (nunca se crea otra).
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
           $files = @(Get-ChildItem -Recurse target/release/bundle -Include *.exe,*.msi)
           if ($files.Count -eq 0) { throw "No installers found under target/release/bundle" }
-          Copy-Item android-release/app-release.apk android-release/ia-usage-android-release.apk -Force
-          Copy-Item android-release/app-release.aab android-release/ia-usage-android-release.aab -Force
-          $files += Get-Item android-release/ia-usage-android-release.apk, android-release/ia-usage-android-release.aab
-          $files += @(Get-ChildItem vscode-release/*.vsix)
+          $files += Get-Item "android-release/IA-Usage-Android-$version.apk", "android-release/IA-Usage-Android-$version.aab"
+          $files += Get-Item "vscode-release/IA-Usage-VSCode-$version.vsix"
           $files |
             ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
             Out-File -Encoding ascii SHA256SUMS.txt
@@ -188,11 +196,17 @@ jobs:
         run: gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --clobber
 
       - name: Upload Android APK + AAB to the release
+        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" android-release/ia-usage-android-release.apk android-release/ia-usage-android-release.aab --clobber
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          gh release upload "${{ github.ref_name }}" "android-release/IA-Usage-Android-$version.apk" "android-release/IA-Usage-Android-$version.aab" --clobber
 
       - name: Upload VSIX to the release
+        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" vscode-release/*.vsix --clobber
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          gh release upload "${{ github.ref_name }}" "vscode-release/IA-Usage-VSCode-$version.vsix" --clobber
