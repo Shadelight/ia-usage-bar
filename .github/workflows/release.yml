@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -37,6 +39,21 @@ jobs:
       - name: Test backend
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
+      - name: Build release notes
+        id: notes
+        shell: pwsh
+        run: |
+          $prev = git describe --tags --abbrev=0 HEAD^ 2>$null
+          if ($LASTEXITCODE -ne 0) { $prev = "" }
+          $scriptArgs = @("scripts/build-release-notes.mjs", "${{ github.ref_name }}")
+          if ($prev) { $scriptArgs += @("--prev-tag", $prev.Trim()) }
+          $body = & node @scriptArgs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $eof = "RELEASE_NOTES_EOF"
+          "body<<$eof" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $body | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $eof | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Build Windows installers
         id: build
         uses: tauri-apps/tauri-action@v1
@@ -45,10 +62,8 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: IA Usage Bar ${{ github.ref_name }}
-          releaseBody: |
-            Download the NSIS setup executable or the MSI installer below.
-            Verify SHA256SUMS.txt against the file you downloaded before running it.
-          releaseDraft: true
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: false
           prerelease: false
 
       - name: Checksum installers
