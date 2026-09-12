@@ -4,7 +4,7 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
-## [0.2.3] - 2026-09-12
+## [0.2.4] - 2026-09-12
 
 ### Added
 
@@ -21,6 +21,11 @@ All notable changes to this project are documented here. This project follows [K
 
 - El estado de credenciales se reconcilia después de guardar y validar, sin
   desincronizar los controles de Ajustes ni ocultar acciones de recuperación.
+- Release Android: R8 fallaba al minificar por referencias AWT desktop-only
+  de la dependencia JNA; se silencian con una regla `-dontwarn` ya que ese
+  código nunca se ejecuta en Android.
+- VSIX de la extensión reducido de ~1.3 MB a ~100 KB: ícono redimensionado a
+  256×256 y `.gitignore`/`.github` excluidos del paquete.
 
 ## [0.2.2] - 2026-09-12
 
@@ -133,6 +138,7 @@ monitor.
 - La caché 0.2.0 sigue siendo legible (campos nuevos con default).
 
 [Unreleased]: https://github.com/Shadelight/ia-usage-bar/compare/v0.2.2...HEAD
+[0.2.4]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.4
 [0.2.2]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.2
 [0.2.1]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.0
