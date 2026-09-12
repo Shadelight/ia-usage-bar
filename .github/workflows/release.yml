@@ -69,7 +69,11 @@ jobs:
       - name: Checksum installers
         shell: pwsh
         run: |
-          Get-ChildItem -Recurse src-tauri/target/release/bundle -Include *.exe,*.msi |
+          # El workspace Cargo vive en la raíz, así que los bundles quedan en
+          # target/release/bundle (no en src-tauri/target).
+          $files = @(Get-ChildItem -Recurse target/release/bundle -Include *.exe,*.msi)
+          if ($files.Count -eq 0) { throw "No installers found under target/release/bundle" }
+          $files |
             ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
             Out-File -Encoding ascii SHA256SUMS.txt
 
