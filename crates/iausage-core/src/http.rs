@@ -142,3 +142,24 @@ pub fn post_json(url: &str, headers: &[(&str, &str)], body: &Value) -> Result<Va
     }
     send_json(req)
 }
+
+/// Local language servers frequently use a self-signed loopback certificate.
+/// Keep this opt-in so remote provider requests always retain TLS validation.
+pub fn post_json_local(
+    url: &str,
+    headers: &[(&str, &str)],
+    body: &Value,
+    timeout: Duration,
+) -> Result<Value, FetchError> {
+    let c = Client::builder()
+        .timeout(timeout)
+        .danger_accept_invalid_certs(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| FetchError::Network(format!("cliente HTTP local: {e}")))?;
+    let mut req = c.post(url).json(body);
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
+    send_json(req)
+}

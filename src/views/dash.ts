@@ -185,7 +185,35 @@ function errorCard(provider: ProviderSnapshot, vendor: VendorInfo): string {
   </section>`;
 }
 
-export function actionsSectionHtml(_provider: ProviderSnapshot, vendor: VendorInfo): string {
+type DashboardSection = "details" | "products" | "actions";
+
+function sectionStorageKey(providerId: string, section: DashboardSection): string {
+  return `dashboard-section:${providerId}:${section}`;
+}
+
+function sectionIsOpen(providerId: string, section: DashboardSection, defaultOpen: boolean): boolean {
+  try {
+    const value = localStorage.getItem(sectionStorageKey(providerId, section));
+    return value === null ? defaultOpen : value === "1";
+  } catch {
+    return defaultOpen;
+  }
+}
+
+function collapsibleSection(
+  providerId: string,
+  section: DashboardSection,
+  title: string,
+  body: string,
+  defaultOpen = false,
+): string {
+  return `<details class="details collapsible-section" data-dashboard-section="${section}" data-provider-id="${escapeHtml(providerId)}" ${sectionIsOpen(providerId, section, defaultOpen) ? "open" : ""}>
+    <summary class="section-summary"><span>${escapeHtml(title)}</span><span class="section-chevron">${actionIconSvg("chevron-right", 14)}</span></summary>
+    <div class="section-content">${body}</div>
+  </details>`;
+}
+
+export function actionsSectionHtml(provider: ProviderSnapshot, vendor: VendorInfo): string {
   const actions = getProviderActions(vendor);
   const rows = actions.map((a) => {
     const iconHtml = actionIconSvg(a.icon, 14);
@@ -217,8 +245,7 @@ export function actionsSectionHtml(_provider: ProviderSnapshot, vendor: VendorIn
 
   const cliCmd = getProviderCliCommand(vendor);
 
-  return `<section class="details provider-actions">
-    <h3>${t("actions")}</h3>
+  return collapsibleSection(provider.id, "actions", t("actions"), `
     <div class="actions-list">${rows.join("")}</div>
     <div class="cli-card">
       <div class="cli-header">
@@ -232,7 +259,7 @@ export function actionsSectionHtml(_provider: ProviderSnapshot, vendor: VendorIn
         </button>
       </div>
     </div>
-  </section>`;
+  `);
 }
 
 function connectionLabel(provider: ProviderSnapshot): string {
@@ -259,6 +286,13 @@ function sourceLabel(source: string | null | undefined): string {
     case "auto": return t("autoSource");
     default: return t("viaMixed");
   }
+}
+
+function connectionHtml(provider: ProviderSnapshot): string {
+  const status = escapeHtml(connectionLabel(provider));
+  return provider.activeSource
+    ? `${status} · ${escapeHtml(sourceLabel(provider.activeSource))}`
+    : status;
 }
 
 function detailHtml(provider: ProviderSnapshot, vendor: VendorInfo, updating: boolean): string {
@@ -296,24 +330,22 @@ function detailHtml(provider: ProviderSnapshot, vendor: VendorInfo, updating: bo
     ? `<button class="btn ghost" data-redeem-reset="${escapeHtml(provider.id)}" data-reset-url="${escapeHtml(vendor.links.usageUrl)}">${escapeHtml(t("redeemReset"))}</button>`
     : "";
   const breakdown = provider.productBreakdown.length
-    ? `<section class="details breakdown">
-        <h3>${t("productUsage")}</h3>
+    ? collapsibleSection(provider.id, "products", t("productUsage"), `
         ${provider.productBreakdown.map((item) => `<div class="kv"><span>${escapeHtml(item.name)}</span><span>${Math.round(item.usedPercent)}%</span></div>`).join("")}
-       </section>`
+       `)
     : "";
-
-  return `<div class="detail-inner">
-    <div class="provider-heading">${providerLogo(vendor.id, vendor.name)}<div><strong>${escapeHtml(vendor.name)}</strong><span>${escapeHtml(provider.plan || t("updated"))}</span></div>${updating ? updatingBadge(provider.id) : ""}</div>
-    ${body}
-    <section class="details">
-      <h3>${t("details")}</h3>
-      <div class="kv"><span>${t("plan")}</span><span>${escapeHtml(provider.plan || "—")}</span></div>
-      <div class="kv"><span>${t("connection")}</span><span>${escapeHtml(connectionLabel(provider))} · ${escapeHtml(sourceLabel(provider.activeSource))}</span></div>
+  const details = collapsibleSection(provider.id, "details", t("details"), `
+      <div class="kv"><span>${t("connection")}</span><span>${connectionHtml(provider)}</span></div>
       ${creditRows}
       ${additionalQuotas}
       ${legacyRows}
       ${redeemReset}
-    </section>
+    `, true);
+
+  return `<div class="detail-inner">
+    <div class="provider-heading">${providerLogo(vendor.id, vendor.name)}<div><strong>${escapeHtml(vendor.name)}</strong><span>${escapeHtml(provider.plan || t("updated"))}</span></div>${updating ? updatingBadge(provider.id) : ""}</div>
+    ${body}
+    ${details}
     ${breakdown}
     ${actionsSectionHtml(provider, vendor)}
   </div>`;

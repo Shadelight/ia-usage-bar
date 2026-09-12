@@ -4,6 +4,21 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-12
+
+### Added
+
+- Actualización en un clic para Windows: descarga el instalador del release,
+  verifica su SHA-256 publicado y lo ejecuta sin abrir el navegador.
+- Dashboard normal con Detalles, Uso por producto y Acciones plegables por
+  proveedor; su estado se conserva entre refreshes y reinicios.
+
+### Fixed
+
+- Antigravity prueba el servidor local como Connect RPC (HTTPS, CSRF de los
+  argumentos del proceso y `Connect-Protocol-Version: 1`) y usa endpoints de
+  compatibilidad antes del fallback Cloud por proyecto.
+
 ## [0.2.1] - 2026-09-12
 
 ### Fixed
@@ -99,6 +114,7 @@ monitor.
 - `refresh_minutes` ahora admite 1/2/5/15/30 (el antiguo 10 migra a 15).
 - La caché 0.2.0 sigue siendo legible (campos nuevos con default).
 
-[Unreleased]: https://github.com/Shadelight/ia-usage-bar/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Shadelight/ia-usage-bar/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.2
 [0.2.1]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.0

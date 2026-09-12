@@ -110,6 +110,11 @@ fn parse_blob(raw: &str) -> Option<String> {
 }
 
 fn fetch_cloud(token: &str) -> Result<ProviderSnapshot, FetchError> {
+    let (plan, project) = fetch_cloud_context(token);
+    let body = project
+        .as_ref()
+        .map(|project| json!({"cloudaicompanionProject": project}))
+        .unwrap_or_else(|| json!({}));
     let mut last = FetchError::Network("Antigravity: Cloud Code no respondió".into());
     for url in QUOTA_URLS {
         match http::post_json(
@@ -118,10 +123,9 @@ fn fetch_cloud(token: &str) -> Result<ProviderSnapshot, FetchError> {
                 ("Authorization", &format!("Bearer {token}")),
                 ("User-Agent", "antigravity"),
             ],
-            &json!({}),
+            &body,
         ) {
             Ok(body) => {
-                let plan = fetch_plan(token).unwrap_or_else(|| "Antigravity".into());
                 return Ok(snapshot_from_quota(&body, &plan));
             }
             Err(e) => last = e,
@@ -130,7 +134,7 @@ fn fetch_cloud(token: &str) -> Result<ProviderSnapshot, FetchError> {
     Err(last)
 }
 
-fn fetch_plan(token: &str) -> Option<String> {
+fn fetch_cloud_context(token: &str) -> (String, Option<String>) {
     for url in PLAN_URLS {
         if let Ok(body) = http::post_json(
             url,
@@ -141,45 +145,100 @@ fn fetch_plan(token: &str) -> Option<String> {
             &json!({}),
         ) {
             if let Some(s) = json_str(&body, &["currentTier", "tierId", "plan", "planName"]) {
-                return Some(s);
+                return (s, project_from(&body));
             }
             if let Some(s) = body
                 .pointer("/cloudaicompanionTier")
                 .and_then(|v| v.as_str())
             {
-                return Some(s.to_string());
+                return (s.to_string(), project_from(&body));
             }
+            return ("Antigravity".into(), project_from(&body));
+        }
+    }
+    ("Antigravity".into(), None)
+}
+
+fn project_from(body: &Value) -> Option<String> {
+    json_str(body, &["cloudaicompanionProject", "cloudAiCompanionProject"]).or_else(|| {
+        body.pointer("/cloudaicompanionProject")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+    })
+}
+
+const LOCAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+const LS_SERVICE: &str = "exa.language_server_pb.LanguageServerService";
+
+fn fetch_local(addr: &str) -> Result<ProviderSnapshot, FetchError> {
+    let base = addr.trim_end_matches('/');
+    let csrf = std::env::var("ANTIGRAVITY_CSRF_TOKEN")
+        .ok()
+        .or_else(process_csrf_token);
+    let mut headers = vec![
+        ("Content-Type", "application/json".to_string()),
+        ("Connect-Protocol-Version", "1".to_string()),
+    ];
+    if let Some(token) = csrf.filter(|token| !token.trim().is_empty()) {
+        headers.push(("X-Codeium-Csrf-Token", token));
+    }
+    let refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    // A listening port is not automatically the language server. Connect's
+    // lightweight readiness endpoint prevents quota calls to unrelated ports.
+    local_post(base, "GetUnleashData", &refs)?;
+    let summary = local_post(base, "RetrieveUserQuotaSummary", &refs)
+        .or_else(|_| local_post(base, "GetUserStatus", &refs))
+        .or_else(|_| local_post(base, "GetCommandModelConfigs", &refs))?;
+    let plan = fetch_local_plan(base, &refs).unwrap_or_else(|| "Antigravity".into());
+    Ok(snapshot_from_quota(&summary, &plan))
+}
+
+fn local_post(base: &str, method: &str, headers: &[(&str, &str)]) -> Result<Value, FetchError> {
+    http::post_json_local(
+        &format!("{base}/{LS_SERVICE}/{method}"),
+        headers,
+        &json!({}),
+        LOCAL_TIMEOUT,
+    )
+}
+
+fn process_csrf_token() -> Option<String> {
+    #[cfg(windows)]
+    {
+        let script = "Get-CimInstance Win32_Process | Select-Object Name,CommandLine | ConvertTo-Json -Compress";
+        let raw = run_hidden("powershell", &["-NoProfile", "-Command", script])?;
+        let processes: Value = serde_json::from_str(&raw).ok()?;
+        let candidates = processes.as_array().cloned().unwrap_or_else(|| vec![processes]);
+        candidates.iter().find_map(|process| {
+            let name = process.get("Name").and_then(|value| value.as_str()).unwrap_or("");
+            let command = process.get("CommandLine").and_then(|value| value.as_str()).unwrap_or("");
+            let lower = command.to_ascii_lowercase();
+            (is_antigravity_process(name) && lower.contains("antigravity")
+                || lower.contains("--app_data_dir antigravity"))
+                .then(|| command_flag(command, "--csrf_token"))
+                .flatten()
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+fn command_flag(command: &str, flag: &str) -> Option<String> {
+    let mut words = command.split_whitespace();
+    while let Some(word) = words.next() {
+        if word.trim_matches('"') == flag {
+            return words
+                .next()
+                .map(|value| value.trim_matches('"').to_string())
+                .filter(|value| !value.is_empty());
+        }
+        if let Some(value) = word.strip_prefix(&format!("{flag}=")) {
+            return (!value.is_empty()).then(|| value.trim_matches('"').to_string());
         }
     }
     None
-}
-
-fn fetch_local(addr: &str) -> Result<ProviderSnapshot, FetchError> {
-    let base = if addr.starts_with("http") {
-        addr.trim_end_matches('/').to_string()
-    } else {
-        format!("http://{addr}")
-    };
-    let csrf = fetch_csrf(&base);
-    let mut headers = vec![("Content-Type", "application/json".to_string())];
-    if let Some(token) = csrf {
-        headers.push(("x-codeium-csrf-token", token));
-    }
-    let refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let url =
-        format!("{base}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary");
-    let body = http::post_json(&url, &refs, &json!({}))?;
-    let plan = fetch_local_plan(&base, &refs).unwrap_or_else(|| "Antigravity".into());
-    Ok(snapshot_from_quota(&body, &plan))
-}
-
-fn fetch_csrf(base: &str) -> Option<String> {
-    let html = http::get_text(base).ok()?;
-    html.split("csrfToken\":\"")
-        .nth(1)
-        .and_then(|s| s.split('"').next())
-        .filter(|t| !t.is_empty())
-        .map(|t| t.to_string())
 }
 
 fn fetch_local_plan(base: &str, headers: &[(&str, &str)]) -> Option<String> {
@@ -200,14 +259,17 @@ fn discover_local_bases() -> Vec<String> {
             if trimmed.starts_with("http") {
                 bases.push(trimmed.trim_end_matches('/').to_string());
             } else {
+                bases.push(format!("https://{trimmed}"));
                 bases.push(format!("http://{trimmed}"));
             }
         }
     }
     for port in discover_windows_ports() {
-        let url = format!("http://127.0.0.1:{port}");
-        if !bases.contains(&url) {
-            bases.push(url);
+        for scheme in ["https", "http"] {
+            let url = format!("{scheme}://127.0.0.1:{port}");
+            if !bases.contains(&url) {
+                bases.push(url);
+            }
         }
     }
     bases
@@ -440,5 +502,17 @@ mod tests {
             "groups": [{"displayName": "Gemini", "fiveHour": {}}]
         }), "Pro");
         assert!(snapshot.quotas.is_empty());
+    }
+
+    #[test]
+    fn extracts_csrf_token_from_language_server_arguments() {
+        assert_eq!(
+            command_flag("language_server --app_data_dir antigravity --csrf_token csrf-123", "--csrf_token"),
+            Some("csrf-123".into())
+        );
+        assert_eq!(
+            command_flag("language_server --csrf_token=csrf-456", "--csrf_token"),
+            Some("csrf-456".into())
+        );
     }
 }

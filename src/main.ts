@@ -327,7 +327,7 @@ async function main() {
 
   document.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
-    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-redeem-reset],[data-savesyncpass],[data-forgetsyncpass],[data-syncqr],[data-syncexport]");
+    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-install-update],[data-redeem-reset],[data-savesyncpass],[data-forgetsyncpass],[data-syncqr],[data-syncexport]");
     if (!btn) {
       if (!target.closest("#head-menu, #btn-menu")) closeHeadMenu();
       return;
@@ -432,6 +432,21 @@ async function main() {
       renderSettings(dash, settingsCategory);
     }
     if (btn.dataset.openUrl) await openExternal(btn.dataset.openUrl);
+    if (btn.hasAttribute("data-install-update")) {
+      const result = document.getElementById("update-result");
+      const installButton = btn as HTMLButtonElement;
+      installButton.disabled = true;
+      if (result) result.textContent = t("downloadingUpdate");
+      const installed = await invokeCmd("install_update");
+      if (!installed.ok) {
+        installButton.disabled = false;
+        if (result) {
+          result.textContent = installed.error ?? t("updateInstallFailed");
+          result.classList.add("update-error");
+        }
+      }
+      return;
+    }
     if (btn.hasAttribute("data-savesyncpass")) {
       const input = document.getElementById("sync-pass") as HTMLInputElement | null;
       const passphrase = input?.value || "";
@@ -476,6 +491,19 @@ async function main() {
       await openExternal(btn.dataset.resetUrl);
     }
   });
+
+  document.addEventListener("toggle", (event) => {
+    const section = event.target as HTMLDetailsElement;
+    if (!section.matches("details[data-dashboard-section][data-provider-id]")) return;
+    try {
+      localStorage.setItem(
+        `dashboard-section:${section.dataset.providerId}:${section.dataset.dashboardSection}`,
+        section.open ? "1" : "0",
+      );
+    } catch {
+      // Storage can be unavailable in restricted webviews; the default still works.
+    }
+  }, true);
 
   document.addEventListener("input", (e) => {
     // Credential drafts update on every keystroke into module state, so no

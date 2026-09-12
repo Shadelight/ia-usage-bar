@@ -1,9 +1,12 @@
 //! Comandos expuestos al frontend (`#[tauri::command]`).
 
+use std::fs::File;
+use std::io::Read;
 use std::process::Command;
 use std::sync::atomic::Ordering;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -471,6 +474,20 @@ pub(crate) struct UpdateCheck {
     update_available: bool,
 }
 
+#[derive(Deserialize)]
+struct ReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    html_url: String,
+    #[serde(default)]
+    assets: Vec<ReleaseAsset>,
+}
+
 fn version_parts(value: &str) -> Vec<u64> {
     value
         .trim_start_matches('v')
@@ -482,35 +499,129 @@ fn version_parts(value: &str) -> Vec<u64> {
 #[tauri::command]
 pub(crate) fn check_for_updates(app: AppHandle) -> Result<UpdateCheck, String> {
     let current = app.package_info().version.to_string();
+    let release = latest_release()?;
+    let latest = release.tag_name.trim_start_matches('v').to_string();
+    Ok(UpdateCheck {
+        update_available: version_parts(&latest) > version_parts(&current),
+        current,
+        latest,
+        url: release.html_url,
+    })
+}
+
+fn latest_release() -> Result<GitHubRelease, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
         .user_agent("IA-Usage-Bar")
         .build()
         .map_err(|_| "No se pudo preparar la búsqueda de actualizaciones".to_string())?;
-    let response: serde_json::Value = client
+    client
         .get("https://api.github.com/repos/Shadelight/ia-usage-bar/releases/latest")
         .send()
         .and_then(|response| response.error_for_status())
         .map_err(|_| "No se pudo consultar la última versión".to_string())?
         .json()
-        .map_err(|_| "La respuesta de actualización no es válida".to_string())?;
-    let latest = response
-        .get("tag_name")
-        .and_then(|value| value.as_str())
-        .unwrap_or(&current)
-        .trim_start_matches('v')
-        .to_string();
-    let url = response
-        .get("html_url")
-        .and_then(|value| value.as_str())
-        .unwrap_or("https://github.com/Shadelight/ia-usage-bar/releases/latest")
-        .to_string();
-    Ok(UpdateCheck {
-        update_available: version_parts(&latest) > version_parts(&current),
-        current,
-        latest,
-        url,
-    })
+        .map_err(|_| "La respuesta de actualización no es válida".to_string())
+}
+
+fn windows_installer(release: &GitHubRelease) -> Result<&ReleaseAsset, String> {
+    release
+        .assets
+        .iter()
+        .find(|asset| asset.name.to_ascii_lowercase().ends_with(".exe"))
+        .ok_or_else(|| "La versión publicada no incluye un instalador de Windows".to_string())
+}
+
+fn published_checksum(release: &GitHubRelease, asset_name: &str) -> Result<String, String> {
+    let checksums = release
+        .assets
+        .iter()
+        .find(|asset| asset.name.eq_ignore_ascii_case("SHA256SUMS.txt"))
+        .ok_or_else(|| "La versión publicada no incluye SHA256SUMS.txt".to_string())?;
+    let body = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .user_agent("IA-Usage-Bar")
+        .build()
+        .map_err(|_| "No se pudo preparar la verificación de actualización".to_string())?
+        .get(&checksums.browser_download_url)
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|_| "No se pudo descargar SHA256SUMS.txt".to_string())?
+        .text()
+        .map_err(|_| "No se pudo leer SHA256SUMS.txt".to_string())?;
+    body.lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let hash = fields.next()?;
+            let name = fields.next()?;
+            (name.trim_start_matches('*') == asset_name).then(|| hash.to_ascii_lowercase())
+        })
+        .next()
+        .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| format!("No hay checksum para {asset_name}"))
+}
+
+fn file_sha256(path: &std::path::Path) -> Result<String, String> {
+    let mut file = File::open(path).map_err(|_| "No se pudo abrir el instalador descargado".to_string())?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|_| "No se pudo verificar el instalador descargado".to_string())?;
+        if read == 0 {
+            break;
+        }
+        hash.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
+fn download_and_start_update() -> Result<(), String> {
+    let release = latest_release()?;
+    let installer = windows_installer(&release)?;
+    let expected_hash = published_checksum(&release, &installer.name)?;
+    let file_name = std::path::Path::new(&installer.name)
+        .file_name()
+        .ok_or_else(|| "Nombre de instalador no válido".to_string())?;
+    let dir = std::env::temp_dir().join("iausagebar-update");
+    std::fs::create_dir_all(&dir).map_err(|_| "No se pudo preparar la descarga".to_string())?;
+    let path = dir.join(file_name);
+    let mut response = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .user_agent("IA-Usage-Bar")
+        .build()
+        .map_err(|_| "No se pudo preparar la descarga".to_string())?
+        .get(&installer.browser_download_url)
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|_| "No se pudo descargar el instalador".to_string())?;
+    let mut file = File::create(&path).map_err(|_| "No se pudo guardar el instalador".to_string())?;
+    response
+        .copy_to(&mut file)
+        .map_err(|_| "La descarga del instalador se interrumpió".to_string())?;
+    drop(file);
+    if file_sha256(&path)? != expected_hash {
+        let _ = std::fs::remove_file(&path);
+        return Err("La verificación de seguridad del instalador falló".into());
+    }
+    Command::new(&path)
+        .arg("/S")
+        .spawn()
+        .map_err(|_| "No se pudo iniciar el instalador descargado".to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn install_update(app: AppHandle) -> Result<(), String> {
+    let current = app.package_info().version.to_string();
+    let release = latest_release()?;
+    if version_parts(release.tag_name.trim_start_matches('v')) <= version_parts(&current) {
+        return Err("Ya estás usando la versión más reciente".into());
+    }
+    download_and_start_update()?;
+    app.exit(0);
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -698,5 +809,27 @@ mod update_tests {
         assert_eq!(provider_login_command(VendorId::Anthropic), Ok(("claude", &[][..])));
         assert_eq!(provider_login_command(VendorId::Openai), Ok(("codex", &["login"][..])));
         assert!(provider_login_command(VendorId::Cursor).is_err());
+    }
+
+    #[test]
+    fn updater_selects_only_a_windows_installer() {
+        let release = super::GitHubRelease {
+            tag_name: "v0.2.2".into(),
+            html_url: "https://example.invalid/release".into(),
+            assets: vec![
+                super::ReleaseAsset {
+                    name: "SHA256SUMS.txt".into(),
+                    browser_download_url: "https://example.invalid/checksums".into(),
+                },
+                super::ReleaseAsset {
+                    name: "IA_Usage_Bar_0.2.2_x64-setup.exe".into(),
+                    browser_download_url: "https://example.invalid/installer".into(),
+                },
+            ],
+        };
+        assert_eq!(
+            super::windows_installer(&release).unwrap().name,
+            "IA_Usage_Bar_0.2.2_x64-setup.exe"
+        );
     }
 }

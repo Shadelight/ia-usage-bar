@@ -88,3 +88,26 @@ test("OAuth errors launch a real provider login command", () => {
   assert.match(dash, /data-act="\$\{action\}" data-provider-id=/);
   assert.match(main, /invokeCmd\("start_provider_login", \{ id: btn\.dataset\.providerId \}\)/);
 });
+
+test("available updates are installed from the app instead of opening a release page", () => {
+  const settings = readFileSync(new URL("../src/views/settings.ts", import.meta.url), "utf8");
+  const commands = readFileSync(new URL("../src-tauri/src/commands.rs", import.meta.url), "utf8");
+  assert.match(settings, /data-install-update/);
+  assert.match(main, /invokeCmd\("install_update"\)/);
+  assert.match(commands, /fn published_checksum/);
+  assert.match(commands, /arg\("\/S"\)/);
+});
+
+test("normal dashboard sections persist their open state per provider", () => {
+  const dash = readFileSync(new URL("../src/views/dash.ts", import.meta.url), "utf8");
+  assert.match(dash, /dashboard-section:\$\{providerId\}:\$\{section\}/);
+  assert.match(dash, /collapsibleSection\(provider\.id, "details"/);
+  assert.match(dash, /collapsibleSection\(provider\.id, "actions"/);
+  assert.match(main, /details\[data-dashboard-section\]\[data-provider-id\]/);
+});
+
+test("an unavailable provider does not invent a source label", () => {
+  const dash = readFileSync(new URL("../src/views/dash.ts", import.meta.url), "utf8");
+  assert.match(dash, /function connectionHtml/);
+  assert.match(dash, /provider\.activeSource[\s\S]*sourceLabel/);
+});

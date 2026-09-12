@@ -1927,7 +1927,7 @@ dependencies = [
 
 [[package]]
 name = "iausagebar"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ab_glyph",
  "base64 0.22.1",
@@ -1939,6 +1939,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",

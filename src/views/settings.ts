@@ -389,7 +389,7 @@ export async function checkForUpdates(): Promise<void> {
     return;
   }
   if (update.value.updateAvailable) {
-    result.innerHTML = `<span>${t("updateAvailable")} · ${escapeHtml(update.value.latest)}</span><button data-open-url="${escapeHtml(update.value.url)}">${t("viewRelease")}</button>`;
+    result.innerHTML = `<span>${t("updateAvailable")} · ${escapeHtml(update.value.latest)}</span><button data-install-update>${t("installUpdate")}</button>`;
     result.classList.add("update-available");
   } else {
     result.textContent = `${t("upToDate")} · IA Usage ${escapeHtml(update.value.current)}`;

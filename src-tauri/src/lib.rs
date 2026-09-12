@@ -329,6 +329,7 @@ pub fn run() {
             commands::clear_logs,
             commands::export_diagnostics,
             commands::check_for_updates,
+            commands::install_update,
             commands::sync_get_status,
             commands::sync_set_enabled,
             commands::sync_set_passphrase,
