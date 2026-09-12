@@ -23,6 +23,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.1.0"
+      - name: Test Android before signing
+        working-directory: android
+        run: gradle :app:testDebugUnitTest
       - name: Validate Android signing configuration
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
