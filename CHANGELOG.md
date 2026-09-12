@@ -4,6 +4,15 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+### Added
+
+- M5 sync con el teléfono (V1 local, sin backend): `SyncPayload` cifrado
+  (Argon2id → XChaCha20-Poly1305), blob en carpeta tras cada refresh,
+  HTTP local (`/v1/meta`, `/v1/snapshot`), pareo por QR con fingerprint
+  de verificación, y sección Sync en Ajustes. Ver `SYNC.md`.
+- CLI `iausage sync`: `export`, `verify`, `status`, `set-passphrase`,
+  `enable`/`disable`, `serve`, `qr`.
+
 ## [0.2.0] - 2026-09-12
 
 First release under the IA Usage Bar name. `v0.1.0` was the original Claude

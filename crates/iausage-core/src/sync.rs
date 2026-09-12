@@ -478,6 +478,40 @@ mod tests {
             .all(|ch| ch == '-' || CROCKFORD.contains(&(ch as u8))));
     }
 
+    /// Vector dorado: fija el formato del cable. Si cambia el algoritmo,
+    /// los parámetros Argon2, el JSON canónico o el envelope, este test
+    /// rompe a propósito (compatibilidad con el teléfono en juego).
+    #[test]
+    fn vector_conocido_fija_formato() {
+        use crate::snapshot_v1::DashboardSnapshotV1;
+        let snapshot = DashboardSnapshotV1 {
+            schema_version: SNAPSHOT_SCHEMA_VERSION,
+            generated_at: "2026-09-12T00:00:00Z".into(),
+            app_version: Some("vector".into()),
+            providers: vec![],
+        };
+        let payload = build_payload(
+            "vector-device".into(),
+            "2026-09-12T00:00:00Z".into(),
+            snapshot,
+        );
+        let salt: [u8; SALT_LEN] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let nonce: [u8; NONCE_LEN] = [17u8; NONCE_LEN];
+        let blob = encrypt_payload_with(&payload, "vector-test-passphrase", &salt, &nonce).unwrap();
+        let wire = serde_json::to_string(&blob).unwrap();
+        assert_eq!(
+            wire,
+            "{\"v\":1,\"alg\":\"xchacha20poly1305+argon2id\",\
+             \"salt\":\"AQIDBAUGBwgJCgsMDQ4PEA==\",\
+             \"nonce\":\"ERERERERERERERERERERERERERERERER\",\
+             \"ciphertext\":\"CnwT2OjdYeHwxCsDnU1POJiWQLHsJ4zdZ8IRClCR+DHuldB2zyvD+5NZ5xoWTDEbdo3pCmTFNihgXsdS+ylwdiuC90VqSJ+3yRmjkY8w5KA9cXkgVDATeD5iC0+Plz0UQ4WR8LySM6AT0nC+cxjff1m6hZwVWdoWPsuZ63sX9BIf0RwL9IqlxVk0YeRPgueCpm2/UjUvpe5ZcMcCTiDQxKv/J/BnIIlJtBnvB8o/AQ7TjkF7UG57ChfJzswWBiCJYvwTiVb4yJRcQc8M\"}"
+        );
+        // Y el vector abre con su passphrase.
+        let parsed: EncryptedBlob = serde_json::from_str(&wire).unwrap();
+        let back = decrypt_blob(&parsed, "vector-test-passphrase").unwrap();
+        assert_eq!(back.device_id, "vector-device");
+    }
+
     #[test]
     fn device_id_persiste_en_disco() {
         let dir = std::env::temp_dir().join(format!("sync-dev-{}", std::process::id()));
