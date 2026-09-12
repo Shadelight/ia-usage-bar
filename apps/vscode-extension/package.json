@@ -14,12 +14,13 @@
     "commands": [
       { "command": "iaUsage.show", "title": "Show usage", "category": "IA Usage" },
       { "command": "iaUsage.refresh", "title": "Refresh now", "category": "IA Usage" },
-      { "command": "iaUsage.restart", "title": "Reconnect CLI", "category": "IA Usage" }
+      { "command": "iaUsage.restart", "title": "Reconnect CLI", "category": "IA Usage" },
+      { "command": "iaUsage.configureCli", "title": "Configure CLI path", "category": "IA Usage" }
     ],
     "configuration": {
       "title": "IA Usage",
       "properties": {
-        "iaUsage.cliPath": { "type": "string", "default": "", "description": "Absolute path to iausage.exe. Empty uses PATH." },
+        "iaUsage.cliPath": { "type": "string", "default": "", "description": "Absolute path to iausage.exe. Empty checks PATH and known IA Usage Desktop installations." },
         "iaUsage.providers": { "type": "array", "items": { "type": "string" }, "default": ["anthropic", "openai", "cursor"], "description": "Provider IDs visible in the status bar." },
         "iaUsage.display": { "type": "string", "enum": ["compact", "full"], "default": "compact", "description": "Status bar label density." },
         "iaUsage.remotePollSeconds": { "type": "number", "default": 60, "minimum": 15, "description": "Remote fallback polling interval used by iausage watch." }
