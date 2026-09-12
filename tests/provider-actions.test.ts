@@ -217,6 +217,8 @@ test("actionIconSvg provides consistent SVGs and contains no Unicode emojis", ()
     "copy",
     "warning",
     "refresh",
+    "eye",
+    "eye-off",
     "check",
   ];
 

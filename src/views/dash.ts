@@ -262,7 +262,7 @@ export function actionsSectionHtml(provider: ProviderSnapshot, vendor: VendorInf
   `);
 }
 
-function connectionLabel(provider: ProviderSnapshot): string {
+function connectionLabel(provider: ProviderSnapshot, vendor?: VendorInfo): string {
   switch (provider.status) {
     case "connected": return t("statusConnected");
     case "needs_permission": return t("statusNeedPermission");
@@ -270,7 +270,11 @@ function connectionLabel(provider: ProviderSnapshot): string {
     case "error": return t("statusError");
     case "needs_auth":
     default:
-      return provider.statusReason === "invalid_credential" ? t("statusSessionInvalid") : t("statusNeedLogin");
+      if (provider.statusReason === "invalid_credential") {
+        const apiCredential = vendor ? vendor.needsKey || vendor.authKind === "apikey" : false;
+        return apiCredential ? t("statusCredentialInvalid") : t("statusSessionInvalid");
+      }
+      return t("statusNeedLogin");
   }
 }
 
@@ -288,8 +292,8 @@ function sourceLabel(source: string | null | undefined): string {
   }
 }
 
-function connectionHtml(provider: ProviderSnapshot): string {
-  const status = escapeHtml(connectionLabel(provider));
+function connectionHtml(provider: ProviderSnapshot, vendor?: VendorInfo): string {
+  const status = escapeHtml(connectionLabel(provider, vendor));
   return provider.activeSource
     ? `${status} · ${escapeHtml(sourceLabel(provider.activeSource))}`
     : status;
@@ -335,7 +339,7 @@ function detailHtml(provider: ProviderSnapshot, vendor: VendorInfo, updating: bo
        `)
     : "";
   const details = collapsibleSection(provider.id, "details", t("details"), `
-      <div class="kv"><span>${t("connection")}</span><span>${connectionHtml(provider)}</span></div>
+      <div class="kv"><span>${t("connection")}</span><span>${connectionHtml(provider, vendor)}</span></div>
       ${creditRows}
       ${additionalQuotas}
       ${legacyRows}

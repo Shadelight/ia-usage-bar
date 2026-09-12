@@ -106,6 +106,8 @@ export interface VendorLinks {
   statusUrl: string | null;
   docsUrl?: string | null;
   appUrl?: string | null;
+  apiKeyUrl?: string | null;
+  signupUrl?: string | null;
 }
 
 export interface VendorInfo {

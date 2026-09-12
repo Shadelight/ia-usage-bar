@@ -8,7 +8,84 @@ permissions:
   contents: write
 
 jobs:
+  android:
+    name: Build signed Android APK + AAB
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.1.0"
+      - name: Validate Android signing configuration
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE" && test -n "$STORE_PASSWORD" && test -n "$KEY_ALIAS" && test -n "$KEY_PASSWORD" || {
+            echo "Missing Android signing secrets. See android/README.md." >&2
+            exit 1
+          }
+      - name: Assemble signed APK + AAB
+        working-directory: android
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/iausage-release.jks"
+          # versionName sigue el tag (v0.3.0 -> 0.3.0); versionCode usa el
+          # run_number para garantizar que siempre crece aunque versionName se repita.
+          VERSION_NAME="${GITHUB_REF_NAME#v}"
+          gradle :app:assembleRelease :app:bundleRelease \
+            -PIAUSAGE_STORE_FILE="$RUNNER_TEMP/iausage-release.jks" \
+            -PIAUSAGE_STORE_PASSWORD="$STORE_PASSWORD" \
+            -PIAUSAGE_KEY_ALIAS="$KEY_ALIAS" \
+            -PIAUSAGE_KEY_PASSWORD="$KEY_PASSWORD" \
+            -PIAUSAGE_VERSION_NAME="$VERSION_NAME" \
+            -PIAUSAGE_VERSION_CODE="$GITHUB_RUN_NUMBER"
+      - name: Upload signed APK + AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: ia-usage-android-release
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+  vscode-extension:
+    name: Build VS Code extension
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install and package VSIX
+        working-directory: apps/vscode-extension
+        run: |
+          npm ci
+          npm run package
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ia-usage-vscode-extension
+          path: apps/vscode-extension/*.vsix
+          if-no-files-found: error
+
   release:
+    needs: [android, vscode-extension]
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -72,18 +149,47 @@ jobs:
           prerelease: false
           args: --config src-tauri/tauri.release.conf.json
 
-      - name: Checksum installers
+      - name: Download Android APK + AAB
+        uses: actions/download-artifact@v4
+        with:
+          name: ia-usage-android-release
+          path: android-release
+
+      - name: Download VSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: ia-usage-vscode-extension
+          path: vscode-release
+
+      - name: Checksum all release assets
         shell: pwsh
         run: |
           # El workspace Cargo vive en la raíz, así que los bundles quedan en
           # target/release/bundle (no en src-tauri/target).
+          # La release la crea una sola vez el job Windows vía tauri-action;
+          # aquí solo se suben assets a esa misma release (nunca se crea otra).
           $files = @(Get-ChildItem -Recurse target/release/bundle -Include *.exe,*.msi)
           if ($files.Count -eq 0) { throw "No installers found under target/release/bundle" }
+          Copy-Item android-release/app-release.apk android-release/ia-usage-android-release.apk -Force
+          Copy-Item android-release/app-release.aab android-release/ia-usage-android-release.aab -Force
+          $files += Get-Item android-release/ia-usage-android-release.apk, android-release/ia-usage-android-release.aab
+          $files += @(Get-ChildItem vscode-release/*.vsix)
           $files |
             ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
             Out-File -Encoding ascii SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
 
       - name: Upload checksums to the release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --clobber
+
+      - name: Upload Android APK + AAB to the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" android-release/ia-usage-android-release.apk android-release/ia-usage-android-release.aab --clobber
+
+      - name: Upload VSIX to the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" vscode-release/*.vsix --clobber

@@ -40,3 +40,6 @@ tarball_url.txt
 
 # Serena MCP project cache
 .serena/
+
+# Configuración local de asistentes; no forma parte del producto.
+.claude/

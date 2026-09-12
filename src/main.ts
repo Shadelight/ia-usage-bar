@@ -6,7 +6,7 @@ import { sanitizeTechnicalDetails, shouldShowRecoveryToast } from "./errors";
 import { setLang, t } from "./i18n";
 import { buildSanitizedDiagnosis, renderDash, updateLoadingClocks, updateResetClocks } from "./views/dash";
 import { actionIconSvg } from "./provider-actions";
-import { checkForUpdates, clearCredentialDraft, clearSyncPassphraseDraft, focusProviderInSettings, patchSettings, persistConfig, refreshSyncView, renderSettings, setCredentialDraft, setExpandedProvider, setSavingProvider, setSyncPairing, setSyncPassphraseDraft } from "./views/settings";
+import { checkForUpdates, clearCredentialDraft, clearSyncPassphraseDraft, focusProviderInSettings, isCredentialValidating, patchSettings, persistConfig, refreshSyncView, renderSettings, setCredentialDraft, setCredentialValidating, setExpandedProvider, setSavingProvider, setSyncPairing, setSyncPassphraseDraft, toggleCredentialRevealed } from "./views/settings";
 import type { SettingsCategory } from "./views/settings";
 import { previewDashboard, renderSpend } from "./views/spend";
 
@@ -23,6 +23,12 @@ let refreshWhenFocused: string | null = null;
 // rejects it, without ever replacing the control the user is touching.
 const pendingProviderEnabled = new Map<string, boolean>();
 const pendingSourcePreferences = new Map<string, string | null>();
+// Optimistic credential presence: set on save/delete success, cleared only
+// when a dashboard confirms the backend value (compare-first, never blind).
+const pendingCredentialPresence = new Map<string, boolean>();
+// Tracks scoped validation refreshes that already emitted their loading
+// state, so a stale pre-save dashboard can never end "Validando…" early.
+const credentialValidationObserved = new Set<string>();
 
 type AppTheme = "system" | "light" | "dark";
 
@@ -143,10 +149,34 @@ function paintDash() {
 async function applyDashboard(d: Dashboard) {
   const compactChanged = dash?.compactMode !== d.compactMode;
   for (const vendor of d.catalog) {
-    const enabled = pendingProviderEnabled.get(vendor.id);
-    if (enabled !== undefined) vendor.enabled = enabled;
+    // Compare-first: inspect the value Rust just sent, then apply the
+    // optimistic one only while the dashboard is still older than the
+    // command. Assigning first and comparing after would always match.
+    const pendingEnabled = pendingProviderEnabled.get(vendor.id);
+    if (pendingEnabled !== undefined) {
+      if (vendor.enabled === pendingEnabled) pendingProviderEnabled.delete(vendor.id);
+      else vendor.enabled = pendingEnabled;
+    }
     if (pendingSourcePreferences.has(vendor.id)) {
-      vendor.sourcePreference = pendingSourcePreferences.get(vendor.id) ?? null;
+      const pendingSource = pendingSourcePreferences.get(vendor.id) ?? null;
+      if (vendor.sourcePreference === pendingSource) pendingSourcePreferences.delete(vendor.id);
+      else vendor.sourcePreference = pendingSource;
+    }
+    const pendingCredential = pendingCredentialPresence.get(vendor.id);
+    if (pendingCredential !== undefined) {
+      if (vendor.hasCredential === pendingCredential) pendingCredentialPresence.delete(vendor.id);
+      else vendor.hasCredential = pendingCredential;
+    }
+    // End "Validando…" only once the scoped validation refresh observed its
+    // loading state and left it. A stale pre-save dashboard (no loading)
+    // must never clear it early.
+    if (isCredentialValidating(vendor.id)) {
+      if (d.loadingProviders.includes(vendor.id)) {
+        credentialValidationObserved.add(vendor.id);
+      } else if (credentialValidationObserved.has(vendor.id)) {
+        credentialValidationObserved.delete(vendor.id);
+        setCredentialValidating(vendor.id, false);
+      }
     }
   }
   watchRecoveries(d);
@@ -327,7 +357,7 @@ async function main() {
 
   document.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
-    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-install-update],[data-redeem-reset],[data-savesyncpass],[data-forgetsyncpass],[data-syncqr],[data-syncexport]");
+    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-toggle-key],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-install-update],[data-redeem-reset],[data-savesyncpass],[data-forgetsyncpass],[data-syncqr],[data-syncexport]");
     if (!btn) {
       if (!target.closest("#head-menu, #btn-menu")) closeHeadMenu();
       return;
@@ -377,29 +407,62 @@ async function main() {
       localStorage.setItem("settingsCategory", settingsCategory);
       renderSettings(dash, settingsCategory);
     }
+    if (btn.dataset.toggleKey) {
+      // Eye toggle: pure DOM flip, never a re-render (the input keeps focus).
+      const id = btn.dataset.toggleKey;
+      const revealed = toggleCredentialRevealed(id);
+      const input = document.querySelector<HTMLInputElement>(`[data-key="${id}"]`);
+      if (input) input.type = revealed ? "text" : "password";
+      btn.innerHTML = actionIconSvg(revealed ? "eye-off" : "eye", 16);
+      btn.setAttribute("aria-label", t(revealed ? "hideCredential" : "showCredential"));
+      btn.setAttribute("aria-pressed", revealed ? "true" : "false");
+      return;
+    }
     if (btn.dataset.savekey) {
       const id = btn.dataset.savekey;
       const input = document.querySelector<HTMLInputElement>(`[data-key="${id}"]`);
+      const key = input?.value.trim() || "";
+      if (!key) return;
       setCredentialDraft(id, input?.value || "");
       setSavingProvider(id);
-      renderSettings(dash, settingsCategory);
-      const saved = (await invokeCmd("save_api_key", { id, key: input?.value || "" })).ok;
-      setSavingProvider(null);
-      // On success the secret stays server-side only: drop the draft so the
-      // input renders empty with a "saved" badge. On failure keep the draft
-      // (what the user typed is never discarded without confirmation).
-      if (saved || !isTauri()) clearCredentialDraft(id);
-      else showCommandError(t("commandFailed"));
       if (view === "settings") renderSettings(dash, settingsCategory);
+      // Persistence and validation are two separate steps: save_api_key only
+      // stores + emits the catalog, and the scoped refresh below starts
+      // afterwards — so validation can never finish before the UI enters
+      // "Validando…".
+      const result = await invokeCmd("save_api_key", { id, key });
+      setSavingProvider(null);
+      if (result.ok || !isTauri()) {
+        // Optimistic presence: the secret stays server-side only, so the
+        // draft is dropped and the input renders empty with a saved badge.
+        pendingCredentialPresence.set(id, true);
+        const vendor = dash?.catalog.find((v) => v.id === id);
+        if (vendor) vendor.hasCredential = true;
+        clearCredentialDraft(id);
+        setCredentialValidating(id, true);
+        if (view === "settings") renderSettings(dash, settingsCategory);
+        await invokeCmd("refresh_provider", { id });
+      } else {
+        // Keep the draft: what the user typed is never discarded, and the
+        // eye stays available on the non-empty input.
+        showCommandError(result.error ?? t("commandFailed"));
+        if (view === "settings") renderSettings(dash, settingsCategory);
+      }
     }
     if (btn.dataset.delkey) {
       const id = btn.dataset.delkey;
-      const deleted = (await invokeCmd("delete_api_key", { id })).ok;
-      if (deleted || !isTauri()) {
+      const result = await invokeCmd("delete_api_key", { id });
+      if (result.ok || !isTauri()) {
+        pendingCredentialPresence.set(id, false);
+        const vendor = dash?.catalog.find((v) => v.id === id);
+        if (vendor) vendor.hasCredential = false;
         clearCredentialDraft(id);
+        setCredentialValidating(id, false);
+        credentialValidationObserved.delete(id);
         if (view === "settings") renderSettings(dash, settingsCategory);
+        await invokeCmd("refresh_provider", { id });
       } else {
-        showCommandError(t("commandFailed"));
+        showCommandError(result.error ?? t("commandFailed"));
       }
     }
     if (btn.dataset.expand) {
@@ -511,7 +574,13 @@ async function main() {
     // focus is never disturbed while typing.
     const el = e.target as HTMLElement;
     const keyInput = (el as HTMLInputElement).dataset?.key;
-    if (keyInput && el instanceof HTMLInputElement) setCredentialDraft(keyInput, el.value);
+    if (keyInput && el instanceof HTMLInputElement) {
+      setCredentialDraft(keyInput, el.value);
+      // The eye only exists while something is typed: patch its visibility
+      // directly so typing never loses focus to a re-render.
+      const eye = document.querySelector<HTMLElement>(`[data-toggle-key="${keyInput}"]`);
+      if (eye) eye.style.display = el.value ? "" : "none";
+    }
     if ((el as HTMLInputElement).dataset?.syncPass !== undefined && el instanceof HTMLInputElement) {
       setSyncPassphraseDraft(el.value);
     }

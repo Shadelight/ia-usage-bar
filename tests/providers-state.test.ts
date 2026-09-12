@@ -78,13 +78,24 @@ test("key input is editable as soon as the provider is enabled", () => {
 });
 
 test("invalid credential or failed fetch never disables the provider", () => {
-  const invalid = deriveProviderState(
+  const invalidKey = deriveProviderState(
     vendor({ enabled: true, hasCredential: true }),
     snap({ status: "needs_auth", statusReason: "invalid_credential" }),
     false,
   );
-  assert.equal(invalid.enabled, true);
-  assert.equal(invalid.sessionInvalid, true);
+  assert.equal(invalidKey.enabled, true);
+  // Key vendors name the credential, not a session.
+  assert.equal(invalidKey.statusKey, "statusCredentialInvalid");
+  assert.equal(invalidKey.sessionInvalid, false);
+
+  const invalidSession = deriveProviderState(
+    vendor({ enabled: true, hasCredential: true, authKind: "oauth", needsKey: false, id: "anthropic", name: "Claude Code" }),
+    snap({ id: "anthropic", status: "needs_auth", statusReason: "invalid_credential" }),
+    false,
+  );
+  assert.equal(invalidSession.enabled, true);
+  assert.equal(invalidSession.statusKey, "statusSessionInvalid");
+  assert.equal(invalidSession.sessionInvalid, true);
 
   const failed = deriveProviderState(
     vendor({ enabled: true, hasCredential: true }),

@@ -12,7 +12,7 @@ use tauri_plugin_autostart::ManagerExt;
 
 use crate::config;
 use crate::config::AppConfig;
-use crate::dashboard::{build_dashboard, do_refresh};
+use crate::dashboard::{build_dashboard, do_refresh, emit_dashboard};
 use crate::model::{Dashboard, VendorId};
 use crate::state::{lock_or_recover, AppState, TrayMenuState};
 
@@ -273,7 +273,10 @@ pub(crate) fn save_api_key(
     cfg.save()?;
     *lock_or_recover(&state.config) = cfg.clone();
     refresh_catalog_and_tray(&app, &state, &cfg);
-    do_refresh(&app, None);
+    // No network here: the frontend applies its optimistic credential state
+    // first and then triggers a scoped `refresh_provider`, so a fast
+    // validation can never finish before the UI enters "validating".
+    emit_dashboard(&app);
     Ok(())
 }
 
@@ -292,7 +295,9 @@ pub(crate) fn delete_api_key(
     cfg.save()?;
     *lock_or_recover(&state.config) = cfg.clone();
     refresh_catalog_and_tray(&app, &state, &cfg);
-    do_refresh(&app, None);
+    // Same split as save_api_key: emit the catalog, let the frontend drive
+    // the scoped refresh that replaces the snapshot with needs_auth.
+    emit_dashboard(&app);
     Ok(())
 }
 

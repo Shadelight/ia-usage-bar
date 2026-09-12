@@ -174,6 +174,53 @@ pub(crate) fn do_refresh(app: &AppHandle, only: Option<String>) {
     });
 }
 
+/// Aplica una medición nacida de un archivo local (por ejemplo, la última
+/// línea `rate_limits` de Codex). No entra por `refresh_sync`: hacerlo allí
+/// convertiría cada pulsación de Codex en una petición HTTP.
+pub(crate) fn apply_local_snapshot(app: &AppHandle, incoming: ProviderSnapshot) {
+    let state = app.state::<AppState>();
+    let stored = {
+        let mut snapshots = lock_or_recover(&state.snapshots);
+        let merged = merge_snapshot(snapshots.get(&incoming.id), incoming);
+        snapshots.insert(merged.id.clone(), merged.clone());
+        merged
+    };
+    if stored.is_connected() {
+        if let Err(error) = crate::cache::save_valid(&stored) {
+            eprintln!("local snapshot cache could not be updated for {}: {error}", stored.id);
+        }
+    }
+    check_notifications(app, &stored);
+    emit_dashboard(app);
+}
+
+/// Watcher de fuentes locales de alta frecuencia. El ciclo normal de refresh
+/// sigue siendo responsable de APIs y de su backoff; aquí solo se reconstruye
+/// Codex desde datos que ya escribió localmente.
+pub(crate) fn start_local_watch(app: AppHandle) {
+    let root = crate::watch::codex_sessions_dir();
+    if !root.is_dir() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let result = crate::watch::run_codex_session_watch(
+            &root,
+            crate::watch::DEFAULT_DEBOUNCE,
+            crate::watch::DEFAULT_REMOTE_POLL,
+            |tick| {
+                if tick == crate::watch::WatchTick::CodexSessionChanged {
+                    if let Some(snapshot) = crate::providers::codex_snapshot_from_sessions() {
+                        apply_local_snapshot(&app, snapshot);
+                    }
+                }
+            },
+        );
+        if let Err(error) = result {
+            eprintln!("local usage watcher stopped: {error}");
+        }
+    });
+}
+
 pub(crate) fn refresh_sync(app: &AppHandle, only: Option<&str>) {
     let state = app.state::<AppState>();
     // F-H3: run at most one refresh fan-out at a time. A request that lands

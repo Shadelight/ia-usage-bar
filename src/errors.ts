@@ -71,10 +71,28 @@ export function sanitizeTechnicalDetails(raw: string): string {
 
 export function normalizeProviderError(
   snap: Pick<ProviderSnapshot, "status" | "statusReason" | "error">,
-  _vendor: VendorInfo,
+  vendor: VendorInfo,
 ): NormalizedProviderError | null {
   if (snap.status === "connected") return null;
   const reason = snap.statusReason ?? "unknown";
+  // A rejected API key is not an expired OAuth session: point key vendors
+  // at replacing the credential instead of signing in again.
+  if (
+    snap.status === "needs_auth" &&
+    reason === "invalid_credential" &&
+    (vendor.needsKey || vendor.authKind === "apikey")
+  ) {
+    const technicalDetails = snap.error ? sanitizeTechnicalDetails(snap.error) : undefined;
+    return {
+      title: t("errorInvalidApiKeyTitle"),
+      message: t("errorInvalidApiKeyMessage"),
+      severity: "warning",
+      action: "configure_credentials",
+      actionLabel: t("actionConfigureCredentials"),
+      technicalDetails,
+      missingScopes: [],
+    };
+  }
   const entry = STATUS_COPY[snap.status][reason] ?? FALLBACK_BY_STATUS[snap.status];
   const technicalDetails = snap.error ? sanitizeTechnicalDetails(snap.error) : undefined;
   return {

@@ -7,7 +7,7 @@
 
 pub use iausage_core::{
     cache, config, cost, descriptor, doctor, guard, health, http, jwt, logfile, model, pace,
-    paths, pricing, providers, refresh_policy, snapshot_v1, sync, sync_server,
+    paths, pricing, providers, refresh_policy, snapshot_v1, sync, sync_server, watch,
 };
 mod commands;
 mod dashboard;
@@ -28,7 +28,7 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt;
 
 use config::AppConfig;
-use dashboard::{do_refresh, run_loop, send_notification};
+use dashboard::{do_refresh, run_loop, send_notification, start_local_watch};
 use state::{lock_or_recover, AppState, TrayMenuState};
 use tray::{on_tray_left_click, show_window};
 
@@ -270,6 +270,10 @@ pub fn run() {
 
             let h1 = app.handle().clone();
             std::thread::spawn(move || run_loop(h1));
+
+            // M6 IDE/GUI: cambios de sesiones Codex actualizan el dashboard
+            // con debounce sin adelantar el polling de proveedores remotos.
+            start_local_watch(app.handle().clone());
 
             // Servidor sync M5: solo arranca si está activo en config.
             sync_service::ensure_sync_server(app.handle());
