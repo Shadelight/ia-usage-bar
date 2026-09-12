@@ -4,6 +4,23 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-12
+
+### Fixed
+
+- Ajustes ya no reconstruye controles nativos durante un refresh: los cambios
+  de proveedor y fuente son optimistas, reversibles ante error y se aplican
+  por parche incremental.
+- El refresco manual comunica su progreso, conserva claramente los datos
+  antiguos cuando falla y separa el último intento del último dato válido.
+- Codex reemplaza `auth.json` de forma atómica también en Windows; Claude y
+  Codex pueden abrir sus flujos oficiales de inicio de sesión desde la UI.
+- OpenAI Admin exige una Admin key con `api.usage.read`; respuestas parciales
+  de proveedores ya no se presentan como 0% ni como saldo/coste $0.
+- Antigravity puede continuar desde Local a Cloud y muestra la fuente que
+  produjo los datos. Cursor conserva su cuota semanal de Grok Bot.
+- La distribución valida el workspace Rust completo antes de publicar.
+
 ### Fixed
 
 - Ajustes: los clics en controles sin acción propia ya no caen en la rama
@@ -82,5 +99,6 @@ monitor.
 - `refresh_minutes` ahora admite 1/2/5/15/30 (el antiguo 10 migra a 15).
 - La caché 0.2.0 sigue siendo legible (campos nuevos con default).
 
-[Unreleased]: https://github.com/Shadelight/ia-usage-bar/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Shadelight/ia-usage-bar/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.0
