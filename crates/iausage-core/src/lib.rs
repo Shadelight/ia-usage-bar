@@ -17,6 +17,7 @@ pub mod jwt;
 pub mod logfile;
 pub mod model;
 pub mod pace;
+pub mod recommend;
 pub mod paths;
 pub mod pricing;
 pub mod providers;

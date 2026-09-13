@@ -16,6 +16,7 @@ import {
   getProviderCliCommand,
   pctOf,
 } from "../provider-actions.ts";
+import { recCopy, recPrefix, recWhyTitle } from "../recommend.ts";
 
 export { actionIconSvg, buildSanitizedDiagnosis };
 
@@ -174,7 +175,9 @@ function errorCard(provider: ProviderSnapshot, vendor: VendorInfo): string {
     ? "refresh"
     : normalized.action === "login"
       ? "provider-login"
-      : "settings";
+      : normalized.action === "configure_credentials"
+        ? "configure-provider"
+        : "settings";
   const details = normalized.technicalDetails
     ? `<details class="technical-details"><summary>${t("showDetails")}</summary><pre>${escapeHtml(normalized.technicalDetails)}</pre></details>`
     : "";
@@ -347,7 +350,7 @@ function detailHtml(provider: ProviderSnapshot, vendor: VendorInfo, updating: bo
     `, true);
 
   return `<div class="detail-inner">
-    <div class="provider-heading">${providerLogo(vendor.id, vendor.name)}<div><strong>${escapeHtml(vendor.name)}</strong><span>${escapeHtml(provider.plan || t("updated"))}</span></div>${updating ? updatingBadge(provider.id) : ""}</div>
+    ${updating ? updatingBadge(provider.id) : ""}
     ${body}
     ${details}
     ${breakdown}
@@ -366,8 +369,16 @@ function compactDetailHtml(provider: ProviderSnapshot, vendor: VendorInfo, dash:
       <span data-reset-relative data-reset-at="${escapeHtml(quota.resetAt || "")}">${escapeHtml(reset)}</span>
     </div>`;
   }).join("");
-  const recommendation = dash.recommendName && dash.recommendLeft != null
-    ? `<button class="compact-recommendation" data-select="${escapeHtml(dash.recommendId || "")}">${escapeHtml(dash.recommendName)} · ${Math.round(dash.recommendLeft)}% ${t("available")}</button>`
+  const rec = (dash.recommendAction && dash.recommendAction !== "insufficient_data"
+    ? recCopy(dash, provider.id)
+    : null) ?? (dash.recommendName && dash.recommendLeft != null
+    ? {
+      text: `${dash.recommendName} · ${Math.round(dash.recommendLeft)}% ${t("available")}`,
+      selectId: dash.recommendId || "",
+    }
+    : null);
+  const recommendation = rec
+    ? `<button class="compact-recommendation" data-select="${escapeHtml(rec.selectId)}" title="${escapeHtml(recWhyTitle(dash))}">${escapeHtml(recPrefix(dash))}${escapeHtml(rec.text)}</button>`
     : "";
 
   const quickLinks = getCompactQuickActions(vendor).map((act) => {
@@ -432,7 +443,11 @@ export function updateLoadingClocks(root: ParentNode = document): void {
 export function renderDash(dash: Dashboard | null, selectedId: string): string {
   if (!dash) return selectedId;
   const added = addedProviders(dash);
-  const enabled = dash.catalog.filter((vendor) => vendor.enabled);
+  // "Primario" (Ajustes → General) doubles as tab order: it leads the rail
+  // instead of only picking the initial selection.
+  const enabled = dash.catalog
+    .filter((vendor) => vendor.enabled)
+    .sort((a, b) => (a.id === dash.primary ? -1 : b.id === dash.primary ? 1 : 0));
   $("empty").classList.toggle("hidden", enabled.length > 0);
   $("empty-text").textContent = t("empty");
   $("empty-detect").textContent = t("detect");
@@ -463,9 +478,10 @@ export function renderDash(dash: Dashboard | null, selectedId: string): string {
     const isLoading = dash.loadingProviders.includes(vendor.id);
     const status = isLoading ? "loading" : snapshot?.status || "loading";
     const visual = providerVisual(vendor.id, vendor.name);
+    const plan = active && snapshot?.plan ? `<span class="tab-plan">${escapeHtml(snapshot.plan)}</span>` : "";
     return `<button class="tab ${active ? "active" : ""}" data-select="${escapeHtml(vendor.id)}" style="--provider-accent:${visual.accent}">
       ${providerLogo(vendor.id, vendor.name)}
-      <span class="label">${escapeHtml(vendor.name)}</span>
+      <span class="label-col"><span class="label">${escapeHtml(vendor.name)}</span>${plan}</span>
       <span class="provider-status-dot status-${status}" title="${status}"></span>
     </button>`;
   }).join("");
@@ -513,15 +529,17 @@ export function renderDash(dash: Dashboard | null, selectedId: string): string {
   });
 
   const stall = $("stall");
-  if (added.length >= 2 && dash.recommendName && dash.recommendLeft != null) {
-    const template = dash.recommendId === selectedId ? t("stallHere") : t("stall");
-    stall.textContent = template.replace("{name}", dash.recommendName).replace("{left}", String(Math.round(dash.recommendLeft)));
+  const stallRec = added.length >= 2 ? recCopy(dash, selectedId) : null;
+  if (stallRec) {
+    stall.textContent = `${recPrefix(dash)}${stallRec.text}`;
     stall.classList.remove("hidden");
-    stall.dataset.select = dash.recommendId || "";
+    stall.dataset.select = stallRec.selectId;
+    stall.title = recWhyTitle(dash);
   } else {
     stall.textContent = "";
     stall.classList.add("hidden");
     delete stall.dataset.select;
+    stall.removeAttribute("title");
   }
 
   return selectedId;

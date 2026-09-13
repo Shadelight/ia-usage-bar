@@ -178,5 +178,10 @@ export function previewDashboard(): Dashboard {
     recommendId: "cursor",
     recommendName: "Cursor",
     recommendLeft: 74,
+    recommendAction: "stay",
+    recommendReason: "sustainable",
+    recommendConfidence: 0.85,
+    recommendFrom: "anthropic",
+    recommendScores: [],
   };
 }

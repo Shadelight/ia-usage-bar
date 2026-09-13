@@ -732,6 +732,18 @@ pub struct Dashboard {
     pub recommend_id: Option<String>,
     pub recommend_name: Option<String>,
     pub recommend_left: Option<f64>,
+    /// Motor contextual (`recommend::recommend`). Siempre presente en v0.3+;
+    /// `#[serde(default)]` mantiene legibles cachés/payloads antiguos.
+    #[serde(default)]
+    pub recommend_action: String,
+    #[serde(default)]
+    pub recommend_reason: String,
+    #[serde(default)]
+    pub recommend_confidence: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recommend_from: Option<String>,
+    #[serde(default)]
+    pub recommend_scores: Vec<crate::recommend::CandidateScore>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -785,6 +797,9 @@ pub fn monthly_spend(p: &ProviderSnapshot) -> Option<(String, f64)> {
     best.map(|(_, label, usd)| (label, usd))
 }
 
+/// Legado: solo miraba `100 - primary_utilization`. Conservado por
+/// compatibilidad; el dashboard usa `recommend::recommend`.
+#[deprecated(note = "usar iausage_core::recommend::recommend")]
 pub fn most_headroom(providers: &[ProviderSnapshot]) -> Option<(String, String, f64)> {
     providers
         .iter()

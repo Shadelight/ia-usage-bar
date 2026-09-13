@@ -11,7 +11,7 @@ use tauri_plugin_notification::NotificationExt;
 
 use crate::commands::parse_id;
 use crate::model::{
-    monthly_spend, most_headroom, now_iso, Dashboard, ProviderSnapshot, ProviderStatus,
+    monthly_spend, now_iso, Dashboard, ProviderSnapshot, ProviderStatus,
     ProviderStatusReason, SpendRow, VendorId,
 };
 use crate::providers;
@@ -50,10 +50,15 @@ pub(crate) fn build_dashboard(app: &AppHandle, state: &AppState) -> Dashboard {
             });
         }
     }
-    let (recommend_id, recommend_name, recommend_left) = match most_headroom(&providers) {
-        Some((id, name, left)) => (Some(id), Some(name), Some(left)),
-        None => (None, None, None),
-    };
+    let now_unix = chrono::Utc::now().timestamp();
+    let rec = iausage_core::recommend::recommend(&providers, &cfg.primary, now_unix);
+    let (recommend_id, recommend_name, recommend_left) =
+        match (&rec.to_id, &rec.to_name, rec.left) {
+            (Some(id), Some(name), Some(left)) if rec.action != "insufficient_data" => {
+                (Some(id.clone()), Some(name.clone()), Some(left))
+            }
+            _ => (None, None, None),
+        };
     Dashboard {
         providers,
         catalog: lock_or_recover(&state.catalog).clone(),
@@ -77,6 +82,11 @@ pub(crate) fn build_dashboard(app: &AppHandle, state: &AppState) -> Dashboard {
         recommend_id,
         recommend_name,
         recommend_left,
+        recommend_action: rec.action,
+        recommend_reason: rec.reason,
+        recommend_confidence: rec.confidence,
+        recommend_from: Some(rec.from_id),
+        recommend_scores: rec.candidates,
     }
 }
 

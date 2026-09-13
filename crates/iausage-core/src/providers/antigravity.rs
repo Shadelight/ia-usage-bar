@@ -74,9 +74,20 @@ fn local_service_unavailable() -> ProviderSnapshot {
 }
 
 fn read_keyring_token() -> Option<String> {
-    let entry = keyring::Entry::new("gemini", "antigravity").ok()?;
-    let raw = entry.get_password().ok()?;
-    parse_blob(&raw)
+    // Antigravity's Go client writes this credential directly as
+    // "<service>:<user>" (visible via `cmdkey /list` as
+    // `gemini:antigravity`), not the "<user>.<service>" target that
+    // keyring-rs's own `Entry::new(service, user)` derives on Windows —
+    // that mismatch alone makes the plain constructor miss the entry
+    // entirely. And unlike our own credentials (always written through
+    // keyring-rs's `set_password`, which stores UTF-16), this blob is raw
+    // UTF-8 JSON: `get_password()` still decodes Windows credentials as
+    // UTF-16 and returns `Ok` with garbage instead of an error, so it can't
+    // be used as a probe here. Go straight to the raw bytes.
+    let entry = keyring::Entry::new_with_target("gemini:antigravity", "gemini", "antigravity").ok()?;
+    let raw = entry.get_secret().ok()?;
+    let text = String::from_utf8_lossy(&raw).trim_end_matches('\0').to_string();
+    parse_blob(&text)
 }
 
 fn parse_blob(raw: &str) -> Option<String> {

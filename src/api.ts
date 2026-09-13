@@ -138,6 +138,21 @@ export interface SpendRow {
   usd: number;
 }
 
+export interface RecommendCandidate {
+  id: string;
+  name: string;
+  score: number;
+  shortHeadroom: number | null;
+  longHeadroom: number | null;
+  displayLeft: number | null;
+  sustainable: boolean | null;
+  exhaustInSecs: number | null;
+  resetInSecs: number | null;
+  hasData: boolean;
+  isReserve: boolean;
+  excluded?: string | null;
+}
+
 export interface Dashboard {
   providers: ProviderSnapshot[];
   catalog: VendorInfo[];
@@ -158,6 +173,13 @@ export interface Dashboard {
   recommendId: string | null;
   recommendName: string | null;
   recommendLeft: number | null;
+  /** Motor contextual: "stay" | "switch" | "balanced" | "insufficient_data". */
+  recommendAction: string;
+  /** Código de motivo para i18n (nunca texto libre del backend). */
+  recommendReason: string;
+  recommendConfidence: number;
+  recommendFrom?: string | null;
+  recommendScores: RecommendCandidate[];
 }
 
 export const $ = (id: string): HTMLElement => document.getElementById(id)!;

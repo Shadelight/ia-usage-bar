@@ -275,8 +275,24 @@ pub fn keyring_api_key(id: VendorId) -> Option<String> {
 /// environment variable must not hide a failed keyring round-trip.
 pub fn verify_keyring_api_key(id: VendorId, expected: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(CREDENTIAL_SERVICE, id.slug()).map_err(|e| e.to_string())?;
-    let stored = read_keyring_entry(&entry).ok_or_else(|| {
-        "La credencial se escribió pero no pudo recuperarse del almacén seguro".to_string()
+    let (stored, password_err, secret_err) = match entry.get_password() {
+        Ok(value) => (Some(value), None, None),
+        Err(password_err) => match entry.get_secret() {
+            Ok(secret) => (Some(decode_keyring_secret(&secret)), Some(password_err), None),
+            Err(secret_err) => (None, Some(password_err), Some(secret_err)),
+        },
+    };
+    let stored = stored.filter(|v| !v.trim().is_empty()).ok_or_else(|| {
+        format!(
+            "La credencial se escribió pero no pudo recuperarse del almacén seguro \
+             (get_password: {}, get_secret: {})",
+            password_err
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "ok".to_string()),
+            secret_err
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "n/a".to_string())
+        )
     })?;
     if stored.trim().is_empty() || stored.trim() != expected.trim() {
         return Err("La credencial guardada no coincide con la que se escribió".into());

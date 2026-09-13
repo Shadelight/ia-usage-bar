@@ -230,9 +230,21 @@ button, input, select { font: inherit; color: inherit; }
   line-height: 1.2;
   letter-spacing: .02em;
 }
+.tab .label-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+  min-width: 0;
+}
 .tab .label {
   font-size: 11px;
   font-weight: 600;
+}
+.tab-plan {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--faint);
 }
 .tab:hover { color: var(--text); background: rgba(255,255,255,.04); }
 .tab.active { color: var(--text); }
@@ -303,11 +315,6 @@ button, input, select { font: inherit; color: inherit; }
   scrollbar-gutter: stable;
 }
 .detail-inner { width: min(100%, 760px); margin: 0 auto; }
-.provider-heading { display: flex; align-items: center; gap: 9px; padding: 5px 0 1px; }
-.provider-heading > div { display: grid; min-width: 0; }
-.provider-heading strong { font-size: 13px; }
-.provider-heading span { color: var(--faint); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.provider-heading .provider-updating { margin-left: auto; display: flex; }
 .quota-grid { display: block; }
 
 .block { margin: 18px 0 8px; }
@@ -823,7 +830,7 @@ button, input, select { font: inherit; color: inherit; }
 .panel.compact .breakdown,
 .panel.compact .hint,
 .panel.compact .guide-row,
-.panel.compact .tab .label,
+.panel.compact .tab .label-col,
 .panel.compact .foot-name,
 .panel.compact .tab-add,
 .panel.compact .head-sub,
@@ -893,7 +900,7 @@ button, input, select { font: inherit; color: inherit; }
 
 @media (max-width: 419px) {
   .panel { padding-inline: 12px; }
-  .tab .label { display: none; }
+  .tab:not(.active) .label-col { display: none; }
   .tab { padding-inline: 8px; }
   .block-top { gap: 8px; }
   .pct { font-size: 31px; }

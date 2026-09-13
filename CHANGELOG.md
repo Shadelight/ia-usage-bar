@@ -4,6 +4,36 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-13
+
+### Fixed
+
+- Antigravity nunca lograba usar la sesión de Google guardada: el código
+  buscaba la credencial con `Entry::new("gemini", "antigravity")`, que en
+  Windows arma el target `antigravity.gemini`, pero el propio cliente Go de
+  Antigravity la guarda como `gemini:antigravity`. Además, `get_password()`
+  decodifica el blob como UTF-16 (la convención de Windows para
+  contraseñas), pero ese blob es JSON UTF-8 crudo, así que devolvía basura
+  en vez de error. Ahora se usa el target real y se lee con `get_secret()`.
+- El botón "Configurar credencial" de la tarjeta de error de un proveedor
+  abría Ajustes → General en vez de la sección de ese proveedor.
+- El mensaje "la credencial se escribió pero no pudo recuperarse" ahora
+  incluye el error real de `get_password`/`get_secret` en vez de un texto
+  genérico, para diagnosticar más rápido si vuelve a aparecer.
+
+### Changed
+
+- El proveedor marcado como "Primario" (Ajustes → General) ahora también
+  encabeza la fila de pestañas del dashboard, no solo la preselección
+  inicial.
+- Quitado el encabezado duplicado (icono + nombre + plan) del panel de
+  detalle: esa información ya vive en la pestaña activa, que ahora muestra
+  el plan como subtítulo.
+- Nuevo motor de recomendación de proveedor: sustituye la heurística de
+  "más margen" por un puntaje que combina margen corto/largo, sostenibilidad
+  hasta el próximo reset, ventaja de reset y confianza de datos, con
+  histéresis para evitar cambios de sugerencia neuróticos.
+
 ## [0.3.1] - 2026-09-13
 
 ### Fixed

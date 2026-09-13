@@ -6,8 +6,8 @@
 //! CLI). Este crate solo conserva ventana/tray/notificaciones/comandos.
 
 pub use iausage_core::{
-    cache, config, cost, descriptor, doctor, guard, health, http, jwt, logfile, model, pace, paths,
-    pricing, providers, refresh_policy, snapshot_v1, sync, sync_server, watch,
+    cache, config, cost, descriptor, doctor, guard, health, http, jwt, logfile, model, pace,
+    paths, pricing, providers, recommend, refresh_policy, snapshot_v1, sync, sync_server, watch,
 };
 mod commands;
 mod dashboard;
