@@ -7,7 +7,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::descriptor::FetchStrategyKind;
-use crate::model::VendorId;
+use crate::model::{CredentialSource, VendorId};
 use crate::paths::{app_config_dir, config_path, detect_path};
 
 const CREDENTIAL_SERVICE: &str = "com.alberth.iausagebar";
@@ -214,14 +214,26 @@ impl AppConfig {
                 }
             }
         }
-        if let Ok(entry) = keyring::Entry::new(CREDENTIAL_SERVICE, id.slug()) {
-            if let Ok(value) = entry.get_password() {
-                if !value.trim().is_empty() {
-                    return Some(value);
-                }
-            }
+        if let Some(value) = keyring_api_key(id) {
+            return Some(value);
         }
         self.provider(id).api_key.filter(|s| !s.trim().is_empty())
+    }
+
+    /// Credential precedence mirrors `api_key()` and reports only its origin.
+    pub fn credential_source(&self, id: VendorId) -> Option<CredentialSource> {
+        if let Some(env) = id.env_key() {
+            if std::env::var(env).is_ok_and(|value| !value.trim().is_empty()) {
+                return Some(CredentialSource::Environment);
+            }
+        }
+        if keyring_api_key(id).is_some() {
+            return Some(CredentialSource::Keyring);
+        }
+        self.provider(id)
+            .api_key
+            .filter(|value| !value.trim().is_empty())
+            .map(|_| CredentialSource::Legacy)
     }
 
     pub fn enabled_ids(&self) -> Vec<VendorId> {
@@ -231,6 +243,30 @@ impl AppConfig {
             .filter(|id| self.is_enabled(*id))
             .collect()
     }
+}
+
+/// Reads a credential from the OS keyring only. It never falls back to an
+/// environment variable or legacy config, so callers can verify persistence.
+pub fn keyring_api_key(id: VendorId) -> Option<String> {
+    let entry = keyring::Entry::new(CREDENTIAL_SERVICE, id.slug()).ok()?;
+    entry
+        .get_password()
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
+/// Proves that the value just written can be read from the OS credential
+/// store. This intentionally bypasses `AppConfig::api_key()`: an old
+/// environment variable must not hide a failed keyring round-trip.
+pub fn verify_keyring_api_key(id: VendorId, expected: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new(CREDENTIAL_SERVICE, id.slug()).map_err(|e| e.to_string())?;
+    let stored = entry.get_password().map_err(|_| {
+        "La credencial se escribió pero no pudo recuperarse del almacén seguro".to_string()
+    })?;
+    if stored.trim().is_empty() || stored.trim() != expected.trim() {
+        return Err("La credencial guardada no coincide con la que se escribió".into());
+    }
+    Ok(())
 }
 
 pub fn store_api_key(id: VendorId, value: &str) -> Result<(), String> {

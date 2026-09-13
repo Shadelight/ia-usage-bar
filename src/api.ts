@@ -122,6 +122,8 @@ export interface VendorInfo {
   detected: boolean;
   /** Credential present (env/keyring/local login). Boolean only, never the secret. */
   hasCredential: boolean;
+  /** Origin of an API credential. Metadata only; never contains the secret. */
+  credentialSource?: "environment" | "keyring" | "legacy" | null;
   links: VendorLinks;
   /** Estrategias declaradas en orden de preferencia ("oauth"|"cli"|"api"|"web"|"local"). */
   strategies: string[];

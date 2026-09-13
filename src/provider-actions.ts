@@ -169,6 +169,28 @@ export function getProviderActions(vendor: VendorInfo): ProviderActionItem[] {
     });
   }
 
+  if (links?.apiKeyUrl) {
+    items.push({
+      id: "api-key",
+      kind: "external",
+      labelKey: "getApiKey",
+      url: links.apiKeyUrl,
+      icon: "gear",
+      indicator: "external-link",
+    });
+  }
+
+  if (links?.signupUrl) {
+    items.push({
+      id: "signup",
+      kind: "external",
+      labelKey: "signUp",
+      url: links.signupUrl,
+      icon: "app",
+      indicator: "external-link",
+    });
+  }
+
   items.push({
     id: "configure",
     kind: "configure",

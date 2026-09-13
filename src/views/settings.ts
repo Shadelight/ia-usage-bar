@@ -136,7 +136,9 @@ function generalBody(dash: Dashboard): string {
 }
 
 function providerLinks(vendor: VendorInfo): string {
-  const items = getProviderActions(vendor).filter((a) => a.kind === "external" && a.url);
+  const items = getProviderActions(vendor).filter(
+    (a) => a.kind === "external" && a.url && a.id !== "api-key" && a.id !== "signup",
+  );
   if (!items.length) return "";
   return `<div class="prov-links">${items
     .map(
@@ -146,20 +148,23 @@ function providerLinks(vendor: VendorInfo): string {
 }
 
 function credentialLinks(vendor: VendorInfo): string {
-  const keyUrl = vendor.links.apiKeyUrl ?? null;
-  const signupUrl = vendor.links.signupUrl ?? null;
-  if (!keyUrl && !signupUrl) return "";
-  return `<div class="credential-links">${
-    keyUrl
-      ? `<button type="button" class="link-btn" data-open-url="${escapeHtml(keyUrl)}">${escapeHtml(t("getApiKey"))}</button>`
-      : ""
-  }${
-    keyUrl && signupUrl ? `<span class="link-separator" aria-hidden="true">|</span>` : ""
-  }${
-    signupUrl
-      ? `<button type="button" class="link-btn" data-open-url="${escapeHtml(signupUrl)}">${escapeHtml(t("signUp"))}</button>`
-      : ""
-  }</div>`;
+  const items = getProviderActions(vendor).filter(
+    (action) => action.kind === "external" && action.url && (action.id === "api-key" || action.id === "signup"),
+  );
+  if (!items.length) return "";
+  return `<div class="credential-links">${items
+    .map((action) => `<button type="button" class="link-btn" data-open-url="${escapeHtml(action.url!)}">${escapeHtml(t(action.labelKey))}</button>`)
+    .join("")}</div>`;
+}
+
+function credentialSourceLabel(vendor: VendorInfo): string {
+  const saved = t("keyConfigured");
+  switch (vendor.credentialSource) {
+    case "environment": return `${saved} · ${t("credentialSourceEnvironment")}`;
+    case "keyring": return `${saved} · ${t("credentialSourceKeyring")}`;
+    case "legacy": return `${saved} · ${t("credentialSourceLegacy")}`;
+    default: return `${saved} · ${t("credentialStoredSecurely")}`;
+  }
 }
 
 function providerKeyDetail(vendor: VendorInfo): string {
@@ -177,12 +182,11 @@ function providerKeyDetail(vendor: VendorInfo): string {
   const eye = draft
     ? `<button type="button" class="credential-eye" data-toggle-key="${escapeHtml(vendor.id)}" aria-label="${escapeHtml(t(revealed ? "hideCredential" : "showCredential"))}" aria-pressed="${revealed ? "true" : "false"}">${actionIconSvg(revealed ? "eye-off" : "eye", 16)}</button>`
     : "";
-  return `
+  return `<div class="credential-card">
     <div class="credential-head">
       <label class="key-label" for="key-${escapeHtml(vendor.id)}">${escapeHtml(t("apiKey"))}</label>
-      ${credentialLinks(vendor)}
+      ${vendor.hasCredential ? `<span class="cred-state"><span aria-hidden="true">&#10003;</span> ${escapeHtml(credentialSourceLabel(vendor))}</span>` : ""}
     </div>
-    ${vendor.hasCredential ? `<p class="cred-state"><span aria-hidden="true">✓</span> ${escapeHtml(t("keyConfigured"))}</p>` : ""}
     <div class="key-row">
       <div class="credential-input-wrap">
         <input id="key-${escapeHtml(vendor.id)}" data-key="${escapeHtml(vendor.id)}" type="${revealed ? "text" : "password"}"
@@ -190,9 +194,13 @@ function providerKeyDetail(vendor: VendorInfo): string {
           autocomplete="off" spellcheck="false" ${disabled ? "disabled" : ""} />
         ${eye}
       </div>
-      <button type="button" data-savekey="${escapeHtml(vendor.id)}" ${disabled ? "disabled" : ""}>${escapeHtml(saveLabel)}</button>
-      ${vendor.hasCredential ? `<button type="button" class="ghost" data-delkey="${escapeHtml(vendor.id)}" ${busy ? "disabled" : ""}>${escapeHtml(t("deleteCredential"))}</button>` : ""}
-    </div>`;
+      <div class="credential-actions">
+        <button type="button" class="primary" data-savekey="${escapeHtml(vendor.id)}" ${disabled ? "disabled" : ""}>${escapeHtml(saveLabel)}</button>
+        ${vendor.hasCredential ? `<button type="button" class="danger" data-delkey="${escapeHtml(vendor.id)}" ${busy ? "disabled" : ""}>${escapeHtml(t("deleteCredential"))}</button>` : ""}
+      </div>
+    </div>
+    ${credentialLinks(vendor)}
+  </div>`;
 }
 
 function providerLoginDetail(vendor: VendorInfo): string {
@@ -236,14 +244,17 @@ function providerSourceDetail(vendor: VendorInfo, snapshot?: ProviderSnapshot): 
 function providerDetail(vendor: VendorInfo, snapshot?: ProviderSnapshot): string {
   const showKey = vendor.needsKey;
   const showLogin = vendor.authKind === "oauth" || vendor.authKind === "local" || vendor.authKind === "mixed";
+  const state = deriveProviderState(vendor, snapshot, false);
+  const canValidate = showKey
+    && vendor.hasCredential
+    && ["needs_auth", "needs_permission", "unavailable", "error"].includes(state.connection);
   return `<div class="prov-detail" id="prov-detail-${escapeHtml(vendor.id)}" role="region" aria-label="${escapeHtml(vendor.name)}">
     ${providerSourceDetail(vendor, snapshot)}
     ${showKey ? providerKeyDetail(vendor) : ""}
     ${showLogin ? providerLoginDetail(vendor) : ""}
-    <div class="prov-buttons">
-      <button type="button" data-refresh-provider="${escapeHtml(vendor.id)}">${actionIconSvg("refresh", 12)}<span>${escapeHtml(t("actionRetry"))}</span></button>
-      ${vendor.links.appUrl ? `<button type="button" data-open-url="${escapeHtml(vendor.links.appUrl)}">${actionIconSvg("app", 12)}<span>${escapeHtml(t("openApp"))}</span></button>` : ""}
-    </div>
+    ${canValidate ? `<div class="prov-buttons">
+      <button type="button" data-refresh-provider="${escapeHtml(vendor.id)}">${actionIconSvg("refresh", 12)}<span>${escapeHtml(t("validateNow"))}</span></button>
+    </div>` : ""}
     ${providerLinks(vendor)}
   </div>`;
 }

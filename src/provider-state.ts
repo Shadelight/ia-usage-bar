@@ -95,9 +95,9 @@ export function deriveProviderState(
     case "needs_permission":
       return { enabled: true, configured, via, connection: "needs_permission", dotClass: dotFor("needs_permission"), statusKey: "statusNeedPermission", sessionInvalid: false };
     case "unavailable":
-      return { enabled: true, configured, via, connection: "unavailable", dotClass: dotFor("unavailable"), statusKey: "statusUnavailable", sessionInvalid: false };
+      return { enabled: true, configured, via, connection: "unavailable", dotClass: dotFor("unavailable"), statusKey: snapshot.statusReason === "network_unavailable" ? "statusNoConnection" : "statusUnavailable", sessionInvalid: false };
     case "error":
-      return { enabled: true, configured, via, connection: "error", dotClass: dotFor("error"), statusKey: "statusError", sessionInvalid: false };
+      return { enabled: true, configured, via, connection: "error", dotClass: dotFor("error"), statusKey: snapshot.statusReason === "parse_failed" ? "statusResponseUnreadable" : "statusError", sessionInvalid: false };
     case "needs_auth":
     default: {
       const reason = snapshot.statusReason ?? null;
@@ -107,12 +107,16 @@ export function deriveProviderState(
         const apiCredential = vendor.needsKey || vendor.authKind === "apikey";
         return { enabled: true, configured, via, connection: "needs_auth", dotClass: dotFor("needs_auth"), statusKey: apiCredential ? "statusCredentialInvalid" : "statusSessionInvalid", sessionInvalid: !apiCredential };
       }
-      if (reason === "missing_credential" || reason == null) {
-        // Missing credential with no stored key and a key-based vendor:
-        // the actionable state is "needs credential", not a generic login.
-        if (!vendor.hasCredential && vendor.needsKey) {
-          return { enabled: true, configured, via, connection: "needs_credential", dotClass: dotFor("needs_credential"), statusKey: "statusNeedKey", sessionInvalid: false };
+      if (vendor.needsKey) {
+        // API-key providers never instruct the user to sign in. A backend
+        // missing credential paired with a catalog credential means the
+        // secure store could not be read, not that OAuth is required.
+        if (vendor.hasCredential) {
+          return { enabled: true, configured, via, connection: "error", dotClass: dotFor("error"), statusKey: "statusCredentialUnreadable", sessionInvalid: false };
         }
+        return { enabled: true, configured, via, connection: "needs_credential", dotClass: dotFor("needs_credential"), statusKey: "statusNeedKey", sessionInvalid: false };
+      }
+      if (reason === "missing_credential" || reason == null) {
         return { enabled: true, configured, via, connection: "needs_auth", dotClass: dotFor("needs_auth"), statusKey: "statusNeedLogin", sessionInvalid: false };
       }
       return { enabled: true, configured, via, connection: "needs_auth", dotClass: dotFor("needs_auth"), statusKey: "statusNeedLogin", sessionInvalid: false };

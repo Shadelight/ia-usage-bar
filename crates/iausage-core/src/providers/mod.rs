@@ -59,6 +59,7 @@ pub fn catalog(cfg: &AppConfig) -> Vec<VendorInfo> {
         .map(|id| {
             let desc = descriptor(id);
             let has_credential = credential_present(id, cfg, &detected);
+            let credential_source = cfg.credential_source(id);
             VendorInfo {
                 id: id.slug().to_string(),
                 name: id.display_name().to_string(),
@@ -70,6 +71,7 @@ pub fn catalog(cfg: &AppConfig) -> Vec<VendorInfo> {
                 enabled: cfg.is_enabled(id),
                 detected: detected.contains(id.slug()),
                 has_credential,
+                credential_source,
                 links: id.links(),
                 strategies: desc.strategies.iter().map(|s| s.slug().to_string()).collect(),
                 // Do not surface stale preferences saved by pre-router builds:

@@ -4,6 +4,7 @@ import { $, escapeHtml } from "../api.ts";
 import type { Dashboard, MetricLine, ProviderSnapshot, UsageQuota, VendorInfo } from "../api.ts";
 import { normalizeProviderError } from "../errors.ts";
 import { lang, t } from "../i18n.ts";
+import { deriveProviderState, formatStatusText } from "../provider-state.ts";
 import { providerVisual } from "../providers.ts";
 import { formatResetAbsolute, formatResetRelative } from "../reset-format.ts";
 import { activeItemScrollDelta, elapsedLabel, horizontalWheelDelta } from "../layout.ts";
@@ -263,6 +264,7 @@ export function actionsSectionHtml(provider: ProviderSnapshot, vendor: VendorInf
 }
 
 function connectionLabel(provider: ProviderSnapshot, vendor?: VendorInfo): string {
+  if (vendor) return formatStatusText(deriveProviderState(vendor, provider, false));
   switch (provider.status) {
     case "connected": return t("statusConnected");
     case "needs_permission": return t("statusNeedPermission");

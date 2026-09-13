@@ -4,6 +4,27 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-09-12
+
+### Added
+
+- Extensión VS Code: la barra de estado usa código de 3 letras
+  (`CLD`/`CDX`/`CUR`), y el tooltip muestra el logo real de cada
+  proveedor (mismo SVG de marca que ya usa la app de escritorio).
+
+### Fixed
+
+- Desktop: `showCommandError` saneaba el error real del backend pero
+  nunca lo mostraba — toda falla de sync (sin passphrase, sync
+  desactivado, LAN rechazado) se veía igual y no decía qué pasó.
+  Ahora se muestra el motivo real. "Exportar ahora" se deshabilita
+  hasta activar sync, en vez de fallar silenciosamente.
+- Android: el widget podía quedar en "No se puede mostrar el
+  contenido" de forma permanente si `provideGlance` lanzaba una
+  excepción. Se blinda la lectura del snapshot y se define
+  `initialLayout`/`targetCellWidth`/`targetCellHeight` en el widget
+  provider.
+
 ## [0.2.5] - 2026-09-12
 
 ### Fixed
@@ -152,6 +173,7 @@ monitor.
 - La caché 0.2.0 sigue siendo legible (campos nuevos con default).
 
 [Unreleased]: https://github.com/Shadelight/ia-usage-bar/compare/v0.2.2...HEAD
+[0.2.6]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.6
 [0.2.5]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.5
 [0.2.4]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.4
 [0.2.2]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.2

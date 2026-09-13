@@ -23,9 +23,28 @@ let refreshWhenFocused: string | null = null;
 // rejects it, without ever replacing the control the user is touching.
 const pendingProviderEnabled = new Map<string, boolean>();
 const pendingSourcePreferences = new Map<string, string | null>();
-// Optimistic credential presence: set on save/delete success, cleared only
-// when a dashboard confirms the backend value (compare-first, never blind).
+// Optimistic credential presence bridges the command response and its catalog
+// event. It is bounded: if a confirming dashboard never arrives, the actual
+// backend value wins instead of showing a saved-credential badge forever.
 const pendingCredentialPresence = new Map<string, boolean>();
+const pendingCredentialPresenceExpiry = new Map<string, number>();
+const CREDENTIAL_PRESENCE_GRACE_MS = 15_000;
+
+function scheduleCredentialPresenceExpiry(id: string): void {
+  const expiresAt = performance.now() + CREDENTIAL_PRESENCE_GRACE_MS;
+  pendingCredentialPresenceExpiry.set(id, expiresAt);
+  window.setTimeout(() => {
+    // A newer save/delete has its own deadline. Otherwise discard the local
+    // claim and ask Rust for the authoritative catalog so the badge cannot
+    // survive forever if an event was lost.
+    if (pendingCredentialPresenceExpiry.get(id) !== expiresAt) return;
+    pendingCredentialPresence.delete(id);
+    pendingCredentialPresenceExpiry.delete(id);
+    void invokeCmd<Dashboard>("get_dashboard").then((result) => {
+      if (result.ok) void applyDashboard(result.value);
+    });
+  }, CREDENTIAL_PRESENCE_GRACE_MS);
+}
 // Tracks scoped validation refreshes that already emitted their loading
 // state, so a stale pre-save dashboard can never end "Validando…" early.
 const credentialValidationObserved = new Set<string>();
@@ -164,8 +183,15 @@ async function applyDashboard(d: Dashboard) {
     }
     const pendingCredential = pendingCredentialPresence.get(vendor.id);
     if (pendingCredential !== undefined) {
-      if (vendor.hasCredential === pendingCredential) pendingCredentialPresence.delete(vendor.id);
-      else vendor.hasCredential = pendingCredential;
+      if (vendor.hasCredential === pendingCredential) {
+        pendingCredentialPresence.delete(vendor.id);
+        pendingCredentialPresenceExpiry.delete(vendor.id);
+      } else if ((pendingCredentialPresenceExpiry.get(vendor.id) ?? 0) > performance.now()) {
+        vendor.hasCredential = pendingCredential;
+      } else {
+        pendingCredentialPresence.delete(vendor.id);
+        pendingCredentialPresenceExpiry.delete(vendor.id);
+      }
     }
     // End "Validando…" only once the scoped validation refresh observed its
     // loading state and left it. A stale pre-save dashboard (no loading)
@@ -436,6 +462,7 @@ async function main() {
         // Optimistic presence: the secret stays server-side only, so the
         // draft is dropped and the input renders empty with a saved badge.
         pendingCredentialPresence.set(id, true);
+        scheduleCredentialPresenceExpiry(id);
         const vendor = dash?.catalog.find((v) => v.id === id);
         if (vendor) vendor.hasCredential = true;
         clearCredentialDraft(id);
@@ -454,6 +481,7 @@ async function main() {
       const result = await invokeCmd("delete_api_key", { id });
       if (result.ok || !isTauri()) {
         pendingCredentialPresence.set(id, false);
+        scheduleCredentialPresenceExpiry(id);
         const vendor = dash?.catalog.find((v) => v.id === id);
         if (vendor) vendor.hasCredential = false;
         clearCredentialDraft(id);

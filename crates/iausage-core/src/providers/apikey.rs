@@ -414,18 +414,75 @@ fn fetch_opencode_go(key: &str) -> Result<ProviderSnapshot, FetchError> {
         "https://opencode.ai/zen/go/v1/usage",
         &[("Authorization", &format!("Bearer {key}"))],
     )?;
+    parse_opencode_go_usage(&body)
+}
+
+fn parse_opencode_go_usage(body: &Value) -> Result<ProviderSnapshot, FetchError> {
+    // Zen Go currently nests the quota windows under `usage`. Keep the root
+    // fallback for older responses, but never turn an unrecognized 200 body
+    // into an apparently valid empty snapshot.
+    let usage = body.get("usage").unwrap_or(body);
     let mut lines = Vec::new();
     for (key_name, label, window, vis) in [
-        ("rolling", "Rolling", 18_000i64, "always"),
+        ("rolling", "5 horas", 18_000i64, "always"),
         ("weekly", "Semanal", 604_800, "always"),
         ("monthly", "Mensual", 2_592_000, "demand"),
     ] {
-        if let Some((w, pct)) = body.get(key_name).and_then(|value| {
-            json_f64(value, &["percent", "utilization"]).map(|pct| (value, pct))
-        }) {
-            let reset = json_str(w, &["reset", "resets_at", "resetAt"]);
-            lines.push(progress_pct(key_name, label, pct, reset, window, vis));
+        if let Some(value) = usage.get(key_name) {
+            let status = json_str(value, &["status"]);
+            let pct = if status.as_deref() == Some("rate-limited") {
+                Some(100.0)
+            } else {
+                json_f64(value, &["percent", "usagePercent", "utilization"])
+            };
+            if let Some(pct) = pct {
+                let reset = json_str(value, &["resetsAt", "resets_at", "resetAt", "reset"]);
+                lines.push(progress_pct(key_name, label, pct, reset, window, vis));
+            }
         }
     }
+    if lines.is_empty() {
+        return Err(FetchError::Parse("OpenCode Go: respuesta sin ventanas de uso".into()));
+    }
     Ok(snapshot_ok(VendorId::OpenCodeGo, "OpenCode Go", lines))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn opencode_go_parses_nested_usage_windows() {
+        let body = json!({
+            "usage": {
+                "rolling": { "status": "ok", "percent": 4, "resetsAt": "2026-09-12T12:00:00Z" },
+                "weekly": { "status": "rate-limited", "resetsAt": "2026-09-19T00:00:00Z" },
+                "monthly": { "status": "ok", "usagePercent": 12.5, "reset": "2026-10-01T00:00:00Z" }
+            }
+        });
+
+        let snapshot = parse_opencode_go_usage(&body).expect("nested usage must parse");
+        assert_eq!(snapshot.lines.len(), 3);
+        let crate::model::MetricLine::Progress { label, resets_at, .. } = &snapshot.lines[0] else {
+            panic!("rolling window must be progress data");
+        };
+        assert_eq!(label, "5 horas");
+        assert_eq!(resets_at.as_deref(), Some("2026-09-12T12:00:00Z"));
+        let crate::model::MetricLine::Progress { used, .. } = &snapshot.lines[1] else {
+            panic!("weekly window must be progress data");
+        };
+        assert_eq!(*used, 100.0);
+        let crate::model::MetricLine::Progress { used, .. } = &snapshot.lines[2] else {
+            panic!("monthly window must be progress data");
+        };
+        assert_eq!(*used, 12.5);
+    }
+
+    #[test]
+    fn opencode_go_rejects_an_empty_usage_response() {
+        let error = parse_opencode_go_usage(&json!({ "usage": { "rolling": { "status": "ok" } } }))
+            .expect_err("empty usage data must not look connected");
+        assert!(matches!(error, FetchError::Parse(_)));
+    }
 }

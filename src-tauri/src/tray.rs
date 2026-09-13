@@ -490,6 +490,7 @@ mod tests {
             enabled,
             detected: false,
             has_credential,
+            credential_source: None,
             strategies: vec![],
             source_preference: None,
             links: crate::model::VendorLinks {

@@ -174,6 +174,8 @@ test("reconciliation compares before overwriting, never assigns first", () => {
   const reconcile = main.slice(main.indexOf("async function applyDashboard"));
   assert.match(reconcile, /vendor\.hasCredential === pendingCredential/);
   assert.match(reconcile, /pendingCredentialPresence\.delete\(vendor\.id\)/);
+  assert.match(reconcile, /pendingCredentialPresenceExpiry/);
+  assert.match(reconcile, /performance\.now\(\)/);
   assert.match(reconcile, /vendor\.enabled === pendingEnabled/);
   assert.match(reconcile, /vendor\.sourcePreference === pendingSource/);
   assert.match(reconcile, /credentialValidationObserved/);
@@ -186,10 +188,10 @@ test("reconciliation compares before overwriting, never assigns first", () => {
 
 test("credential header shows key links and the eye only while typing", () => {
   assert.match(settings, /function credentialLinks/);
-  assert.match(settings, /vendor\.links\.apiKeyUrl/);
-  assert.match(settings, /vendor\.links\.signupUrl/);
-  assert.match(settings, /t\("getApiKey"\)/);
-  assert.match(settings, /t\("signUp"\)/);
+  assert.match(settings, /getProviderActions\(vendor\)/);
+  assert.match(settings, /action\.id === "api-key"/);
+  assert.match(settings, /action\.id === "signup"/);
+  assert.match(settings, /t\(action\.labelKey\)/);
   assert.match(settings, /class="credential-head"/);
   assert.match(settings, /class="credential-input-wrap"/);
   assert.match(settings, /data-toggle-key/);
@@ -198,6 +200,16 @@ test("credential header shows key links and the eye only while typing", () => {
   const eyeBranch = settings.slice(settings.indexOf("const eye = draft"));
   assert.match(eyeBranch, /const eye = draft/);
   assert.match(main, /btn\.dataset\.toggleKey/);
+});
+
+test("API-key providers never show an OAuth sign-in state", () => {
+  const unreadable = deriveProviderState(
+    keyVendor({ hasCredential: true }),
+    invalidSnap({ statusReason: "missing_credential" }),
+    false,
+  );
+  assert.equal(unreadable.statusKey, "statusCredentialUnreadable");
+  assert.notEqual(unreadable.statusKey, "statusNeedLogin");
 });
 
 test("patchSettings keeps text-only mutation while validating", () => {

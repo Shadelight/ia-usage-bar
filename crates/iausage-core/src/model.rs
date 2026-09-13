@@ -669,6 +669,16 @@ impl ProviderUsage {
 
 pub type ProviderSnapshot = ProviderUsage;
 
+/// Where an API credential was found. This is deliberately metadata only:
+/// serializing it must never expose the credential value itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialSource {
+    Environment,
+    Keyring,
+    Legacy,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VendorInfo {
@@ -686,6 +696,10 @@ pub struct VendorInfo {
     /// boolean only — the secret itself is never exposed. The UI derives
     /// "configured" from this; `enabled` stays fully independent.
     pub has_credential: bool,
+    /// Origin of an API credential, when one is available. This makes an
+    /// environment override visible without exposing the secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_source: Option<CredentialSource>,
     pub links: VendorLinks,
     /// Estrategias declaradas en orden de preferencia (`descriptor`).
     #[serde(default)]

@@ -265,6 +265,9 @@ pub(crate) fn save_api_key(
     let vid = parse_id(&id).ok_or_else(|| format!("Proveedor desconocido: {id}"))?;
     let mut cfg = lock_or_recover(&state.config).clone();
     config::store_api_key(vid, &key)?;
+    if !key.trim().is_empty() {
+        config::verify_keyring_api_key(vid, &key)?;
+    }
     let entry = cfg.providers.entry(id.clone()).or_default();
     entry.api_key = None;
     if !key.trim().is_empty() {

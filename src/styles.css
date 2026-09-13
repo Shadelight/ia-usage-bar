@@ -760,7 +760,7 @@ button, input, select { font: inherit; color: inherit; }
 .prov .provider-logo-wrap { width: 28px; height: 28px; }
 .prov .provider-logo { width: 20px; height: 20px; }
 .prov-name { flex: 1; }
-.key-row { display: flex; gap: 6px; margin: 0 0 10px 38px; }
+.key-row { display: flex; gap: 6px; margin: 0 0 10px; }
 .key-row input { flex: 1; min-width: 0; }
 .key-row button {
   padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line);
@@ -994,7 +994,18 @@ button, input, select { font: inherit; color: inherit; }
   justify-content: space-between;
   gap: 8px;
 }
-.credential-links { display: flex; align-items: center; gap: 6px; }
+.credential-card { display: grid; gap: 8px; }
+.credential-card .key-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+.credential-actions { display: flex; align-items: center; gap: 6px; }
+.credential-actions .primary { background: var(--surface-strong); color: var(--text); }
+.credential-actions .danger { margin-left: auto; background: transparent; color: var(--muted); }
+.credential-actions .danger:hover { color: var(--hot); border-color: var(--hot); }
+.credential-links { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .link-btn {
   border: 0;
   background: none;

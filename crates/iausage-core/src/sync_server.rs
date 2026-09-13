@@ -293,6 +293,7 @@ mod tests {
             enabled: true,
             detected: true,
             has_credential: true,
+            credential_source: None,
             links: VendorId::Anthropic.links(),
             strategies: vec!["oauth".into()],
             source_preference: None,
