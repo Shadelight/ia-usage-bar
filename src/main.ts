@@ -91,7 +91,7 @@ function showCommandError(detail: string): void {
   const safeDetail = sanitizeTechnicalDetails(detail);
   console.error(safeDetail);
   const toast = $("status-toast");
-  toast.textContent = t("commandFailed");
+  toast.textContent = safeDetail || t("commandFailed");
   toast.classList.add("status-toast-error");
   toast.classList.remove("hidden");
   window.clearTimeout(toastTimer);
@@ -513,24 +513,24 @@ async function main() {
     if (btn.hasAttribute("data-savesyncpass")) {
       const input = document.getElementById("sync-pass") as HTMLInputElement | null;
       const passphrase = input?.value || "";
-      const saved = (await invokeCmd("sync_set_passphrase", { passphrase })).ok;
-      if (saved || !isTauri()) {
+      const result = await invokeCmd("sync_set_passphrase", { passphrase });
+      if (result.ok || !isTauri()) {
         clearSyncPassphraseDraft();
         setSyncPairing(null);
         showToast(t("syncPassphraseSaved"));
       } else {
-        showCommandError(t("commandFailed"));
+        showCommandError(result.error ?? t("commandFailed"));
       }
       if (view === "settings") refreshSyncView();
     }
     if (btn.hasAttribute("data-forgetsyncpass")) {
-      const done = (await invokeCmd("sync_set_passphrase", { passphrase: "" })).ok;
-      if (done || !isTauri()) {
+      const result = await invokeCmd("sync_set_passphrase", { passphrase: "" });
+      if (result.ok || !isTauri()) {
         clearSyncPassphraseDraft();
         setSyncPairing(null);
         showToast(t("syncUpdated"));
       } else {
-        showCommandError(t("commandFailed"));
+        showCommandError(result.error ?? t("commandFailed"));
       }
       if (view === "settings") refreshSyncView();
     }
@@ -538,13 +538,13 @@ async function main() {
       const lanToggle = document.getElementById("cfg-sync-lan") as HTMLInputElement | null;
       const pairing = await invokeCmd<SyncPairingDto>("sync_get_pairing", { lan: lanToggle?.checked ?? false });
       if (pairing.ok) setSyncPairing(pairing.value);
-      else showCommandError(t("commandFailed"));
+      else showCommandError(pairing.error ?? t("commandFailed"));
       if (view === "settings") refreshSyncView();
     }
     if (btn.hasAttribute("data-syncexport")) {
       const path = await invokeCmd<string>("sync_export_now");
       if (path.ok) showToast(`${t("syncExported")} ${path.value}`);
-      else showCommandError(t("commandFailed"));
+      else showCommandError(path.error ?? t("commandFailed"));
       if (view === "settings") refreshSyncView();
     }
     if (btn.dataset.redeemReset && btn.dataset.resetUrl) {
@@ -635,8 +635,8 @@ async function main() {
       if (view === "settings") refreshSyncView();
     } else if (el.id === "cfg-sync-lan") {
       const lan = (el as HTMLInputElement).checked;
-      const ok = (await invokeCmd("sync_set_lan", { lan })).ok;
-      if (!ok && isTauri()) showCommandError(t("commandFailed"));
+      const result = await invokeCmd("sync_set_lan", { lan });
+      if (!result.ok && isTauri()) showCommandError(result.error ?? t("commandFailed"));
       if (view === "settings") refreshSyncView();
     } else if (el.id === "cfg-autostart") {
       const enabled = (el as HTMLInputElement).checked;

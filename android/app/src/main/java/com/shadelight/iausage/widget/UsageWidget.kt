@@ -32,7 +32,12 @@ class UsageWidget : GlanceAppWidget() {
 
     @Composable private fun WidgetContent() {
         val context = LocalContext.current
-        val payload = SecureStateStore(context).payload()?.let { runCatching { SyncPayload.fromJson(JSONObject(it)) }.getOrNull() }
+        // ponytail: a widget host (notably Samsung One UI) shows a permanent
+        // "can't load widget" placeholder if provideGlance ever throws, so
+        // any failure here must degrade to an error row instead of crashing.
+        val payload = runCatching {
+            SecureStateStore(context).payload()?.let { runCatching { SyncPayload.fromJson(JSONObject(it)) }.getOrNull() }
+        }.getOrNull()
         Column(
             modifier = GlanceModifier.fillMaxSize().background(Color(0xFF15233B)).cornerRadius(16.dp).padding(14.dp)
                 .clickable(actionStartActivity(Intent(context, MainActivity::class.java))),

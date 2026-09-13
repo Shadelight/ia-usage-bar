@@ -373,7 +373,7 @@ function syncBody(): string {
     <p class="lede">${t("syncLanHint")}</p>
     <div class="prov-buttons">
       <button type="button" data-syncqr>${actionIconSvg("external-link", 12)}<span>${escapeHtml(t("syncShowQr"))}</span></button>
-      <button type="button" data-syncexport>${actionIconSvg("refresh", 12)}<span>${escapeHtml(t("syncExportNow"))}</span></button>
+      <button type="button" data-syncexport ${st?.enabled ? "" : "disabled"} title="${st?.enabled ? "" : escapeHtml(t("syncEnableFirst"))}">${actionIconSvg("refresh", 12)}<span>${escapeHtml(t("syncExportNow"))}</span></button>
     </div>
     <div id="sync-qr" class="sync-qr">${syncPairing ? `
       <img src="data:image/png;base64,${syncPairing.qrPngBase64}" alt="QR" />
