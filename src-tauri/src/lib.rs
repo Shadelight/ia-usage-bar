@@ -350,11 +350,12 @@ pub fn run() {
             commands::check_for_updates,
             commands::install_update,
             commands::sync_get_status,
-            commands::sync_set_enabled,
             commands::sync_set_passphrase,
             commands::sync_set_export_dir,
             commands::sync_set_lan,
             commands::sync_get_pairing,
+            commands::sync_start_pairing,
+            commands::sync_revoke_device,
             commands::sync_export_now,
         ])
         .on_window_event(|window, event| {

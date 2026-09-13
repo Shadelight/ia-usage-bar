@@ -1000,6 +1000,8 @@ pub(crate) struct SyncStatus {
     server_addr: String,
     server_error: Option<String>,
     last_export: Option<SyncExportInfo>,
+    paired_devices: Vec<PairedDeviceDto>,
+    pending_pairing: Option<PendingPairingDto>,
 }
 
 #[derive(Serialize)]
@@ -1010,6 +1012,22 @@ pub(crate) struct SyncPairing {
     host: String,
     port: u16,
     qr_png_base64: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PairedDeviceDto {
+    client_device_id: String,
+    name: String,
+    created_at: String,
+    last_seen_at: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PendingPairingDto {
+    fingerprint: String,
+    expires_at: String,
 }
 
 fn sync_last_export(cfg: &AppConfig, device_id: &str) -> Option<SyncExportInfo> {
@@ -1029,6 +1047,24 @@ pub(crate) fn sync_get_status(
     let cfg = lock_or_recover(&state.config).clone();
     let device_id = crate::sync::load_or_create_device_id()?;
     let server = lock_or_recover(&state.sync_server);
+    let paired_devices = cfg
+        .paired_devices
+        .iter()
+        .filter(|d| !d.revoked)
+        .map(|d| PairedDeviceDto {
+            client_device_id: d.client_device_id.clone(),
+            name: d.name.clone(),
+            created_at: d.created_at.clone(),
+            last_seen_at: d.last_seen_at.clone(),
+        })
+        .collect();
+    let pending_pairing = lock_or_recover(&state.pending_pairing)
+        .as_ref()
+        .filter(|p| !p.core.is_expired())
+        .map(|p| PendingPairingDto {
+            fingerprint: crate::sync::pairing_fingerprint(&device_id),
+            expires_at: p.expires_at_iso.clone(),
+        });
     Ok(SyncStatus {
         enabled: cfg.sync_enabled,
         fingerprint: crate::sync::pairing_fingerprint(&device_id),
@@ -1040,33 +1076,9 @@ pub(crate) fn sync_get_status(
         server_addr: server.addr.clone(),
         server_error: server.last_error.clone(),
         last_export: sync_last_export(&cfg, &device_id),
+        paired_devices,
+        pending_pairing,
     })
-}
-
-#[tauri::command]
-pub(crate) fn sync_set_enabled(
-    app: AppHandle,
-    state: tauri::State<AppState>,
-    enabled: bool,
-) -> Result<(), String> {
-    if enabled && !crate::sync::has_passphrase() {
-        return Err("sync: primero guarda una frase secreta".into());
-    }
-    let mut cfg = lock_or_recover(&state.config).clone();
-    let previous = cfg.sync_enabled;
-    cfg.sync_enabled = enabled;
-    cfg.save()?;
-    *lock_or_recover(&state.config) = cfg.clone();
-    if let Err(error) = crate::sync_service::ensure_sync_server(&app) {
-        // El switch no puede quedar en ON con el servidor muerto: revertir
-        // la config guardada y devolver el error real (no un "detenido"
-        // genérico) para que la UI lo muestre.
-        cfg.sync_enabled = previous;
-        cfg.save()?;
-        *lock_or_recover(&state.config) = cfg;
-        return Err(error);
-    }
-    Ok(())
 }
 
 #[tauri::command]
@@ -1168,6 +1180,67 @@ pub(crate) fn sync_get_pairing(
         port: info.port,
         qr_png_base64: B64.encode(&png),
     })
+}
+
+#[tauri::command]
+pub(crate) fn sync_start_pairing(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<SyncPairing, String> {
+    let cfg = lock_or_recover(&state.config).clone();
+    if !cfg.sync_lan {
+        return Err("sync: activa Exponer en la red local".into());
+    }
+    let device_id = crate::sync::load_or_create_device_id()?;
+    let new_pairing = iausage_core::pairing::start_pairing();
+    let expires_at_iso = (chrono::Local::now()
+        + chrono::Duration::from_std(iausage_core::pairing::PAIRING_TTL).unwrap())
+    .to_rfc3339();
+    *lock_or_recover(&state.pending_pairing) = Some(crate::sync_service::PendingPairingRuntime {
+        core: new_pairing.pending,
+        expires_at_iso,
+    });
+    crate::sync_service::ensure_sync_server(&app)?;
+    let host =
+        crate::sync_server::lan_ip().ok_or_else(|| "sync: sin IP LAN detectable".to_string())?;
+    let fingerprint = crate::sync::pairing_fingerprint(&device_id);
+    let info = iausage_core::pairing::PairingInfoV2 {
+        host: host.clone(),
+        port: crate::sync_server::SYNC_DEFAULT_PORT,
+        pc_device_id: device_id,
+        fingerprint: fingerprint.clone(),
+        token: new_pairing.token_hex,
+        secret: new_pairing.secret_b64,
+    };
+    let uri = info.to_uri();
+    let png = crate::sync_server::pairing_qr_png(&uri, 512)?;
+    use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+    Ok(SyncPairing {
+        uri,
+        fingerprint,
+        host,
+        port: info.port,
+        qr_png_base64: B64.encode(&png),
+    })
+}
+
+#[tauri::command]
+pub(crate) fn sync_revoke_device(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+    client_device_id: String,
+) -> Result<(), String> {
+    let mut cfg = lock_or_recover(&state.config).clone();
+    if !cfg.revoke_device(&client_device_id) {
+        return Err("sync: dispositivo no encontrado".into());
+    }
+    cfg.save()?;
+    *lock_or_recover(&state.config) = cfg;
+    crate::config::delete_device_secret(&client_device_id)?;
+    // Revocar el último dispositivo (sin V1 activo ni pairing pendiente)
+    // debe apagar el servidor de inmediato, no esperar el próximo tick.
+    crate::sync_service::ensure_sync_server(&app)?;
+    Ok(())
 }
 
 #[tauri::command]
