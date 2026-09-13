@@ -46,6 +46,28 @@ impl ServeConfig {
 
 pub type PayloadFn = Arc<dyn Fn() -> Result<SyncPayload, String> + Send + Sync>;
 
+/// Outcome of trying to consume a v2 pairing token. `Rejected` covers both
+/// "wrong token" and "expired" — a wrong token must carry no more signal
+/// than an expired one. `NoPendingPairing` means nobody pressed "Vincular
+/// teléfono" at all (a distinct, less alarming case).
+pub enum PairOutcome {
+    Paired,
+    NoPendingPairing,
+    Rejected,
+}
+
+/// (token, client_device_id, name) -> outcome. Backed by whatever shared
+/// state the caller (the desktop app) uses — kept as a closure so this
+/// crate stays testable without a real AppState/Tauri context.
+pub type TryConsumeTokenFn = Arc<dyn Fn(&str, &str, &str) -> PairOutcome + Send + Sync>;
+/// client_device_id -> that device's secret, or `None` if unknown/revoked.
+pub type SnapshotKeyForFn = Arc<dyn Fn(&str) -> Option<[u8; 32]> + Send + Sync>;
+
+pub struct PairingHooks {
+    pub try_consume_token: TryConsumeTokenFn,
+    pub snapshot_key_for: SnapshotKeyForFn,
+}
+
 fn json_response(body: String, status: u16) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     use tiny_http::{Header, Response, StatusCode};
     let status = StatusCode::from(status);
@@ -109,22 +131,127 @@ fn rand_salt_nonce_24() -> [u8; 24] {
 }
 
 fn handle(
-    request: tiny_http::Request,
+    mut request: tiny_http::Request,
     app_version: &str,
     device_id: &str,
     lan: bool,
     make_payload: &PayloadFn,
     passphrase: &str,
+    pairing_hooks: Option<&PairingHooks>,
 ) {
-    let (status, body) = match (request.method(), request.url()) {
+    let method = request.method().clone();
+    let url = request.url().to_string();
+    let (status, body) = match (&method, url.split('?').next().unwrap_or("")) {
         (&tiny_http::Method::Get, "/v1/meta") => (200, meta_json(app_version, device_id, lan)),
         (&tiny_http::Method::Get, "/v1/snapshot") => snapshot_json(make_payload, passphrase),
+        (&tiny_http::Method::Post, "/v2/pair") => handle_v2_pair(&mut request, pairing_hooks),
+        (&tiny_http::Method::Get, "/v2/snapshot") => {
+            handle_v2_snapshot(&url, make_payload, pairing_hooks)
+        }
         _ => (
             404,
             serde_json::json!({ "error": "no encontrado" }).to_string(),
         ),
     };
     let _ = request.respond(json_response(body, status));
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PairRequestBody {
+    token: String,
+    client_device_id: String,
+    name: String,
+}
+
+fn handle_v2_pair(
+    request: &mut tiny_http::Request,
+    pairing_hooks: Option<&PairingHooks>,
+) -> (u16, String) {
+    let Some(hooks) = pairing_hooks else {
+        return (
+            404,
+            serde_json::json!({ "error": "no encontrado" }).to_string(),
+        );
+    };
+    let mut raw_body = String::new();
+    if std::io::Read::read_to_string(request.as_reader(), &mut raw_body).is_err() {
+        return (
+            400,
+            serde_json::json!({ "error": "cuerpo inválido" }).to_string(),
+        );
+    }
+    let Ok(body) = serde_json::from_str::<PairRequestBody>(&raw_body) else {
+        return (
+            400,
+            serde_json::json!({ "error": "cuerpo inválido" }).to_string(),
+        );
+    };
+    let name = crate::pairing::sanitize_device_name(&body.name);
+    match (hooks.try_consume_token)(&body.token, &body.client_device_id, &name) {
+        PairOutcome::NoPendingPairing => (
+            404,
+            serde_json::json!({ "error": "no hay pareo pendiente" }).to_string(),
+        ),
+        PairOutcome::Rejected => (
+            410,
+            serde_json::json!({ "error": "token vencido o inválido" }).to_string(),
+        ),
+        PairOutcome::Paired => (
+            200,
+            serde_json::json!({
+                "paired": true,
+                "deviceId": body.client_device_id,
+            })
+            .to_string(),
+        ),
+    }
+}
+
+fn handle_v2_snapshot(
+    url: &str,
+    make_payload: &PayloadFn,
+    pairing_hooks: Option<&PairingHooks>,
+) -> (u16, String) {
+    let Some(hooks) = pairing_hooks else {
+        return (
+            404,
+            serde_json::json!({ "error": "no encontrado" }).to_string(),
+        );
+    };
+    let Some(client_device_id) = query_param(url, "device") else {
+        return (
+            400,
+            serde_json::json!({ "error": "falta el parámetro device" }).to_string(),
+        );
+    };
+    let Some(key) = (hooks.snapshot_key_for)(&client_device_id) else {
+        return (
+            404,
+            serde_json::json!({ "error": "no encontrado" }).to_string(),
+        );
+    };
+    let blob: Result<EncryptedBlob, String> = (|| {
+        let payload = make_payload()?;
+        crate::sync::encrypt_payload_with_key(&payload, &key)
+    })();
+    match blob {
+        Ok(blob) => (
+            200,
+            serde_json::to_string(&blob).unwrap_or_else(|_| "{}".into()),
+        ),
+        Err(e) => (500, serde_json::json!({ "error": e }).to_string()),
+    }
+}
+
+/// Hand-rolled: matches the same style `PairingInfo::parse_uri` already
+/// uses for query strings, no new dependency.
+fn query_param(url: &str, key: &str) -> Option<String> {
+    let query = url.split_once('?')?.1;
+    query.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        (k == key).then(|| v.to_string())
+    })
 }
 
 /// Solo el bind: separado de `serve` para que un llamador (la GUI) pueda
@@ -149,6 +276,7 @@ pub fn serve(
     make_payload: &PayloadFn,
     passphrase: &str,
     stop: &Arc<AtomicBool>,
+    pairing_hooks: Option<&PairingHooks>,
 ) -> Result<(), String> {
     while !stop.load(Ordering::Relaxed) {
         match server.recv_timeout(Duration::from_millis(200)) {
@@ -159,6 +287,7 @@ pub fn serve(
                 lan,
                 make_payload,
                 passphrase,
+                pairing_hooks,
             ),
             Ok(None) => {}
             Err(e) => return Err(e.to_string()),
@@ -176,6 +305,7 @@ pub fn run_server(
     make_payload: PayloadFn,
     passphrase: &str,
     stop: Arc<AtomicBool>,
+    pairing_hooks: Option<PairingHooks>,
 ) -> Result<(), String> {
     let server = bind(cfg)?;
     serve(
@@ -186,6 +316,7 @@ pub fn run_server(
         &make_payload,
         passphrase,
         &stop,
+        pairing_hooks.as_ref(),
     )
 }
 
@@ -450,6 +581,7 @@ mod tests {
                 make_payload,
                 passphrase,
                 stop_clone,
+                None,
             )
             .unwrap();
         });
@@ -495,6 +627,7 @@ mod tests {
                 &make_payload,
                 "clave-test",
                 &stop_clone,
+                None,
             )
             .unwrap();
         });
@@ -522,6 +655,158 @@ mod tests {
             .unwrap_or(0);
         let body = raw.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
         (status, body)
+    }
+
+    fn always_paired_hooks(key: [u8; 32]) -> PairingHooks {
+        PairingHooks {
+            try_consume_token: Arc::new(move |token, _client_id, _name| {
+                if token == "goodtoken" {
+                    PairOutcome::Paired
+                } else {
+                    PairOutcome::Rejected
+                }
+            }),
+            snapshot_key_for: Arc::new(move |client_id| {
+                if client_id == "phone-1" {
+                    Some(key)
+                } else {
+                    None
+                }
+            }),
+        }
+    }
+
+    fn http_post(port: u16, path: &str, body: &str) -> (u16, String) {
+        use std::io::{Read, Write};
+        let mut stream = std::net::TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+        write!(
+            stream,
+            "POST {path} HTTP/1.0\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        let mut raw = String::new();
+        stream.read_to_string(&mut raw).unwrap();
+        let status: u16 = raw
+            .lines()
+            .next()
+            .unwrap_or("")
+            .split_whitespace()
+            .nth(1)
+            .unwrap_or("0")
+            .parse()
+            .unwrap_or(0);
+        let body = raw.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+        (status, body)
+    }
+
+    fn serve_v2_in_background(
+        port: u16,
+        hooks: PairingHooks,
+    ) -> (std::thread::JoinHandle<()>, Arc<AtomicBool>) {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = stop.clone();
+        let cfg = ServeConfig::loopback(port);
+        let handle = std::thread::spawn(move || {
+            run_server(
+                &cfg,
+                "test",
+                "testdev",
+                sample_payload_fn(),
+                "unused-for-v2",
+                stop_clone,
+                Some(hooks),
+            )
+            .unwrap();
+        });
+        for _ in 0..50 {
+            if std::net::TcpStream::connect(format!("127.0.0.1:{port}")).is_ok() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        (handle, stop)
+    }
+
+    #[test]
+    fn v2_pair_rejects_a_wrong_token() {
+        let port = free_port();
+        let (handle, stop) = serve_v2_in_background(port, always_paired_hooks([0u8; 32]));
+        let (status, _) = http_post(
+            port,
+            "/v2/pair",
+            r#"{"token":"badtoken","clientDeviceId":"phone-1","name":"Galaxy"}"#,
+        );
+        stop.store(true, Ordering::Relaxed);
+        let _ = handle.join();
+        assert_eq!(status, 410);
+    }
+
+    #[test]
+    fn v2_pair_accepts_the_right_token_and_never_echoes_a_secret() {
+        let port = free_port();
+        let (handle, stop) = serve_v2_in_background(port, always_paired_hooks([0u8; 32]));
+        let (status, body) = http_post(
+            port,
+            "/v2/pair",
+            r#"{"token":"goodtoken","clientDeviceId":"phone-1","name":"Galaxy"}"#,
+        );
+        stop.store(true, Ordering::Relaxed);
+        let _ = handle.join();
+        assert_eq!(status, 200, "{body}");
+        assert!(body.contains("\"paired\":true"));
+        assert!(body.contains("\"deviceId\":\"phone-1\""));
+        assert!(!body.to_lowercase().contains("secret"));
+    }
+
+    #[test]
+    fn v2_snapshot_404_for_unknown_device() {
+        let port = free_port();
+        let (handle, stop) = serve_v2_in_background(port, always_paired_hooks([3u8; 32]));
+        let (status, _) = http_get(port, "/v2/snapshot?device=someone-else");
+        stop.store(true, Ordering::Relaxed);
+        let _ = handle.join();
+        assert_eq!(status, 404);
+    }
+
+    #[test]
+    fn v2_snapshot_decrypts_with_that_devices_key() {
+        let port = free_port();
+        let key = [3u8; 32];
+        let (handle, stop) = serve_v2_in_background(port, always_paired_hooks(key));
+        let (status, body) = http_get(port, "/v2/snapshot?device=phone-1");
+        stop.store(true, Ordering::Relaxed);
+        let _ = handle.join();
+        assert_eq!(status, 200, "{body}");
+        let blob: EncryptedBlob = serde_json::from_str(&body).unwrap();
+        let payload = crate::sync::decrypt_payload_with_key(&blob, &key).unwrap();
+        assert_eq!(payload.device_id, "testdev");
+    }
+
+    #[test]
+    fn v1_routes_still_work_when_v2_hooks_are_none() {
+        let port = free_port();
+        let (handle, stop) = serve_in_background(port, sample_payload_fn(), "clave-test");
+        let (status, _) = http_get(port, "/v1/meta");
+        stop.store(true, Ordering::Relaxed);
+        let _ = handle.join();
+        assert_eq!(status, 200);
+    }
+
+    #[test]
+    fn v2_routes_404_when_no_hooks_are_configured() {
+        let port = free_port();
+        let (handle, stop) = serve_in_background(port, sample_payload_fn(), "clave-test");
+        let (pair_status, _) = http_post(
+            port,
+            "/v2/pair",
+            r#"{"token":"x","clientDeviceId":"y","name":"z"}"#,
+        );
+        let (snapshot_status, _) = http_get(port, "/v2/snapshot?device=y");
+        stop.store(true, Ordering::Relaxed);
+        let _ = handle.join();
+        assert_eq!(pair_status, 404);
+        assert_eq!(snapshot_status, 404);
     }
 
     #[test]

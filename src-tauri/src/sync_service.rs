@@ -148,6 +148,7 @@ pub(crate) fn ensure_sync_server(app: &AppHandle) -> Result<(), String> {
             &supplier,
             &passphrase,
             &stop,
+            None,
         );
         // El hilo terminó: si nadie llamó a stop_locked (que ya deja el
         // estado consistente) esto fue una muerte inesperada del socket.

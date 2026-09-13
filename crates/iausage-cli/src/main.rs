@@ -726,6 +726,7 @@ fn cmd_sync_serve(args: &[String]) -> ExitCode {
         supplier,
         &passphrase,
         stop,
+        None,
     ) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
