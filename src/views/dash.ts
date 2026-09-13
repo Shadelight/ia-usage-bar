@@ -16,6 +16,7 @@ import {
   getProviderCliCommand,
   pctOf,
 } from "../provider-actions.ts";
+import { tabHtml } from "../provider-tabs.ts";
 import { recCopy, recPrefix, recWhyTitle } from "../recommend.ts";
 
 export { actionIconSvg, buildSanitizedDiagnosis };
@@ -476,14 +477,15 @@ export function renderDash(dash: Dashboard | null, selectedId: string): string {
     const active = vendor.id === selectedId;
     const snapshot = added.find((provider) => provider.id === vendor.id);
     const isLoading = dash.loadingProviders.includes(vendor.id);
-    const status = isLoading ? "loading" : snapshot?.status || "loading";
     const visual = providerVisual(vendor.id, vendor.name);
-    const plan = active && snapshot?.plan ? `<span class="tab-plan">${escapeHtml(snapshot.plan)}</span>` : "";
-    return `<button class="tab ${active ? "active" : ""}" data-select="${escapeHtml(vendor.id)}" style="--provider-accent:${visual.accent}">
-      ${providerLogo(vendor.id, vendor.name)}
-      <span class="label-col"><span class="label">${escapeHtml(vendor.name)}</span>${plan}</span>
-      <span class="provider-status-dot status-${status}" title="${status}"></span>
-    </button>`;
+    return tabHtml({
+      vendor,
+      snapshot,
+      active,
+      loading: isLoading,
+      visual: { icon: visual.icon, accent: visual.accent },
+      logoHtml: providerLogo(vendor.id, vendor.name),
+    });
   }).join("");
   $("add-provider").setAttribute("title", t("add"));
   $("add-provider").setAttribute("aria-label", t("add"));
