@@ -4,6 +4,20 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-09-12
+
+### Fixed
+
+- Release Windows: `SHA256SUMS.txt` guardaba los nombres de instalador con
+  espacios, pero GitHub sirve esos assets con espacios reemplazados por
+  puntos; el updater nunca encontraba el checksum ("No hay checksum para
+  IA.Usage.Bar_..."). Ahora el checksum se genera con el nombre que el
+  asset tendrá realmente en GitHub.
+- Android: la release firmada crasheaba al abrir. `isMinifyEnabled` +
+  `isShrinkResources` nunca se habían probado en un build real (el CI solo
+  corre `testDebugUnitTest`, una prueba JVM); se desactivan hasta poder
+  diagnosticar con un logcat real qué necesita una regla `-keep`.
+
 ## [0.2.4] - 2026-09-12
 
 ### Added
@@ -138,6 +152,7 @@ monitor.
 - La caché 0.2.0 sigue siendo legible (campos nuevos con default).
 
 [Unreleased]: https://github.com/Shadelight/ia-usage-bar/compare/v0.2.2...HEAD
+[0.2.5]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.5
 [0.2.4]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.4
 [0.2.2]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.2
 [0.2.1]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.1

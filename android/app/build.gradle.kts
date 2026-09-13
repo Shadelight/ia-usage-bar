@@ -35,8 +35,14 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // ponytail: R8+shrinkResources never actually ran on a device
+            // before v0.2.4 (CI only runs testDebugUnitTest, a JVM test) and
+            // the resulting APK crashed on launch. Off until we can attach a
+            // logcat to a minified build and add the exact -keep rules it
+            // needs (BouncyCastle/Glance/Play Services reflection are the
+            // likely suspects).
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (providers.gradleProperty("IAUSAGE_STORE_FILE").isPresent) {
                 signingConfig = signingConfigs.getByName("release")
