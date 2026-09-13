@@ -28,6 +28,9 @@ pub const SYNC_BLOB_VERSION: u32 = 1;
 pub const SYNC_BLOB_ALG: &str = "xchacha20poly1305+argon2id";
 /// Cuenta de keyring donde vive la passphrase de sync (igual que las API keys).
 pub const SYNC_KEYRING_ACCOUNT: &str = "sync-passphrase";
+/// V2 (Sync V2 passwordless pairing): the key is already 256 bits of CSPRNG
+/// output, so there is no passphrase to derive it from — same cipher, no KDF.
+pub const SYNC_BLOB_ALG_V2: &str = "xchacha20poly1305";
 
 const ARGON_M_COST_KIB: u32 = 64 * 1024;
 const ARGON_T_COST: u32 = 3;
@@ -174,6 +177,46 @@ pub fn decrypt_blob(blob: &EncryptedBlob, passphrase: &str) -> Result<SyncPayloa
     let nonce_arr: [u8; NONCE_LEN] = nonce.try_into().map_err(|_| "sync: nonce inválido")?;
     let plaintext = open(&key, &nonce_arr, &ciphertext)
         .map_err(|_| "sync: no se pudo descifrar (¿passphrase incorrecta?)")?;
+    decode_payload(&plaintext)
+}
+
+/// V2 encrypt: same cipher and wire shape as `encrypt_payload_with`, no
+/// Argon2id. `salt` is still populated (16 random, unused-by-design bytes)
+/// so `EncryptedBlob` needs no second struct — see the design spec's
+/// "Cryptography" section for why this is deliberate, not an oversight.
+pub fn encrypt_payload_with_key(
+    payload: &SyncPayload,
+    key: &[u8; KEY_LEN],
+) -> Result<EncryptedBlob, String> {
+    let salt: [u8; SALT_LEN] = random_bytes();
+    let nonce: [u8; NONCE_LEN] = random_bytes();
+    let ciphertext = seal(key, &nonce, &encode_payload(payload)?)?;
+    Ok(EncryptedBlob {
+        v: SYNC_BLOB_VERSION,
+        alg: SYNC_BLOB_ALG_V2.into(),
+        salt: B64.encode(salt),
+        nonce: B64.encode(nonce),
+        ciphertext: B64.encode(&ciphertext),
+    })
+}
+
+pub fn decrypt_payload_with_key(
+    blob: &EncryptedBlob,
+    key: &[u8; KEY_LEN],
+) -> Result<SyncPayload, String> {
+    if blob.v != SYNC_BLOB_VERSION {
+        return Err(format!("sync: blob v{} no soportado", blob.v));
+    }
+    if blob.alg != SYNC_BLOB_ALG_V2 {
+        return Err(format!("sync: algoritmo {} no soportado", blob.alg));
+    }
+    let nonce = decode_b64("nonce", &blob.nonce)?;
+    let ciphertext = decode_b64("ciphertext", &blob.ciphertext)?;
+    if nonce.len() != NONCE_LEN {
+        return Err("sync: nonce con longitud inválida".into());
+    }
+    let nonce_arr: [u8; NONCE_LEN] = nonce.try_into().map_err(|_| "sync: nonce inválido")?;
+    let plaintext = open(key, &nonce_arr, &ciphertext).map_err(|_| "sync: no se pudo descifrar")?;
     decode_payload(&plaintext)
 }
 
@@ -577,5 +620,35 @@ mod tests {
             resolve_export_dir(&cfg),
             std::path::PathBuf::from("D:/sync-mio")
         );
+    }
+
+    #[test]
+    fn encrypt_decrypt_with_key_round_trips() {
+        let payload = sample_payload_for_key_tests();
+        let key = [9u8; 32];
+        let blob = encrypt_payload_with_key(&payload, &key).unwrap();
+        assert_eq!(blob.alg, SYNC_BLOB_ALG_V2);
+        let back = decrypt_payload_with_key(&blob, &key).unwrap();
+        assert_eq!(back.device_id, payload.device_id);
+    }
+
+    #[test]
+    fn decrypt_with_key_rejects_a_different_devices_key() {
+        let payload = sample_payload_for_key_tests();
+        let blob = encrypt_payload_with_key(&payload, &[1u8; 32]).unwrap();
+        assert!(decrypt_payload_with_key(&blob, &[2u8; 32]).is_err());
+    }
+
+    #[test]
+    fn decrypt_with_key_rejects_a_v1_blob() {
+        let payload = sample_payload_for_key_tests();
+        let v1_blob = encrypt_payload(&payload, "some-passphrase").unwrap();
+        assert!(decrypt_payload_with_key(&v1_blob, &[1u8; 32]).is_err());
+    }
+
+    fn sample_payload_for_key_tests() -> SyncPayload {
+        let snapshot =
+            crate::snapshot_v1::build(&std::collections::HashMap::new(), &[], "now".into(), None);
+        build_payload("dev-key-test".into(), "now".into(), snapshot)
     }
 }
