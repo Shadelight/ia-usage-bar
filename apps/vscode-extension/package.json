@@ -2,7 +2,7 @@
   "name": "ia-usage",
   "displayName": "IA Usage - AI Quota Monitor",
   "description": "Monitor Claude Code, Codex, Cursor and other AI usage limits directly from your VS Code status bar.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "shadelightdev",
   "icon": "images/icon.png",
   "license": "MIT",
@@ -63,8 +63,36 @@
         "command": "iaUsage.configureCli",
         "title": "Configure CLI path",
         "category": "IA Usage"
+      },
+      {
+        "command": "iaUsage.configureProviders",
+        "title": "Configure providers",
+        "category": "IA Usage"
       }
     ],
+    "icons": {
+      "ia-anthropic": {
+        "description": "Claude / Anthropic",
+        "default": {
+          "fontPath": "./media/provider-icons/provider-icons.woff",
+          "fontCharacter": "\\F103"
+        }
+      },
+      "ia-openai": {
+        "description": "Codex / OpenAI",
+        "default": {
+          "fontPath": "./media/provider-icons/provider-icons.woff",
+          "fontCharacter": "\\F101"
+        }
+      },
+      "ia-cursor": {
+        "description": "Cursor",
+        "default": {
+          "fontPath": "./media/provider-icons/provider-icons.woff",
+          "fontCharacter": "\\F102"
+        }
+      }
+    },
     "configuration": {
       "title": "IA Usage",
       "properties": {
@@ -83,13 +111,19 @@
             "openai",
             "cursor"
           ],
-          "description": "Provider IDs visible in the status bar."
+          "description": "Provider IDs visible in the status bar, in order. Use \"IA Usage: Configure providers\" instead of editing this by hand."
         },
         "iaUsage.display": {
           "type": "string",
           "enum": [
+            "minimal",
             "compact",
             "full"
+          ],
+          "enumDescriptions": [
+            "Icon + percentage only",
+            "Icon + 3-letter code + percentage",
+            "Icon + full provider name + percentage"
           ],
           "default": "compact",
           "description": "Status bar label density."
@@ -111,6 +145,7 @@
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
     "check-version": "node scripts/check-published-version.mjs",
+    "build-icons": "node scripts/build-icon-font.mjs",
     "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20",
     "package": "npm run check-version && npm run check && npm run bundle && vsce package --no-dependencies"
   },
@@ -119,6 +154,7 @@
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.4",
+    "fantasticon": "^4.1.0",
     "typescript": "^5.8.3"
   }
 }

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { CliClient } from "./cli-client";
-import { StatusBar } from "./status-bar";
+import { StatusBar } from "./status/status-bar";
 
 export function activate(context: vscode.ExtensionContext): void {
   const status = new StatusBar(context.extensionUri);
@@ -23,6 +23,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("iaUsage.refresh", refresh),
     vscode.commands.registerCommand("iaUsage.restart", () => client.start()),
     vscode.commands.registerCommand("iaUsage.configureCli", () => void vscode.commands.executeCommand("workbench.action.openSettings", "iaUsage.cliPath")),
+    vscode.commands.registerCommand("iaUsage.configureProviders", status.configureProviders),
     vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration("iaUsage")) client.start(); }),
   );
   client.start();

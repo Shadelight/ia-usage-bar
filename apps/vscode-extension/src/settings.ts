@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 export interface Settings {
   cliPath: string;
   providers: string[];
-  display: "compact" | "full";
+  display: "minimal" | "compact" | "full";
   remotePollSeconds: number;
   showAllMetrics: boolean;
 }
@@ -14,7 +14,7 @@ export function settings(): Settings {
   return {
     cliPath: config.get<string>("cliPath", "").trim(),
     providers: config.get<string[]>("providers", ["anthropic", "openai", "cursor"]),
-    display: config.get<"compact" | "full">("display", "compact"),
+    display: config.get<"minimal" | "compact" | "full">("display", "compact"),
     remotePollSeconds: interval,
     showAllMetrics: config.get<boolean>("showAllMetrics", false),
   };

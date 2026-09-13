@@ -2,6 +2,22 @@
 
 All notable changes to IA Usage will be documented in this file.
 
+## 0.3.2 — 2026-09-13
+
+### Added
+
+- Real provider logos (Claude, Codex, Cursor) now render directly in the
+  status bar, not just the tooltip — via a small custom icon font
+  (`contributes.icons`) built from the same brand SVGs the desktop app uses.
+- `IA Usage: Configure providers` command: a checkbox picker for which
+  providers show in the status bar, replacing hand-edited JSON.
+- `iaUsage.display` gained a `minimal` mode (icon + percentage only).
+
+### Changed
+
+- Internal refactor: `status-bar.ts` split into `status/{status-bar,
+  tooltip, quick-menu, provider-visuals, format}.ts`.
+
 ## 0.3.1 — 2026-09-13
 
 An earlier `0.3.0` was published to Open VSX before this project's other

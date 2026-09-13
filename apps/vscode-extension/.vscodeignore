@@ -1,6 +1,8 @@
 .vscode/**
 src/**
 scripts/**
+media/font-src/**
+media/provider-icons/provider-icons.json
 tsconfig.json
 node_modules/**
 *.vsix
