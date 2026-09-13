@@ -191,8 +191,12 @@ jobs:
           if ($files.Count -eq 0) { throw "No installers found under target/release/bundle" }
           $files += Get-Item "android-release/IA-Usage-Android-$version.apk", "android-release/IA-Usage-Android-$version.aab"
           $files += Get-Item "vscode-release/IA-Usage-VSCode-$version.vsix"
+          # GitHub replaces spaces with dots in uploaded release asset names
+          # (tauri-action's Windows installers are the only files here with
+          # spaces), so record checksums under the name assets will actually
+          # have once uploaded — otherwise the app's updater can't match them.
           $files |
-            ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
+            ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name -replace ' ', '.')" } |
             Out-File -Encoding ascii SHA256SUMS.txt
           Get-Content SHA256SUMS.txt
 
