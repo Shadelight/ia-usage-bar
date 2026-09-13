@@ -3,29 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>IA Usage Bar — AI usage limits for Windows, Android & VS Code</title>
+<title>IA Usage — AI usage limits for Windows, Android & VS Code</title>
 <meta name="description" content="Monitor AI usage limits, quota resets, spend and provider status for Claude Code, Codex, Cursor, Copilot and more — from a Windows tray app, Android companion, or VS Code status bar.">
 <meta property="og:type" content="website">
-<meta property="og:title" content="IA Usage Bar">
+<meta property="og:title" content="IA Usage">
 <meta property="og:description" content="All your AI usage limits. Windows, Android, and VS Code.">
-<meta property="og:image" content="https://shadelight.github.io/ia-usage-bar/assets/hero.png">
+<meta property="og:image" content="https://shadelight.github.io/ia-usage-bar/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
 <meta property="og:url" content="https://shadelight.github.io/ia-usage-bar/">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="IA Usage Bar">
+<meta name="twitter:title" content="IA Usage">
 <meta name="twitter:description" content="All your AI usage limits. Windows, Android, and VS Code.">
-<meta name="twitter:image" content="https://shadelight.github.io/ia-usage-bar/assets/hero.png">
-<meta name="theme-color" content="#1c1c1e">
+<meta name="twitter:image" content="https://shadelight.github.io/ia-usage-bar/og-image.png">
+<meta name="theme-color" content="#18181B">
 <link rel="canonical" href="https://shadelight.github.io/ia-usage-bar/">
-<link rel="icon" href="./favicon.ico">
+<link rel="icon" href="./favicon-16.png" type="image/png" sizes="16x16">
+<link rel="icon" href="./favicon-32.png" type="image/png" sizes="32x32">
+<link rel="icon" href="./favicon-48.png" type="image/png" sizes="48x48">
+<link rel="alternate icon" href="./favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png" sizes="180x180">
+<link rel="manifest" href="./site.webmanifest">
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 
 <header class="nav" id="site-nav">
   <div class="wrap nav-row">
-    <a class="brand" href="#top">
-      <img src="./icon.png" alt="">
-      IA Usage Bar
+    <a class="brand" href="#top" aria-label="IA Usage">
+      <img class="brand-wordmark brand-wordmark-on-dark" src="./wordmark-dark.svg" alt="">
+      <img class="brand-wordmark brand-wordmark-on-light" src="./wordmark-light.svg" alt="">
+      <span class="brand-compact"><img src="./small-mark.svg" alt=""><span>IA Usage</span></span>
     </a>
     <nav class="nav-links" aria-label="Primary">
       <a href="#features" data-i18n="navFeatures">Funciones</a>
@@ -70,6 +78,7 @@
   <section class="hero">
     <div class="wrap">
       <span class="eyebrow"><span class="dot"></span> Windows · Android · VS Code · Open source</span>
+      <p class="brand-tagline">Insights for a smarter tomorrow</p>
       <h1 data-i18n="heroTitle">Todos tus límites de IA.<br>Una sola app de <span>Windows</span>.</h1>
       <p class="subtitle" data-i18n="heroSubtitle">Monitoriza cuotas de sesión, reinicios semanales, gasto y estado de las herramientas de IA que realmente usas.</p>
       <div class="cta-row">
@@ -78,7 +87,7 @@
       </div>
       <p class="fine-print" data-i18n="finePrint">Gratis · Open source · Windows 10/11</p>
       <div class="shot-frame">
-        <img src="./assets/hero.png" alt="IA Usage Bar provider panel" loading="eager">
+        <img src="./assets/hero.png" alt="IA Usage provider panel" loading="eager">
       </div>
     </div>
   </section>
@@ -114,7 +123,7 @@
     <div class="wrap">
       <div class="section-head">
         <h2 data-i18n="providersTitle">Una app, todos los proveedores que pagas</h2>
-        <p data-i18n="providersSubtitle">Activa solo los que usas. IA Usage Bar nunca desactiva un proveedor por ti.</p>
+        <p data-i18n="providersSubtitle">Activa solo los que usas. IA Usage nunca desactiva un proveedor por ti.</p>
       </div>
       <div class="provider-grid">
         <span class="chip">Claude Code</span>
@@ -181,7 +190,7 @@
         <p data-i18n="compactP2">Ambos estados persisten entre reinicios y se reflejan en el menú de la bandeja.</p>
       </div>
       <div class="shot-frame">
-        <img src="./assets/compact.png" alt="IA Usage Bar compact mode" loading="lazy">
+        <img src="./assets/compact.png" alt="IA Usage compact mode" loading="lazy">
       </div>
     </div>
   </section>
@@ -198,7 +207,7 @@
         </ul>
       </div>
       <div class="shot-frame">
-        <img src="./assets/settings.png" alt="IA Usage Bar settings" loading="lazy">
+        <img src="./assets/settings.png" alt="IA Usage settings" loading="lazy">
       </div>
     </div>
   </section>
@@ -221,7 +230,7 @@
         </div>
         <div class="card">
           <h3 data-i18n="statusCard3t">Límite de tasa / no disponible</h3>
-          <p data-i18n="statusCard3p">IA Usage Bar no pudo obtener datos frescos ahora. Conserva el último dato válido y muestra la causa cuando puede determinarla.</p>
+          <p data-i18n="statusCard3p">IA Usage no pudo obtener datos frescos ahora. Conserva el último dato válido y muestra la causa cuando puede determinarla.</p>
         </div>
       </div>
     </div>
@@ -232,7 +241,7 @@
       <div class="section-head">
         <span style="color:var(--accent);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;" data-i18n="privacyKicker">Privacidad y seguridad</span>
         <h2 data-i18n="privacyTitle">Tus credenciales se quedan en tu equipo</h2>
-        <p data-i18n="privacySubtitle">IA Usage Bar reutiliza sesiones y credenciales que ya existen localmente cuando el proveedor lo permite.</p>
+        <p data-i18n="privacySubtitle">IA Usage reutiliza sesiones y credenciales que ya existen localmente cuando el proveedor lo permite.</p>
       </div>
       <ul class="priv-list">
         <li data-i18n="privacyLi1">Las claves API añadidas manualmente se guardan en Windows Credential Manager, nunca en texto plano.</li>
@@ -280,7 +289,7 @@
     <div class="wrap">
       <h2 data-i18n="finalTitle">Deja de adivinar tu cuota.</h2>
       <p data-i18n="finalSubtitle">Una app en la bandeja, todos los proveedores, siempre al día.</p>
-      <a class="btn btn-primary" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="finalCta">Descargar IA Usage Bar para Windows</a>
+      <a class="btn btn-primary" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="finalCta">Descargar IA Usage para Windows</a>
     </div>
   </section>
 
@@ -288,7 +297,7 @@
 
 <footer>
   <div class="wrap footer-row">
-    <span>&copy; <span data-year>2026</span> IA Usage Bar. MIT License. <span data-i18n="footerNote">No afiliado con Anthropic, OpenAI, Cursor ni ningún proveedor listado.</span></span>
+    <span>&copy; <span data-year>2026</span> IA Usage. MIT License. <span data-i18n="footerNote">No afiliado con Anthropic, OpenAI, Cursor ni ningún proveedor listado.</span></span>
     <nav class="footer-links">
       <a href="https://github.com/Shadelight/ia-usage-bar">GitHub</a>
       <a href="https://github.com/Shadelight/ia-usage-bar/blob/main/CHANGELOG.md">Changelog</a>

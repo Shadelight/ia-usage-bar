@@ -1,6 +1,9 @@
-# IA Usage Bar
+# IA Usage
 
-![IA Usage Bar](docs/screenshots/panel.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/source/ia-usage-wordmark-dark.svg">
+  <img src="assets/brand/source/ia-usage-wordmark-light.svg" width="360" alt="IA Usage">
+</picture>
 
 [![Latest release](https://img.shields.io/github/v/release/Shadelight/ia-usage-bar)](https://github.com/Shadelight/ia-usage-bar/releases/latest)
 [![Build](https://github.com/Shadelight/ia-usage-bar/actions/workflows/build.yml/badge.svg)](https://github.com/Shadelight/ia-usage-bar/actions/workflows/build.yml)
@@ -14,12 +17,12 @@
 
 [Website](https://shadelight.github.io/ia-usage-bar/) · [Installation](#install) · [Supported providers](#supported-providers) · [Privacy](#privacy--security)
 
-## Why IA Usage Bar
+## Why IA Usage
 
 Most people using AI tools today juggle more than one subscription — Claude
 Code, Codex, Cursor, Copilot, a couple of pay-per-token APIs. Checking "how
 much do I have left" means opening a different dashboard for each one. IA
-Usage Bar puts every provider's session/weekly quota, reset countdown, and
+Usage puts every provider's session/weekly quota, reset countdown, and
 spend in one resident tray window, so you know before you hit a wall.
 
 ## Features
@@ -79,7 +82,7 @@ apps once beforehand.
 1. Download the installer from [GitHub Releases](https://github.com/Shadelight/ia-usage-bar/releases/latest)
    — either the NSIS setup `.exe` or the `.msi`.
 2. Run it.
-3. Launch **IA Usage Bar** from the Start menu.
+3. Launch **IA Usage** from the Start menu.
 4. Open Settings and enable the providers you use (or click **Detect the
    ones I already use**).
 
@@ -105,7 +108,7 @@ export to `%APPDATA%\ia-usagebar\logs\`.
 
 ## How provider detection works
 
-On first launch, IA Usage Bar checks for local logins (CLI session files,
+On first launch, IA Usage checks for local logins (CLI session files,
 Windows Credential Manager entries) and enables the providers it finds —
 it never disables one for you afterward. Providers without a local session
 need a manually pasted API key, saved through Settings into Windows
@@ -113,7 +116,7 @@ Credential Manager.
 
 ## Privacy & security
 
-**Your credentials stay on your machine.** IA Usage Bar reuses sessions and
+**Your credentials stay on your machine.** IA Usage reuses sessions and
 credentials that already exist locally when a provider allows it — OAuth/CLI
 login, device flows, local session files, user-configured API keys — instead
 of asking you to re-authenticate.
@@ -150,7 +153,7 @@ quitting — use **Exit** from the tray menu or the footer to actually quit.
 | Provider shows "needs login" | Sign in to that provider's app/CLI, then use **Detect** or **Refresh** |
 | Provider shows "needs permission" | The saved credential can authenticate but can't read usage — check the account's plan/permissions |
 | "Application is not responding" | The provider's local app/service isn't running |
-| Data looks stale / an amber warning appears | The last refresh failed; IA Usage Bar keeps the last good numbers instead of showing nothing |
+| Data looks stale / an amber warning appears | The last refresh failed; IA Usage keeps the last good numbers instead of showing nothing |
 | Something is just wrong | Settings → Datos y registros → **Exportar diagnóstico**, attach the file to a bug report |
 
 ## Roadmap
@@ -184,7 +187,7 @@ MIT. See [LICENSE](LICENSE).
 
 ## Third-party notices
 
-IA Usage Bar's provider architecture and connection patterns build on
+IA Usage's provider architecture and connection patterns build on
 several MIT-licensed open-source projects, including the original Claude
 Bar by Daybi that this project started from. Full attribution is in
 [NOTICE](NOTICE).

@@ -281,7 +281,9 @@ pub fn snapshot_from_json(body: &Value) -> ProviderSnapshot {
         .or_else(|| list.first());
     let mut lines = Vec::new();
     if let Some(row) = credit {
-        let used = row.get("currentUsageWithPrecision").and_then(|v| v.as_f64());
+        let used = row
+            .get("currentUsageWithPrecision")
+            .and_then(|v| v.as_f64());
         let limit = row.get("usageLimitWithPrecision").and_then(|v| v.as_f64());
         let reset = body
             .get("nextDateReset")

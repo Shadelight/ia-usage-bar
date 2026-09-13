@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1400" role="img" aria-labelledby="title desc">
+  <title id="title">IA Usage application proof</title>
+  <desc id="desc">The selected IA Usage identity applied to Windows, Android, VS Code, favicon and web header surfaces.</desc>
+  <defs>
+    <symbol id="mark" viewBox="0 0 256 256">
+      <rect x="26" y="48" width="34" height="160" rx="7" fill="#FF7043"/>
+      <path d="M82 204 142 55c3-8 9-12 17-12s14 4 18 12l69 149h-42l-47-108-36 108Z" fill="#F5F5F5"/>
+      <rect x="116" y="171" width="15" height="33" rx="3" fill="#FF7043"/>
+      <rect x="139" y="145" width="15" height="59" rx="3" fill="#FF7043"/>
+      <rect x="162" y="119" width="15" height="85" rx="3" fill="#FF7043"/>
+    </symbol>
+    <symbol id="mono" viewBox="0 0 256 256">
+      <rect x="30" y="50" width="38" height="158" rx="6" fill="#F5F5F5"/>
+      <path d="M82 204 143 55c3-8 9-12 17-12s14 4 18 12l68 149h-44L159 98l-35 106Z" fill="#F5F5F5"/>
+      <rect x="130" y="151" width="47" height="18" rx="3" fill="#F5F5F5"/>
+    </symbol>
+    <symbol id="small" viewBox="0 0 256 256">
+      <rect x="30" y="50" width="38" height="158" rx="6" fill="#FF7043"/>
+      <path d="M82 204 143 55c3-8 9-12 17-12s14 4 18 12l68 149h-44L159 98l-35 106Z" fill="#F5F5F5"/>
+      <rect x="130" y="151" width="47" height="18" rx="3" fill="#FF7043"/>
+    </symbol>
+    <symbol id="app" viewBox="0 0 256 256">
+      <rect x="6" y="6" width="244" height="244" rx="56" fill="#18181B"/>
+      <rect x="6.5" y="6.5" width="243" height="243" rx="55.5" fill="none" stroke="#343439"/>
+      <use href="#mark" x="34" y="34" width="188" height="188"/>
+    </symbol>
+    <symbol id="favicon-small" viewBox="0 0 256 256">
+      <rect x="8" y="8" width="240" height="240" rx="52" fill="#18181B" stroke="#343439"/>
+      <use href="#small" x="28" y="28" width="200" height="200"/>
+    </symbol>
+    <symbol id="favicon-tiny" viewBox="0 0 256 256">
+      <rect x="8" y="8" width="240" height="240" rx="52" fill="#18181B" stroke="#343439"/>
+      <use href="#mono" x="24" y="24" width="208" height="208"/>
+    </symbol>
+  </defs>
+
+  <rect width="1400" height="1400" fill="#111113"/>
+  <text x="64" y="76" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="42" font-weight="750">IA Usage — application proof</text>
+  <text x="64" y="114" fill="#8A8A93" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="20">One identity, adapted by size and platform — never redrawn as unrelated logos.</text>
+
+  <!-- Windows -->
+  <g transform="translate(60 160)">
+    <rect width="620" height="350" rx="26" fill="#202023" stroke="#343439"/>
+    <text x="24" y="38" fill="#8A8A93" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="2">WINDOWS APP</text>
+    <rect x="24" y="58" width="572" height="226" rx="18" fill="#18181B"/>
+    <use href="#mark" x="42" y="70" width="42" height="42"/>
+    <text x="94" y="98" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="23" font-weight="700">IA Usage</text>
+    <circle cx="563" cy="91" r="5" fill="#34D399"/>
+    <g font-family="Inter,Segoe UI,Arial,sans-serif">
+      <text x="46" y="150" fill="#A1A1AA" font-size="15">Claude Code</text><text x="542" y="150" text-anchor="end" fill="#F5F5F5" font-size="15" font-weight="650">68%</text>
+      <rect x="46" y="163" width="496" height="8" rx="4" fill="#303035"/><rect x="46" y="163" width="337" height="8" rx="4" fill="#FF7043"/>
+      <text x="46" y="211" fill="#A1A1AA" font-size="15">Codex</text><text x="542" y="211" text-anchor="end" fill="#F5F5F5" font-size="15" font-weight="650">31%</text>
+      <rect x="46" y="224" width="496" height="8" rx="4" fill="#303035"/><rect x="46" y="224" width="154" height="8" rx="4" fill="#34D399"/>
+    </g>
+    <rect x="24" y="300" width="572" height="34" rx="10" fill="#171719"/>
+    <circle cx="410" cy="317" r="10" fill="#242428"/><use href="#mono" x="403" y="310" width="14" height="14"/>
+    <use href="#app" x="438" y="304" width="26" height="26"/>
+    <text x="475" y="322" fill="#8A8A93" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13">taskbar</text>
+    <circle cx="550" cy="317" r="12" fill="#18181B" stroke="#FF7043" stroke-width="2"/><text x="550" y="321" text-anchor="middle" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="10" font-weight="750">68</text>
+    <text x="571" y="322" fill="#8A8A93" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13">tray</text>
+  </g>
+
+  <!-- Android -->
+  <g transform="translate(720 160)">
+    <rect width="620" height="350" rx="26" fill="#202023" stroke="#343439"/>
+    <text x="24" y="38" fill="#8A8A93" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="2">ANDROID LAUNCHER</text>
+    <rect x="24" y="58" width="250" height="266" rx="34" fill="#18181B"/>
+    <circle cx="149" cy="77" r="3" fill="#52525B"/>
+    <rect x="83" y="102" width="132" height="132" rx="30" fill="#18181B" stroke="#343439"/>
+    <use href="#mark" x="106" y="125" width="86" height="86"/>
+    <text x="149" y="261" text-anchor="middle" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" font-weight="650">IA Usage</text>
+    <text x="304" y="88" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="23" font-weight="700">Adaptive icon</text>
+    <text x="304" y="118" fill="#8A8A93" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16">66% symbol occupancy</text>
+    <text x="304" y="143" fill="#8A8A93" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16">dark safe-area container</text>
+    <rect x="304" y="177" width="74" height="74" rx="18" fill="#18181B"/><use href="#mark" x="316" y="189" width="50" height="50"/>
+    <circle cx="434" cy="214" r="37" fill="#18181B"/><use href="#mark" x="409" y="189" width="50" height="50"/>
+    <rect x="490" y="177" width="74" height="74" rx="14" fill="#18181B"/><use href="#mark" x="502" y="189" width="50" height="50"/>
+    <circle cx="315" cy="286" r="6" fill="#34D399"/><text x="332" y="292" fill="#A1A1AA" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15">status color remains functional</text>
+  </g>
+
+  <!-- Android widget -->
+  <g transform="translate(60 550)">
+    <rect width="620" height="250" rx="26" fill="#202023" stroke="#343439"/>
+    <text x="24" y="38" fill="#8A8A93" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="2">ANDROID WIDGET</text>
+    <rect x="24" y="58" width="572" height="166" rx="24" fill="#18181B"/>
+    <use href="#mark" x="46" y="76" width="40" height="40"/><text x="96" y="102" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="21" font-weight="700">IA Usage</text>
+    <text x="46" y="151" fill="#A1A1AA" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15">Claude</text><text x="550" y="151" text-anchor="end" fill="#FF7043" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700">68%</text>
+    <rect x="46" y="164" width="504" height="8" rx="4" fill="#303035"/><rect x="46" y="164" width="343" height="8" rx="4" fill="#FF7043"/>
+    <text x="46" y="201" fill="#71717A" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13">resets in 2h 14m</text>
+  </g>
+
+  <!-- VS Code -->
+  <g transform="translate(720 550)">
+    <rect width="620" height="250" rx="26" fill="#202023" stroke="#343439"/>
+    <text x="24" y="38" fill="#8A8A93" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="2">VS CODE MARKETPLACE + STATUS BAR</text>
+    <rect x="24" y="58" width="572" height="124" rx="16" fill="#18181B"/>
+    <use href="#app" x="43" y="76" width="88" height="88"/>
+    <text x="151" y="102" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="24" font-weight="720">IA Usage</text>
+    <text x="151" y="130" fill="#A1A1AA" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15">AI quotas, limits and reset times</text>
+    <rect x="151" y="143" width="96" height="24" rx="6" fill="#FF7043"/><text x="199" y="160" text-anchor="middle" fill="#18181B" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="12" font-weight="750">INSTALL</text>
+    <rect x="24" y="195" width="572" height="31" rx="8" fill="#2B2B30"/>
+    <use href="#mono" x="40" y="202" width="17" height="17"/><text x="66" y="216" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13">Claude 68% · Codex 31%</text>
+  </g>
+
+  <!-- Web -->
+  <g transform="translate(60 840)">
+    <rect width="1280" height="240" rx="26" fill="#202023" stroke="#343439"/>
+    <text x="24" y="38" fill="#8A8A93" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="2">IAUSAGE WEB HEADER</text>
+    <rect x="24" y="58" width="1232" height="82" rx="16" fill="#18181B"/>
+    <use href="#mark" x="48" y="72" width="54" height="54"/><text x="115" y="108" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="27" font-weight="720">IA Usage</text>
+    <text x="815" y="106" fill="#A1A1AA" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15">Docs</text><text x="891" y="106" fill="#A1A1AA" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15">Guides</text><text x="979" y="106" fill="#A1A1AA" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15">Providers</text>
+    <rect x="1080" y="82" width="146" height="36" rx="8" fill="#FF7043"/><text x="1153" y="106" text-anchor="middle" fill="#18181B" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="750">DOWNLOAD</text>
+    <text x="24" y="182" fill="#8A8A93" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="2">FAVICON</text>
+    <use href="#app" x="127" y="162" width="48" height="48"/><use href="#favicon-small" x="195" y="170" width="32" height="32"/><use href="#favicon-tiny" x="247" y="178" width="16" height="16"/>
+    <text x="292" y="192" fill="#71717A" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14">48 · 32 · 16 px</text>
+    <text x="1040" y="192" fill="#71717A" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14">no tagline in product UI</text>
+  </g>
+
+  <g transform="translate(60 1120)">
+    <rect width="1280" height="214" rx="26" fill="#18181B" stroke="#343439"/>
+    <text x="24" y="42" fill="#FF7043" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="750" letter-spacing="2">OFFICIAL SYSTEM</text>
+    <use href="#app" x="26" y="66" width="112" height="112"/>
+    <use href="#mark" x="178" y="74" width="96" height="96"/>
+    <use href="#mono" x="314" y="90" width="64" height="64"/>
+    <use href="#small" x="418" y="106" width="32" height="32"/>
+    <use href="#mono" x="490" y="114" width="16" height="16"/>
+    <use href="#mark" x="570" y="78" width="90" height="90"/>
+    <text x="680" y="137" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="49" font-weight="720" letter-spacing="-2">IA Usage</text>
+    <circle cx="1195" cy="122" r="8" fill="#34D399"/><text x="1215" y="129" fill="#71717A" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14">data</text>
+  </g>
+</svg>

@@ -163,27 +163,42 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
             ..Q
         }
     ),
-    desc!(VendorId::Zai, &[Api], Api, ProviderCapabilities {
-        quotas: true,
-        credits: true,
-        cost: true,
-        dashboard: true,
-        ..Q
-    }),
-    desc!(VendorId::Openrouter, &[Api], Api, ProviderCapabilities {
-        quotas: true,
-        credits: true,
-        cost: true,
-        dashboard: true,
-        ..Q
-    }),
-    desc!(VendorId::Deepseek, &[Api], Api, ProviderCapabilities {
-        quotas: true,
-        credits: true,
-        cost: true,
-        dashboard: true,
-        ..Q
-    }),
+    desc!(
+        VendorId::Zai,
+        &[Api],
+        Api,
+        ProviderCapabilities {
+            quotas: true,
+            credits: true,
+            cost: true,
+            dashboard: true,
+            ..Q
+        }
+    ),
+    desc!(
+        VendorId::Openrouter,
+        &[Api],
+        Api,
+        ProviderCapabilities {
+            quotas: true,
+            credits: true,
+            cost: true,
+            dashboard: true,
+            ..Q
+        }
+    ),
+    desc!(
+        VendorId::Deepseek,
+        &[Api],
+        Api,
+        ProviderCapabilities {
+            quotas: true,
+            credits: true,
+            cost: true,
+            dashboard: true,
+            ..Q
+        }
+    ),
     desc!(
         VendorId::Kimi,
         &[Api],
@@ -196,20 +211,30 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
         }
     ),
     desc!(VendorId::Kilo, &[Api], Api, Q),
-    desc!(VendorId::Novita, &[Api], Api, ProviderCapabilities {
-        quotas: true,
-        credits: true,
-        cost: true,
-        dashboard: true,
-        ..Q
-    }),
-    desc!(VendorId::Moonshot, &[Api], Api, ProviderCapabilities {
-        quotas: true,
-        credits: true,
-        cost: true,
-        dashboard: true,
-        ..Q
-    }),
+    desc!(
+        VendorId::Novita,
+        &[Api],
+        Api,
+        ProviderCapabilities {
+            quotas: true,
+            credits: true,
+            cost: true,
+            dashboard: true,
+            ..Q
+        }
+    ),
+    desc!(
+        VendorId::Moonshot,
+        &[Api],
+        Api,
+        ProviderCapabilities {
+            quotas: true,
+            credits: true,
+            cost: true,
+            dashboard: true,
+            ..Q
+        }
+    ),
     desc!(
         VendorId::Grok,
         &[Api],
@@ -244,13 +269,18 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
             ..Q
         }
     ),
-    desc!(VendorId::Minimax, &[Api], Api, ProviderCapabilities {
-        quotas: true,
-        credits: true,
-        cost: true,
-        dashboard: true,
-        ..Q
-    }),
+    desc!(
+        VendorId::Minimax,
+        &[Api],
+        Api,
+        ProviderCapabilities {
+            quotas: true,
+            credits: true,
+            cost: true,
+            dashboard: true,
+            ..Q
+        }
+    ),
     desc!(
         VendorId::Kiro,
         &[Local],
@@ -271,12 +301,17 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
             ..Q
         }
     ),
-    desc!(VendorId::OpenCodeGo, &[Api], Api, ProviderCapabilities {
-        quotas: true,
-        credits: true,
-        cost: true,
-        ..Q
-    }),
+    desc!(
+        VendorId::OpenCodeGo,
+        &[Api],
+        Api,
+        ProviderCapabilities {
+            quotas: true,
+            credits: true,
+            cost: true,
+            ..Q
+        }
+    ),
     desc!(
         VendorId::CommandCode,
         &[Local],
@@ -287,14 +322,19 @@ pub static DESCRIPTORS: &[ProviderDescriptor] = &[
             ..Q
         }
     ),
-    desc!(VendorId::Groq, &[Api], Api, ProviderCapabilities {
-        quotas: true,
-        credits: true,
-        cost: true,
-        service_status: true,
-        dashboard: true,
-        ..Q
-    }),
+    desc!(
+        VendorId::Groq,
+        &[Api],
+        Api,
+        ProviderCapabilities {
+            quotas: true,
+            credits: true,
+            cost: true,
+            service_status: true,
+            dashboard: true,
+            ..Q
+        }
+    ),
     desc!(
         VendorId::Windsurf,
         &[Local],
@@ -390,7 +430,10 @@ mod tests {
     fn resolve_prefers_explicit_when_supported() {
         let claude = descriptor(VendorId::Anthropic);
         assert_eq!(resolve_strategy(claude, None), Oauth);
-        assert_eq!(resolve_strategy(claude, Some(FetchStrategyKind::Web)), Oauth);
+        assert_eq!(
+            resolve_strategy(claude, Some(FetchStrategyKind::Web)),
+            Oauth
+        );
         // Kimi no declara Web: cae al default.
         let kimi = descriptor(VendorId::Kimi);
         assert_eq!(resolve_strategy(kimi, Some(FetchStrategyKind::Web)), Api);

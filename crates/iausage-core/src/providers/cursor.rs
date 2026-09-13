@@ -15,7 +15,8 @@ use super::Provider;
 
 const TOKEN_KEY: &str = "cursorAuth/accessToken";
 const USAGE_URL: &str = "https://cursor.com/api/usage-summary";
-const SAND_USAGE_URL: &str = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus";
+const SAND_USAGE_URL: &str =
+    "https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus";
 const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 pub struct Cursor;
@@ -42,22 +43,24 @@ impl Provider for Cursor {
             );
         };
         match fetch_summary(&cookie) {
-            Ok(body) => snapshot_from_json(&body).map(|mut snapshot| {
-                // Grok Bot has a separate weekly allowance. This endpoint is
-                // supplementary: failure must not discard the normal Cursor
-                // quota that was already fetched successfully.
-                if let Ok(sand) = fetch_sand_usage(&token) {
-                    append_grok_bot(&mut snapshot, &sand);
-                }
-                snapshot
-            }).unwrap_or_else(|e| {
-                snapshot_with_status(
-                    VendorId::Cursor,
-                    ProviderStatus::Error,
-                    ProviderStatusReason::ParseFailed,
-                    &e,
-                )
-            }),
+            Ok(body) => snapshot_from_json(&body)
+                .map(|mut snapshot| {
+                    // Grok Bot has a separate weekly allowance. This endpoint is
+                    // supplementary: failure must not discard the normal Cursor
+                    // quota that was already fetched successfully.
+                    if let Ok(sand) = fetch_sand_usage(&token) {
+                        append_grok_bot(&mut snapshot, &sand);
+                    }
+                    snapshot
+                })
+                .unwrap_or_else(|e| {
+                    snapshot_with_status(
+                        VendorId::Cursor,
+                        ProviderStatus::Error,
+                        ProviderStatusReason::ParseFailed,
+                        &e,
+                    )
+                }),
             Err(e) => super::map_fetch_err(VendorId::Cursor, e),
         }
     }
@@ -176,7 +179,14 @@ pub fn snapshot_from_json(body: &Value) -> Result<ProviderSnapshot, String> {
             ("other_models", "Other Models", "apiPercentUsed"),
         ] {
             if let Some(pct) = json_f64(plan_obj, &[field]) {
-                lines.push(progress_pct(id, label, pct, reset.clone(), 2_592_000, "always"));
+                lines.push(progress_pct(
+                    id,
+                    label,
+                    pct,
+                    reset.clone(),
+                    2_592_000,
+                    "always",
+                ));
             }
         }
     } else {
@@ -235,33 +245,45 @@ fn append_grok_bot(snapshot: &mut ProviderSnapshot, body: &Value) {
     };
     let reset = json_str(status, &["nextResetTimestampUtc"])
         .or_else(|| unix_reset(status.get("nextResetTimestampUtc")));
-    let line = progress_pct(
-        "grok_bot",
-        "Grok Bot",
-        used,
-        reset,
-        604_800,
-        "always",
-    );
+    let line = progress_pct("grok_bot", "Grok Bot", used, reset, 604_800, "always");
     snapshot.quotas.extend(line_to_quota(&line, snapshot));
     snapshot.lines.push(line);
 }
 
 fn unix_reset(value: Option<&Value>) -> Option<String> {
-    let seconds = value?.as_i64().or_else(|| value?.as_f64().map(|n| n as i64))?;
-    let seconds = if seconds > 10_000_000_000 { seconds / 1_000 } else { seconds };
+    let seconds = value?
+        .as_i64()
+        .or_else(|| value?.as_f64().map(|n| n as i64))?;
+    let seconds = if seconds > 10_000_000_000 {
+        seconds / 1_000
+    } else {
+        seconds
+    };
     chrono::DateTime::from_timestamp(seconds, 0).map(|time| time.to_rfc3339())
 }
 
 // `snapshot_ok` normally performs this conversion. This small adapter keeps
 // the Grok line consistent with the rest of a already-normalized snapshot.
-fn line_to_quota(line: &crate::model::MetricLine, snapshot: &ProviderSnapshot) -> Vec<crate::model::UsageQuota> {
+fn line_to_quota(
+    line: &crate::model::MetricLine,
+    snapshot: &ProviderSnapshot,
+) -> Vec<crate::model::UsageQuota> {
     let crate::model::MetricLine::Progress {
-        id, label, used, remaining, resets_at, ..
-    } = line else { return Vec::new() };
+        id,
+        label,
+        used,
+        remaining,
+        resets_at,
+        ..
+    } = line
+    else {
+        return Vec::new();
+    };
     let reset_in_seconds = resets_at.as_deref().and_then(|iso| {
         chrono::DateTime::parse_from_rfc3339(iso).ok().map(|time| {
-            (time.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds().max(0)
+            (time.with_timezone(&chrono::Utc) - chrono::Utc::now())
+                .num_seconds()
+                .max(0)
         })
     });
     vec![crate::model::UsageQuota {
@@ -282,7 +304,9 @@ fn line_to_quota(line: &crate::model::MetricLine, snapshot: &ProviderSnapshot) -
         },
         temporary_multiplier: None,
         temporary_expires_at: None,
-        source: snapshot.active_source.unwrap_or(crate::model::UsageSource::LocalSession),
+        source: snapshot
+            .active_source
+            .unwrap_or(crate::model::UsageSource::LocalSession),
         fetched_at: snapshot.updated_at.clone(),
         stale: snapshot.stale,
         confidence: crate::model::DataConfidence::Exact,
@@ -315,7 +339,11 @@ mod tests {
             "nextResetTimestampUtc": "2099-01-08T00:00:00Z"
         });
         append_grok_bot(&mut snapshot, &sand);
-        let quota = snapshot.quotas.iter().find(|quota| quota.id == "grok_bot").unwrap();
+        let quota = snapshot
+            .quotas
+            .iter()
+            .find(|quota| quota.id == "grok_bot")
+            .unwrap();
         assert_eq!(quota.window_type, crate::model::WindowType::Weekly);
         assert_eq!(quota.used_percent, Some(25.0));
     }

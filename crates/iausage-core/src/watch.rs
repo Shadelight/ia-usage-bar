@@ -56,12 +56,18 @@ where
     let mut next_remote = Instant::now() + remote_poll;
     loop {
         let now = Instant::now();
-        let next = pending_local.map(|d| d.min(next_remote)).unwrap_or(next_remote);
+        let next = pending_local
+            .map(|d| d.min(next_remote))
+            .unwrap_or(next_remote);
         match rx.recv_timeout(next.saturating_duration_since(now)) {
-            Ok(Ok(event)) if touches_session_jsonl(&event) => pending_local = Some(Instant::now() + debounce),
+            Ok(Ok(event)) if touches_session_jsonl(&event) => {
+                pending_local = Some(Instant::now() + debounce)
+            }
             Ok(Ok(_)) => {}
             Ok(Err(error)) => eprintln!("iausage watch: evento de filesystem ignorado: {error}"),
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Err("watcher de filesystem desconectado".into()),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("watcher de filesystem desconectado".into())
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
         let now = Instant::now();
@@ -78,20 +84,29 @@ where
 
 fn touches_session_jsonl(event: &Event) -> bool {
     event.paths.iter().any(|path| {
-        path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
+        path.extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notify::{EventKind, event::ModifyKind};
+    use notify::{event::ModifyKind, EventKind};
 
     #[test]
     fn only_jsonl_changes_trigger_the_fast_path() {
-        let event = Event { kind: EventKind::Modify(ModifyKind::Any), paths: vec![PathBuf::from("session.jsonl")], attrs: Default::default() };
+        let event = Event {
+            kind: EventKind::Modify(ModifyKind::Any),
+            paths: vec![PathBuf::from("session.jsonl")],
+            attrs: Default::default(),
+        };
         assert!(touches_session_jsonl(&event));
-        let other = Event { kind: EventKind::Modify(ModifyKind::Any), paths: vec![PathBuf::from("auth.json")], attrs: Default::default() };
+        let other = Event {
+            kind: EventKind::Modify(ModifyKind::Any),
+            paths: vec![PathBuf::from("auth.json")],
+            attrs: Default::default(),
+        };
         assert!(!touches_session_jsonl(&other));
     }
 }

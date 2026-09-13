@@ -1,6 +1,6 @@
 [package]
 name = "iausagebar"
-version = "0.2.7"
+version = "0.3.0"
 description = "Monitor de uso de planes de IA para la bandeja de Windows"
 authors = ["Alberth Salazar"]
 edition = "2021"
@@ -27,12 +27,15 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 chrono = { version = "0.4", features = ["clock", "serde"] }
 walkdir = "2"
 dirs = "5"
-ab_glyph = "0.2"
 toml = "0.8"
 base64 = "0.22"
 rusqlite = { version = "0.32", features = ["bundled"] }
 keyring = "3"
 sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 opt-level = "z"

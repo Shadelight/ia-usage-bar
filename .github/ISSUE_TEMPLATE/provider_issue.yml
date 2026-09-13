@@ -5,7 +5,7 @@ labels: [provider]
 body:
   - type: markdown
     attributes:
-      value: Thanks for helping improve IA Usage Bar. Never paste tokens, API keys, cookies, or raw session/auth files — sanitized logs only (Settings → Datos y registros → Exportar diagnóstico).
+      value: Thanks for helping improve IA Usage. Never paste tokens, API keys, cookies, or raw session/auth files — sanitized logs only (Settings → Datos y registros → Exportar diagnóstico).
   - type: input
     id: provider
     attributes:
@@ -16,7 +16,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: IA Usage Bar version
+      label: IA Usage version
       placeholder: 0.2.0
     validations:
       required: true

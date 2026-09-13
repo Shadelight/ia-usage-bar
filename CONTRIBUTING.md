@@ -1,6 +1,6 @@
-# Contributing to IA Usage Bar
+# Contributing to IA Usage
 
-Thanks for helping improve IA Usage Bar. The application targets Windows 10/11 and uses Tauri 2, Rust, TypeScript, and Vite.
+Thanks for helping improve IA Usage. The application targets Windows 10/11 and uses Tauri 2, Rust, TypeScript, and Vite.
 
 ## Development setup
 

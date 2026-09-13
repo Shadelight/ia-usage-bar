@@ -8,7 +8,10 @@ use crate::config::AppConfig;
 use crate::http::{self, FetchError};
 use crate::jwt;
 use std::path::Path;
-use std::{fs::File, io::{Read, Seek, SeekFrom}};
+use std::{
+    fs::File,
+    io::{Read, Seek, SeekFrom},
+};
 use walkdir::WalkDir;
 
 use crate::model::{
@@ -111,15 +114,29 @@ fn latest_session_rate_limits(root: &Path) -> Option<Value> {
     let mut files: Vec<_> = WalkDir::new(root)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file() && entry.path().extension().is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl")))
-        .filter_map(|entry| entry.metadata().ok().and_then(|meta| meta.modified().ok().map(|modified| (modified, entry.into_path()))))
+        .filter(|entry| {
+            entry.file_type().is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
+        })
+        .filter_map(|entry| {
+            entry.metadata().ok().and_then(|meta| {
+                meta.modified()
+                    .ok()
+                    .map(|modified| (modified, entry.into_path()))
+            })
+        })
         .collect();
     files.sort_by(|a, b| b.0.cmp(&a.0));
     files.into_iter().take(20).find_map(|(_, path)| {
         let mut latest = None;
         let raw = read_tail(&path, 1_048_576).ok()?;
         for line in raw.lines() {
-            let Ok(value) = serde_json::from_str::<Value>(line) else { continue };
+            let Ok(value) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
             if let Some(rate) = find_rate_limits(&value) {
                 latest = Some(rate.clone());
             }
@@ -136,7 +153,11 @@ fn read_tail(path: &Path, max_bytes: u64) -> std::io::Result<String> {
     let mut raw = String::new();
     file.read_to_string(&mut raw)?;
     if start > 0 {
-        Ok(raw.split_once('\n').map(|(_, rest)| rest).unwrap_or("").to_string())
+        Ok(raw
+            .split_once('\n')
+            .map(|(_, rest)| rest)
+            .unwrap_or("")
+            .to_string())
     } else {
         Ok(raw)
     }
@@ -144,31 +165,56 @@ fn read_tail(path: &Path, max_bytes: u64) -> std::io::Result<String> {
 
 fn find_rate_limits(value: &Value) -> Option<&Value> {
     match value {
-        Value::Object(map) => map.get("rate_limits").or_else(|| map.values().find_map(find_rate_limits)),
+        Value::Object(map) => map
+            .get("rate_limits")
+            .or_else(|| map.values().find_map(find_rate_limits)),
         Value::Array(values) => values.iter().find_map(find_rate_limits),
         _ => None,
     }
 }
 
 fn session_rate_limits_body(rate_limits: &Value) -> Option<Value> {
-    let primary = rate_limits.get("primary_window").or_else(|| rate_limits.get("primary")).and_then(normalize_session_window)?;
-    let secondary = rate_limits.get("secondary_window").or_else(|| rate_limits.get("secondary")).and_then(normalize_session_window);
+    let primary = rate_limits
+        .get("primary_window")
+        .or_else(|| rate_limits.get("primary"))
+        .and_then(normalize_session_window)?;
+    let secondary = rate_limits
+        .get("secondary_window")
+        .or_else(|| rate_limits.get("secondary"))
+        .and_then(normalize_session_window);
     let mut limit = serde_json::Map::new();
     limit.insert("primary_window".into(), primary);
-    if let Some(window) = secondary { limit.insert("secondary_window".into(), window); }
+    if let Some(window) = secondary {
+        limit.insert("secondary_window".into(), window);
+    }
     Some(serde_json::json!({ "rate_limit": Value::Object(limit) }))
 }
 
 fn normalize_session_window(window: &Value) -> Option<Value> {
     let used = normalized_used_percent(window)?;
-    let seconds = window.get("limit_window_seconds").and_then(Value::as_i64)
+    let seconds = window
+        .get("limit_window_seconds")
+        .and_then(Value::as_i64)
         .or_else(|| window.get("window_seconds").and_then(Value::as_i64))
-        .or_else(|| window.get("window_minutes").and_then(Value::as_i64).map(|mins| mins * 60))?;
-    let mut normalized = serde_json::json!({ "used_percent": used, "limit_window_seconds": seconds });
+        .or_else(|| {
+            window
+                .get("window_minutes")
+                .and_then(Value::as_i64)
+                .map(|mins| mins * 60)
+        })?;
+    let mut normalized =
+        serde_json::json!({ "used_percent": used, "limit_window_seconds": seconds });
     let reset = window.get("reset_at").or_else(|| window.get("resets_at"));
-    if let Some(seconds) = reset.and_then(Value::as_i64) { normalized["reset_at"] = Value::from(seconds); }
-    else if let Some(iso) = reset.and_then(Value::as_str).and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()) { normalized["reset_at"] = Value::from(iso.timestamp()); }
-    else if let Some(after) = window.get("reset_after_seconds").and_then(Value::as_i64) { normalized["reset_after_seconds"] = Value::from(after); }
+    if let Some(seconds) = reset.and_then(Value::as_i64) {
+        normalized["reset_at"] = Value::from(seconds);
+    } else if let Some(iso) = reset
+        .and_then(Value::as_str)
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+    {
+        normalized["reset_at"] = Value::from(iso.timestamp());
+    } else if let Some(after) = window.get("reset_after_seconds").and_then(Value::as_i64) {
+        normalized["reset_after_seconds"] = Value::from(after);
+    }
     Some(normalized)
 }
 
@@ -486,7 +532,11 @@ mod tests {
     fn write_back_replaces_an_existing_auth_file() {
         let dir = scratch_dir("replace-existing");
         let path = dir.join("auth.json");
-        std::fs::write(&path, r#"{"tokens":{"access_token":"old","refresh_token":"old"}}"#).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"tokens":{"access_token":"old","refresh_token":"old"}}"#,
+        )
+        .unwrap();
         let auth = Auth {
             access_token: "new-access".into(),
             refresh_token: "new-refresh".into(),

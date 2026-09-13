@@ -1,7 +1,7 @@
 [package]
 name = "iausage"
-version = "0.2.7"
-description = "CLI for IA Usage Bar: usage, best provider, doctor, guard"
+version = "0.3.0"
+description = "CLI for IA Usage: usage, best provider, doctor, guard"
 authors = ["Alberth Salazar"]
 edition = "2021"
 license = "MIT"

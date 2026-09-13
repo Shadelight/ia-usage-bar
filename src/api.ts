@@ -218,3 +218,10 @@ export interface SyncPairingDto {
   port: number;
   qrPngBase64: string;
 }
+
+export interface CliInstallStatusDto {
+  binaryExists: boolean;
+  binaryPath: string;
+  pathConfigured: boolean;
+  version: string | null;
+}

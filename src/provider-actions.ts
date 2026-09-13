@@ -19,7 +19,11 @@ export type IconName =
   | "refresh"
   | "eye"
   | "eye-off"
-  | "check";
+  | "check"
+  | "bell"
+  | "phone"
+  | "folder"
+  | "settings";
 
 export function actionIconSvg(name: string, size = 14): string {
   switch (name) {
@@ -51,6 +55,14 @@ export function actionIconSvg(name: string, size = 14): string {
       return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.83 6.72 2.24L21 8"/><polyline points="21 3 21 8 16 8"/></svg>`;
     case "check":
       return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+    case "bell":
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>`;
+    case "phone":
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>`;
+    case "folder":
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
+    case "settings":
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>`;
     case "eye":
       return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`;
     case "eye-off":
@@ -207,7 +219,17 @@ export function getProviderActions(vendor: VendorInfo): ProviderActionItem[] {
     indicator: "copy",
   });
 
-  return items;
+  // Provider metadata occasionally points multiple semantic actions at the
+  // same destination. Render one real action per URL so "Abrir aplicación"
+  // (or an equivalent dashboard link) never appears twice.
+  const seenUrls = new Set<string>();
+  return items.filter((item) => {
+    if (item.kind !== "external" || !item.url) return true;
+    const normalized = item.url.replace(/\/$/, "").toLowerCase();
+    if (seenUrls.has(normalized)) return false;
+    seenUrls.add(normalized);
+    return true;
+  });
 }
 
 export function getCompactQuickActions(vendor: VendorInfo): Array<{ labelKey: string; url?: string; isConfigure?: boolean }> {

@@ -187,7 +187,10 @@ pub(crate) fn apply_local_snapshot(app: &AppHandle, incoming: ProviderSnapshot) 
     };
     if stored.is_connected() {
         if let Err(error) = crate::cache::save_valid(&stored) {
-            eprintln!("local snapshot cache could not be updated for {}: {error}", stored.id);
+            eprintln!(
+                "local snapshot cache could not be updated for {}: {error}",
+                stored.id
+            );
         }
     }
     check_notifications(app, &stored);

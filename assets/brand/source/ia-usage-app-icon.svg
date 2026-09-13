@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title id="title">IA Usage app icon</title>
+  <rect x="36" y="36" width="952" height="952" rx="224" fill="#18181B"/>
+  <rect x="37" y="37" width="950" height="950" rx="223" fill="none" stroke="#2B2B30" stroke-width="2"/>
+  <g transform="translate(128 128) scale(3)">
+    <rect x="26" y="48" width="34" height="160" rx="7" fill="#FF7043"/>
+    <path d="M82 204 142 55c3-8 9-12 17-12s14 4 18 12l69 149h-42l-47-108-36 108Z" fill="#F5F5F5"/>
+    <rect x="116" y="171" width="15" height="33" rx="3" fill="#FF7043"/>
+    <rect x="139" y="145" width="15" height="59" rx="3" fill="#FF7043"/>
+    <rect x="162" y="119" width="15" height="85" rx="3" fill="#FF7043"/>
+  </g>
+</svg>

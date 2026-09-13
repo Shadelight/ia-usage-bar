@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 220" role="img" aria-labelledby="title">
+  <title id="title">IA Usage wordmark on dark</title>
+  <g transform="translate(12 5) scale(.8)">
+    <rect x="26" y="48" width="34" height="160" rx="7" fill="#FF7043"/>
+    <path d="M82 204 142 55c3-8 9-12 17-12s14 4 18 12l69 149h-42l-47-108-36 108Z" fill="#F5F5F5"/>
+    <rect x="116" y="171" width="15" height="33" rx="3" fill="#FF7043"/>
+    <rect x="139" y="145" width="15" height="59" rx="3" fill="#FF7043"/>
+    <rect x="162" y="119" width="15" height="85" rx="3" fill="#FF7043"/>
+  </g>
+  <text x="240" y="142" fill="#F5F5F5" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="96" font-weight="720" letter-spacing="-4">IA Usage</text>
+</svg>

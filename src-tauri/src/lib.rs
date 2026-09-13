@@ -1,13 +1,13 @@
-//! IA Usage Bar: monitor multi-proveedor para la bandeja de Windows.
+//! IA Usage: monitor multi-proveedor para la bandeja de Windows.
 
-//! IA Usage Bar: monitor multi-proveedor para la bandeja de Windows.
+//! IA Usage: monitor multi-proveedor para la bandeja de Windows.
 //!
 //! Todo el pipeline de providers vive en `iausage-core` (compartido con el
 //! CLI). Este crate solo conserva ventana/tray/notificaciones/comandos.
 
 pub use iausage_core::{
-    cache, config, cost, descriptor, doctor, guard, health, http, jwt, logfile, model, pace,
-    paths, pricing, providers, refresh_policy, snapshot_v1, sync, sync_server, watch,
+    cache, config, cost, descriptor, doctor, guard, health, http, jwt, logfile, model, pace, paths,
+    pricing, providers, refresh_policy, snapshot_v1, sync, sync_server, watch,
 };
 mod commands;
 mod dashboard;
@@ -112,8 +112,9 @@ pub fn run() {
             let open_i = MenuItem::with_id(app, "open", "Abrir IA Usage", true, None::<&str>)?;
             let refresh_i =
                 MenuItem::with_id(app, "refresh", "Actualizar ahora", true, None::<&str>)?;
-            let primary_submenu =
-                Submenu::with_id(app, "provider", "Proveedor", true)?;
+            let pair_phone_i =
+                MenuItem::with_id(app, "pair_phone", "Vincular teléfono", true, None::<&str>)?;
+            let primary_submenu = Submenu::with_id(app, "provider", "Proveedor", true)?;
             let compact_i = CheckMenuItem::with_id(
                 app,
                 "compact",
@@ -152,6 +153,7 @@ pub fn run() {
                     &sep1,
                     &open_i,
                     &refresh_i,
+                    &pair_phone_i,
                     &primary_submenu,
                     &compact_i,
                     &pin_i,
@@ -178,7 +180,7 @@ pub fn run() {
 
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(tray::render(None))
-                .tooltip("IA Usage Bar")
+                .tooltip("IA Usage")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
@@ -196,6 +198,10 @@ pub fn run() {
                         let _ = app.emit("tray-cmd", "settings:providers");
                     }
                     "refresh" => do_refresh(app, None),
+                    "pair_phone" => {
+                        show_window(app, None);
+                        let _ = app.emit("tray-cmd", "pair-phone");
+                    }
                     "detect_submenu" => run_provider_detect(app),
                     "autostart" => {
                         let al = app.autolaunch();
@@ -262,7 +268,7 @@ pub fn run() {
                     let _ = std::fs::write(&marker, b"1");
                     send_notification(
                         app.handle(),
-                        "IA Usage Bar activo",
+                        "IA Usage activo",
                         "Te avisaré cuando un plan se acerque al límite o se reinicie.",
                     );
                 }
@@ -330,6 +336,9 @@ pub fn run() {
             commands::set_always_on_top,
             commands::set_compact_mode,
             commands::open_logs_folder,
+            commands::cli_install_status,
+            commands::repair_cli_path,
+            commands::cli_test,
             commands::clear_logs,
             commands::export_diagnostics,
             commands::check_for_updates,
@@ -352,7 +361,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("error al iniciar IA Usage Bar")
+        .expect("error al iniciar IA Usage")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 if !app.state::<AppState>().allow_exit.load(Ordering::SeqCst) {

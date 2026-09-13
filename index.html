@@ -3,14 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>IA Usage Bar</title>
+    <title>IA Usage</title>
   </head>
   <body>
     <div id="panel" class="panel">
       <header class="head" data-tauri-drag-region>
-        <div class="head-copy" data-tauri-drag-region>
-          <div class="head-title" data-tauri-drag-region>IA Usage</div>
-          <div id="updated" class="head-sub">—</div>
+        <div class="head-brand" data-tauri-drag-region>
+          <img class="head-brand-mark" src="/src/assets/brand/ia-usage-small-mark.svg" alt="" aria-hidden="true" />
+          <div class="head-copy" data-tauri-drag-region>
+            <div class="head-title" data-tauri-drag-region>IA Usage</div>
+            <div id="updated" class="head-sub">—</div>
+          </div>
         </div>
         <div class="head-actions">
           <button class="icon-btn" data-act="refresh" title="Actualizar" aria-label="Refresh">
@@ -70,7 +73,7 @@
       </main>
 
       <footer class="foot">
-        <span class="foot-name">IA Usage Bar</span>
+        <span class="foot-name" id="app-version">IA Usage</span>
         <div class="lang-seg">
           <button class="seg" data-act="lang-en">EN</button>
           <button class="seg" data-act="lang-es">ES</button>

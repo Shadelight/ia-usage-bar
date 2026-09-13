@@ -1,12 +1,33 @@
 import * as fs from "fs";
 import * as vscode from "vscode";
+import { t } from "../i18n";
 import { settings } from "../settings";
-import { DashboardSnapshot, Provider } from "../types";
-import { percent, providerVisual } from "./provider-visuals";
-import { pickProviders, showMenu, visible } from "./quick-menu";
+import { DashboardSnapshot } from "../types";
+import { buildStatusBarLabel, shouldWarnBackground, visible } from "./format";
+import { pickProviders, showMenu } from "./quick-menu";
 import { tooltip } from "./tooltip";
 
-const PROVIDER_LOGOS: Record<string, string> = { anthropic: "anthropic.svg", openai: "openai.svg", cursor: "cursor.svg" };
+const PROVIDER_LOGOS: Record<string, string> = {
+  anthropic: "anthropic.svg",
+  openai: "openai.svg",
+  cursor: "cursor.svg",
+  antigravity: "antigravity.svg",
+  opencode_go: "opencode_go.svg",
+  openrouter: "openrouter.svg",
+  deepseek: "deepseek.svg",
+  groq: "groq.svg",
+  kimi: "kimi.svg",
+  kilo: "kilo.svg",
+  minimax: "minimax.svg",
+  grok: "grok.svg",
+  copilot: "copilot.svg",
+  windsurf: "windsurf.svg",
+  zai: "zai.svg",
+  moonshot: "moonshot.svg",
+  novita: "novita.svg",
+  kiro: "kiro.svg",
+  nous: "nous.svg",
+};
 
 /** Reads each bundled provider logo once and inlines it as a data: URI the tooltip's Markdown can render as `<img>`. */
 function loadProviderLogos(extensionUri: vscode.Uri): Record<string, string> {
@@ -26,26 +47,39 @@ export class StatusBar implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   private readonly logos: Record<string, string>;
   private snapshot?: DashboardSnapshot;
+  private refreshing = false;
 
   constructor(extensionUri: vscode.Uri) {
     this.logos = loadProviderLogos(extensionUri);
     this.item.command = "iaUsage.show";
-    this.item.name = "IA Usage";
-    this.item.text = "$(pulse) IA Usage";
-    this.item.tooltip = "IA Usage: esperando al CLI";
+    this.item.name = t("menu.title");
+    this.item.text = `$(loading~spin) ${t("menu.title")}`;
+    this.item.tooltip = t("error.waiting");
     this.item.show();
   }
 
   update(snapshot: DashboardSnapshot): void {
     this.snapshot = snapshot;
+    this.render();
+  }
+
+  /** Shows a spinner alongside the last known values instead of blanking the
+   * status bar while a manual refresh is in flight. */
+  setRefreshing(active: boolean): void {
+    this.refreshing = active;
+    this.render();
+  }
+
+  private render(): void {
+    if (!this.snapshot) return;
     const config = settings();
-    const providers = visible(snapshot, config.providers);
-    const icon = providers.length === 0 ? "pulse" : providers.every((provider) => provider.stale) ? "clock" : "check";
+    const providers = visible(this.snapshot, config.providers);
+    const spinner = this.refreshing ? "$(sync~spin) " : "";
     this.item.text = providers.length
-      ? `$(${icon}) ${providers.map((provider) => label(provider, config.display)).join("  ")}`
-      : "$(pulse) IA Usage";
-    this.item.tooltip = tooltip(snapshot, providers, this.logos);
-    this.item.backgroundColor = providers.length > 0 && providers.every((provider) => provider.stale) ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
+      ? `${spinner}${providers.map((provider) => buildStatusBarLabel(provider, config)).join("  ")}`
+      : `${spinner}$(pulse) ${t("menu.title")}`;
+    this.item.tooltip = tooltip(this.snapshot, providers, this.logos);
+    this.item.backgroundColor = shouldWarnBackground(providers) ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
   }
 
   showMenu(onRefresh: () => void, onReconnect: () => void): void {
@@ -54,14 +88,10 @@ export class StatusBar implements vscode.Disposable {
 
   configureProviders = (): void => { void pickProviders(this.snapshot); };
 
-  setError(message: string): void { this.item.text = "$(warning) IA Usage"; this.item.tooltip = message; }
-  dispose(): void { this.item.dispose(); }
-}
+  setError(message: string): void {
+    this.item.text = `$(warning) ${t("menu.title")}`;
+    this.item.tooltip = message;
+  }
 
-function label(provider: Provider, mode: "minimal" | "compact" | "full"): string {
-  const visual = providerVisual(provider.id, provider.name);
-  const value = percent(provider);
-  if (mode === "minimal") return `$(${visual.icon}) ${value}`;
-  if (mode === "full") return `$(${visual.icon}) ${provider.name} ${value}`;
-  return `$(${visual.icon}) ${visual.short} ${value}`;
+  dispose(): void { this.item.dispose(); }
 }

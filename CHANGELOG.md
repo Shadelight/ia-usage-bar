@@ -4,6 +4,42 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-13
+
+### Added
+
+- Vinculación móvil completa mediante `iausage://pair`: Android abre el flujo
+  desde Cámara o Lens, valida el enlace y conserva de forma segura el estado
+  de la frase secreta durante recomposiciones.
+- Diagnóstico y reparación del CLI desde la aplicación, junto con un smoke
+  test del instalador que comprueba el binario y el PATH de usuario desde una
+  PowerShell nueva.
+- Nueva experiencia Android, widget configurable, recursos de marca y una
+  suite ampliada de pruebas unitarias e instrumentadas.
+- Extensión VS Code 0.4.0 con personalización de métricas, proveedores,
+  apariencia, localización y cobertura automatizada del menú y tooltip.
+
+### Changed
+
+- Navegación de escritorio simplificada: el menú global dirige a categorías
+  concretas y las acciones contextuales viven únicamente dentro del proveedor.
+- La vinculación exige frase secreta, sync activo, LAN habilitada y una IP
+  alcanzable; el QR ya no presenta `localhost` o `127.0.0.1` al teléfono.
+- La interfaz visible adopta el nombre `IA Usage` y obtiene dinámicamente la
+  versión de la aplicación, manteniendo los identificadores técnicos heredados
+  para conservar compatibilidad de actualización y credenciales.
+
+### Fixed
+
+- Habilitar un proveedor actualiza en el sitio el campo de API key sin cerrar
+  el detalle, perder foco ni borrar texto ante eventos del dashboard.
+- Las frases secretas de sync y la eliminación de API keys usan la lectura
+  tolerante a NUL de Windows Credential Manager.
+- El switch de sync revierte su estado visual si el backend rechaza la
+  activación, y el flujo de QR espera a que el servidor esté realmente listo.
+- El instalador NSIS administra el segmento exacto de `resources\\bin` en el
+  PATH de usuario, evita duplicados y lo retira con precisión al desinstalar.
+
 ## [0.2.7] - 2026-09-13
 
 ### Fixed

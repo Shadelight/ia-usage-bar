@@ -16,8 +16,8 @@ use crate::config::AppConfig;
 use crate::descriptor::descriptor;
 use crate::http::FetchError;
 use crate::model::{
-    snapshot_needs_auth, snapshot_with_status, ProviderSnapshot, ProviderStatus,
-    ProviderStatusReason, AuthKind, VendorId, VendorInfo,
+    snapshot_needs_auth, snapshot_with_status, AuthKind, ProviderSnapshot, ProviderStatus,
+    ProviderStatusReason, VendorId, VendorInfo,
 };
 
 pub trait Provider {
@@ -73,7 +73,11 @@ pub fn catalog(cfg: &AppConfig) -> Vec<VendorInfo> {
                 has_credential,
                 credential_source,
                 links: id.links(),
-                strategies: desc.strategies.iter().map(|s| s.slug().to_string()).collect(),
+                strategies: desc
+                    .strategies
+                    .iter()
+                    .map(|s| s.slug().to_string())
+                    .collect(),
                 // Do not surface stale preferences saved by pre-router builds:
                 // if the fetcher cannot execute it, it is not a selectable source.
                 source_preference: cfg
@@ -342,10 +346,22 @@ mod tests {
         std::env::set_var("DEEPSEEK_API_KEY", "sk-test-must-never-serialize");
         let cat = catalog(&AppConfig::default());
         std::env::remove_var("DEEPSEEK_API_KEY");
-        let deepseek = cat.iter().find(|v| v.id == "deepseek").expect("deepseek in catalog");
-        assert!(deepseek.has_credential, "env credential must surface as a boolean");
-        let grok = cat.iter().find(|v| v.id == "grok").expect("grok in catalog");
-        assert!(!grok.has_credential, "unset credential must surface as false");
+        let deepseek = cat
+            .iter()
+            .find(|v| v.id == "deepseek")
+            .expect("deepseek in catalog");
+        assert!(
+            deepseek.has_credential,
+            "env credential must surface as a boolean"
+        );
+        let grok = cat
+            .iter()
+            .find(|v| v.id == "grok")
+            .expect("grok in catalog");
+        assert!(
+            !grok.has_credential,
+            "unset credential must surface as false"
+        );
         let serialized = serde_json::to_string(&cat).unwrap();
         assert!(
             !serialized.contains("sk-test-must-never-serialize"),

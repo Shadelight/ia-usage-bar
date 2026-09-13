@@ -28,7 +28,7 @@ const COPY = {
     providersEyebrow: "Providers",
     providersTitle: "One app, every provider you pay for",
     providersSubtitle:
-      "Enable only what you use. IA Usage Bar never disables a provider for you.",
+      "Enable only what you use. IA Usage never disables a provider for you.",
     providersMore: "+ more via API key or local session",
     limitsKicker: "Limits & resets",
     limitsTitle: "Session, weekly, monthly — all in one glance",
@@ -41,7 +41,7 @@ const COPY = {
     limitCard3t: "Stale-data handling",
     limitCard3p: "If a provider is unreachable, the last good numbers stay on screen — flagged, not hidden.",
     calloutBadge: "Switch",
-    calloutText: "<b>Cursor</b> has the most headroom right now (74%) — IA Usage Bar flags it before you hit a wall on your primary provider.",
+    calloutText: "<b>Cursor</b> has the most headroom right now (74%) — IA Usage flags it before you hit a wall on your primary provider.",
     compactKicker: "Compact mode",
     compactTitle: "Small window, same signal",
     compactP1:
@@ -65,11 +65,11 @@ const COPY = {
     statusCard2t: "Needs permission",
     statusCard2p: "Credential authenticates but can't read usage — check the plan.",
     statusCard3t: "Rate limited / unavailable",
-    statusCard3p: "IA Usage Bar couldn't fetch fresh data right now. It keeps the last good snapshot and shows the cause when it can tell.",
+    statusCard3p: "IA Usage couldn't fetch fresh data right now. It keeps the last good snapshot and shows the cause when it can tell.",
     privacyKicker: "Privacy & security",
     privacyTitle: "Your credentials stay on your machine",
     privacySubtitle:
-      "IA Usage Bar reuses sessions and credentials that already exist locally when a provider allows it — OAuth/CLI login, device flows, local session files — instead of asking you to re-authenticate.",
+      "IA Usage reuses sessions and credentials that already exist locally when a provider allows it — OAuth/CLI login, device flows, local session files — instead of asking you to re-authenticate.",
     privacyLi1: "Manually entered API keys are stored in Windows Credential Manager, never in plaintext config.",
     privacyLi2: "No passwords are ever stored by the app.",
     privacyLi3: "Processing happens locally, except the network calls each enabled provider's own usage endpoint needs.",
@@ -94,7 +94,7 @@ const COPY = {
     ossCard3p: "Vulnerability reporting and credential-handling policy.",
     finalTitle: "Stop guessing your quota.",
     finalSubtitle: "One tray app, every provider, always current.",
-    finalCta: "Download IA Usage Bar for Windows",
+    finalCta: "Download IA Usage for Windows",
     footerNote: "Not affiliated with Anthropic, OpenAI, Cursor, or any listed provider.",
   },
   es: {
@@ -126,7 +126,7 @@ const COPY = {
     providersEyebrow: "Proveedores",
     providersTitle: "Una app, todos los proveedores que pagas",
     providersSubtitle:
-      "Activa solo los que usas. IA Usage Bar nunca desactiva un proveedor por ti.",
+      "Activa solo los que usas. IA Usage nunca desactiva un proveedor por ti.",
     providersMore: "+ más vía clave API o sesión local",
     limitsKicker: "Límites y reinicios",
     limitsTitle: "Sesión, semanal, mensual — todo de un vistazo",
@@ -139,7 +139,7 @@ const COPY = {
     limitCard3t: "Manejo de datos obsoletos",
     limitCard3p: "Si un proveedor no responde, se mantienen los últimos datos válidos — marcados, no ocultos.",
     calloutBadge: "Cambia",
-    calloutText: "<b>Cursor</b> tiene el mayor margen ahora mismo (74%) — IA Usage Bar te avisa antes de quedarte sin cuota en tu proveedor principal.",
+    calloutText: "<b>Cursor</b> tiene el mayor margen ahora mismo (74%) — IA Usage te avisa antes de quedarte sin cuota en tu proveedor principal.",
     compactKicker: "Modo compacto",
     compactTitle: "Ventana pequeña, misma señal",
     compactP1:
@@ -163,11 +163,11 @@ const COPY = {
     statusCard2t: "Necesita permiso",
     statusCard2p: "La credencial autentica pero no puede leer el uso — revisa el plan.",
     statusCard3t: "Límite de tasa / no disponible",
-    statusCard3p: "IA Usage Bar no pudo obtener datos frescos ahora. Conserva el último dato válido y muestra la causa cuando puede determinarla.",
+    statusCard3p: "IA Usage no pudo obtener datos frescos ahora. Conserva el último dato válido y muestra la causa cuando puede determinarla.",
     privacyKicker: "Privacidad y seguridad",
     privacyTitle: "Tus credenciales se quedan en tu equipo",
     privacySubtitle:
-      "IA Usage Bar reutiliza sesiones y credenciales que ya existen localmente cuando el proveedor lo permite — OAuth/CLI, flujos de dispositivo, archivos de sesión locales — en vez de pedirte que vuelvas a autenticarte.",
+      "IA Usage reutiliza sesiones y credenciales que ya existen localmente cuando el proveedor lo permite — OAuth/CLI, flujos de dispositivo, archivos de sesión locales — en vez de pedirte que vuelvas a autenticarte.",
     privacyLi1: "Las claves API añadidas manualmente se guardan en Windows Credential Manager, nunca en texto plano.",
     privacyLi2: "La app nunca almacena contraseñas.",
     privacyLi3: "El procesamiento es local, salvo las llamadas que cada proveedor activo necesita a su propio endpoint de uso.",
@@ -192,7 +192,7 @@ const COPY = {
     ossCard3p: "Política de reporte de vulnerabilidades y manejo de credenciales.",
     finalTitle: "Deja de adivinar tu cuota.",
     finalSubtitle: "Una app en la bandeja, todos los proveedores, siempre al día.",
-    finalCta: "Descargar IA Usage Bar para Windows",
+    finalCta: "Descargar IA Usage para Windows",
     footerNote: "No afiliado con Anthropic, OpenAI, Cursor ni ningún proveedor listado.",
   },
 };

@@ -25,7 +25,7 @@ jobs:
           gradle-version: "9.1.0"
       - name: Test Android before signing
         working-directory: android
-        run: gradle :app:testDebugUnitTest
+        run: gradle :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:assembleDebug :app:lintDebug
       - name: Validate Android signing configuration
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -56,6 +56,7 @@ jobs:
             -PIAUSAGE_KEY_PASSWORD="$KEY_PASSWORD" \
             -PIAUSAGE_VERSION_NAME="$VERSION_NAME" \
             -PIAUSAGE_VERSION_CODE="$GITHUB_RUN_NUMBER"
+          grep -q "\"versionName\": \"$VERSION_NAME\"" app/build/outputs/apk/release/output-metadata.json
       - name: Upload signed APK + AAB
         uses: actions/upload-artifact@v4
         with:
@@ -146,11 +147,21 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: IA Usage Bar ${{ github.ref_name }}
+          releaseName: IA Usage ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           args: --config src-tauri/tauri.release.conf.json
+
+      - name: Smoke installed CLI and user PATH
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem target/release/bundle/nsis -Filter '*-setup.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'NSIS setup executable not found' }
+          $installDir = Join-Path $env:RUNNER_TEMP 'iausage-cli-smoke'
+          $process = Start-Process -FilePath $installer.FullName -Wait -PassThru -ArgumentList "/S /D=$installDir"
+          if ($process.ExitCode -ne 0) { throw "NSIS install failed: $($process.ExitCode)" }
+          ./scripts/smoke-installed-cli.ps1 -InstallDir $installDir
 
       - name: Download Android APK + AAB
         uses: actions/download-artifact@v4

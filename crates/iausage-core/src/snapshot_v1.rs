@@ -102,7 +102,11 @@ pub fn build(
                 credits: snap.and_then(|s| s.credits.clone()),
                 cost: snap.and_then(|s| s.cost.clone()),
                 accounts: snap
-                    .map(|_| vec![AccountV1 { id: "default".into() }])
+                    .map(|_| {
+                        vec![AccountV1 {
+                            id: "default".into(),
+                        }]
+                    })
                     .unwrap_or_default(),
                 updated_at: snap.map(|s| s.updated_at.clone()),
             }
@@ -145,7 +149,9 @@ mod tests {
         let snap = snapshot_ok(
             VendorId::Anthropic,
             "Max",
-            vec![progress_pct("session", "Sesión", 10.0, None, 18_000, "always")],
+            vec![progress_pct(
+                "session", "Sesión", 10.0, None, 18_000, "always",
+            )],
         );
         let snaps = HashMap::from([(snap.id.clone(), snap)]);
         let v1 = build(&snaps, &catalog(), "now".into(), Some("0.3.0".into()));

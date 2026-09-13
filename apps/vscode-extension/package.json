@@ -2,7 +2,7 @@
   "name": "ia-usage",
   "displayName": "IA Usage - AI Quota Monitor",
   "description": "Monitor Claude Code, Codex, Cursor and other AI usage limits directly from your VS Code status bar.",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "publisher": "shadelightdev",
   "icon": "images/icon.png",
   "license": "MIT",
@@ -68,29 +68,94 @@
         "command": "iaUsage.configureProviders",
         "title": "Configure providers",
         "category": "IA Usage"
+      },
+      {
+        "command": "iaUsage.customizeStatusBar",
+        "title": "Customize status bar",
+        "category": "IA Usage"
+      },
+      {
+        "command": "iaUsage.reorderProviders",
+        "title": "Reorder providers",
+        "category": "IA Usage"
       }
     ],
     "icons": {
       "ia-anthropic": {
         "description": "Claude / Anthropic",
-        "default": {
-          "fontPath": "./media/provider-icons/provider-icons.woff",
-          "fontCharacter": "\\F103"
-        }
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F113" }
       },
       "ia-openai": {
         "description": "Codex / OpenAI",
-        "default": {
-          "fontPath": "./media/provider-icons/provider-icons.woff",
-          "fontCharacter": "\\F101"
-        }
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F105" }
       },
       "ia-cursor": {
         "description": "Cursor",
-        "default": {
-          "fontPath": "./media/provider-icons/provider-icons.woff",
-          "fontCharacter": "\\F102"
-        }
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F110" }
+      },
+      "ia-antigravity": {
+        "description": "Antigravity",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F112" }
+      },
+      "ia-opencode_go": {
+        "description": "OpenCode Go",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F104" }
+      },
+      "ia-openrouter": {
+        "description": "OpenRouter",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F103" }
+      },
+      "ia-deepseek": {
+        "description": "DeepSeek",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F10F" }
+      },
+      "ia-groq": {
+        "description": "Groq",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F10D" }
+      },
+      "ia-kimi": {
+        "description": "Kimi",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F10B" }
+      },
+      "ia-kilo": {
+        "description": "Kilo Code",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F10C" }
+      },
+      "ia-minimax": {
+        "description": "MiniMax",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F109" }
+      },
+      "ia-grok": {
+        "description": "Grok",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F10E" }
+      },
+      "ia-copilot": {
+        "description": "GitHub Copilot",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F111" }
+      },
+      "ia-windsurf": {
+        "description": "Windsurf",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F102" }
+      },
+      "ia-zai": {
+        "description": "Z.ai",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F101" }
+      },
+      "ia-moonshot": {
+        "description": "Moonshot AI",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F108" }
+      },
+      "ia-novita": {
+        "description": "Novita",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F106" }
+      },
+      "ia-kiro": {
+        "description": "Kiro",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F10A" }
+      },
+      "ia-nous": {
+        "description": "Nous",
+        "default": { "fontPath": "./media/provider-icons/provider-icons.woff", "fontCharacter": "\\F107" }
       }
     },
     "configuration": {
@@ -138,6 +203,37 @@
           "type": "boolean",
           "default": false,
           "description": "Show every quota in the tooltip, including secondary metrics at 0%."
+        },
+        "iaUsage.showResetInStatusBar": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the primary quota's reset countdown next to its percentage in the status bar, e.g. \"CDX 21% (39m)\"."
+        },
+        "iaUsage.percentageMode": {
+          "type": "string",
+          "enum": ["used", "available"],
+          "enumDescriptions": [
+            "Show the percentage already used, e.g. \"21%\"",
+            "Show the percentage still available, e.g. \"79% libre\""
+          ],
+          "default": "used",
+          "description": "Whether the status bar and tooltip show used or available percentage."
+        },
+        "iaUsage.primaryMetric": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": { "type": "string" },
+          "description": "Maps a provider id to the quota id that represents it in the status bar, e.g. { \"openai\": \"five_hour\" }. Falls back to the provider's first quota when unset or when the configured quota id no longer exists. Set via \"IA Usage: Customize status bar\" instead of editing this by hand."
+        },
+        "iaUsage.showProviderIcons": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show each provider's brand icon in the status bar. Disable to show text only."
+        },
+        "iaUsage.showStaleIndicator": {
+          "type": "boolean",
+          "default": true,
+          "description": "Mark stale providers with \"*\" in the status bar. Stale state is always visible in the tooltip regardless of this setting."
         }
       }
     }
@@ -147,6 +243,8 @@
     "check-version": "node scripts/check-published-version.mjs",
     "build-icons": "node scripts/build-icon-font.mjs",
     "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20",
+    "test:build": "esbuild \"src/**/*.test.ts\" \"test/**/*.test.ts\" --bundle --outdir=.test-out --platform=node --format=cjs --target=node20 --alias:vscode=./test/vscode-mock.ts",
+    "test": "npm run test:build && cd .test-out && node --test",
     "package": "npm run check-version && npm run check && npm run bundle && vsce package --no-dependencies"
   },
   "devDependencies": {

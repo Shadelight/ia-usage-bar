@@ -32,8 +32,8 @@ object PairingUri {
         require(host.isNotEmpty() && !host.equals("localhost", true) && host != "127.0.0.1") { "El QR no contiene una dirección LAN válida." }
         require(port != null && port in 1..65535) { "El puerto del QR no es válido." }
         require(device.matches(Regex("[0-9a-fA-F]{16,128}"))) { "El identificador del PC no es válido." }
-        require(fingerprint.matches(Regex("[0-9A-HJKMNPQRSTVWXYZ]{4}-[0-9A-HJKMNPQRSTVWXYZ]{4}"))) { "El fingerprint del QR no es válido." }
-        require(fingerprint == fingerprintFor(device)) { "El fingerprint no corresponde al PC del QR." }
+        require(fingerprint.matches(Regex("[0-9A-HJKMNPQRSTVWXYZ]{4}-[0-9A-HJKMNPQRSTVWXYZ]{4}"))) { "El código de verificación del QR no es válido." }
+        require(fingerprint == fingerprintFor(device)) { "El código de verificación no corresponde al PC del QR." }
         require(minApp.matches(Regex("\\d+\\.\\d+\\.\\d+"))) { "La versión mínima del PC no es válida." }
         return PairingInfo(host, port, device.lowercase(), fingerprint, minApp)
     }

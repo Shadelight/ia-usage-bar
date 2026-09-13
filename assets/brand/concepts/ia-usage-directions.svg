@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1400" role="img" aria-labelledby="title desc">
+  <title id="title">IA Usage identity directions</title>
+  <desc id="desc">Three dark, flat identity directions for IA Usage: Integrated IA, Usage Mark and IA Cutout.</desc>
+  <defs>
+    <symbol id="a-color" viewBox="0 0 256 256">
+      <rect x="26" y="48" width="34" height="160" rx="7" fill="#FF7043"/>
+      <path d="M82 204 142 55c3-8 9-12 17-12s14 4 18 12l69 149h-42l-47-108-36 108Z" fill="#F5F5F5"/>
+      <rect x="116" y="171" width="15" height="33" rx="3" fill="#FF7043"/>
+      <rect x="139" y="145" width="15" height="59" rx="3" fill="#FF7043"/>
+      <rect x="162" y="119" width="15" height="85" rx="3" fill="#FF7043"/>
+    </symbol>
+    <symbol id="a-mono" viewBox="0 0 256 256">
+      <rect x="30" y="50" width="38" height="158" rx="6" fill="#F5F5F5"/>
+      <path d="M82 204 143 55c3-8 9-12 17-12s14 4 18 12l68 149h-44L159 98l-35 106Z" fill="#F5F5F5"/>
+      <rect x="130" y="151" width="47" height="18" rx="3" fill="#F5F5F5"/>
+    </symbol>
+    <symbol id="b-color" viewBox="0 0 256 256">
+      <rect x="27" y="50" width="34" height="158" rx="6" fill="#FF7043"/>
+      <path d="M83 208v-44h25v44Zm33 0v-73h25v73Zm33 0V104h25v104Z" fill="#F5F5F5"/>
+      <path d="M85 152 146 52c4-7 10-10 17-10 8 0 14 4 18 11l65 155h-43L159 94l-42 68Z" fill="#F5F5F5"/>
+      <rect x="149" y="179" width="25" height="29" fill="#FF7043"/>
+    </symbol>
+    <symbol id="b-mono" viewBox="0 0 256 256">
+      <rect x="27" y="50" width="34" height="158" rx="6" fill="#F5F5F5"/>
+      <path d="M83 208v-44h25v44Zm33 0v-73h25v73Zm33 0V104h25v104Z" fill="#F5F5F5"/>
+      <path d="M85 152 146 52c4-7 10-10 17-10 8 0 14 4 18 11l65 155h-43L159 94l-42 68Z" fill="#F5F5F5"/>
+    </symbol>
+    <mask id="cutout">
+      <rect x="0" y="0" width="256" height="256" fill="white"/>
+      <rect x="61" y="66" width="24" height="124" rx="3" fill="black"/>
+      <path d="M105 190 150 69c2-6 7-9 13-9s11 3 14 9l54 121h-28l-18-44h-45l-16 44Z" fill="black"/>
+      <path d="M148 126h28l-15-38Z" fill="white"/>
+      <rect x="142" y="159" width="10" height="31" fill="white"/>
+      <rect x="157" y="146" width="10" height="44" fill="white"/>
+      <rect x="172" y="132" width="10" height="58" fill="white"/>
+    </mask>
+    <symbol id="c-color" viewBox="0 0 256 256">
+      <rect x="25" y="25" width="206" height="206" rx="28" fill="#FF7043" mask="url(#cutout)"/>
+    </symbol>
+    <symbol id="c-mono" viewBox="0 0 256 256">
+      <rect x="25" y="25" width="206" height="206" rx="28" fill="#F5F5F5" mask="url(#cutout)"/>
+    </symbol>
+  </defs>
+
+  <rect width="1400" height="1400" fill="#111113"/>
+  <text x="72" y="82" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="42" font-weight="750">IA Usage — identity directions</text>
+  <text x="72" y="122" fill="#8A8A93" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="20">Dark · technical · compact · one symbol across every surface</text>
+
+  <!-- Direction A -->
+  <g transform="translate(60 175)">
+    <rect width="1280" height="330" rx="28" fill="#202023" stroke="#35353A"/>
+    <rect x="26" y="26" width="278" height="278" rx="58" fill="#18181B" stroke="#303035"/>
+    <use href="#a-color" x="62" y="62" width="206" height="206"/>
+    <text x="344" y="62" fill="#FF7043" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="750" letter-spacing="2.5">DIRECTION A · RECOMMENDED</text>
+    <text x="344" y="112" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="40" font-weight="750">Integrated IA</text>
+    <text x="344" y="150" fill="#9B9BA4" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18">The I begins the quota graph; the A and bars resolve as one compact monogram.</text>
+    <use href="#a-color" x="350" y="186" width="96" height="96"/>
+    <rect x="486" y="186" width="96" height="96" rx="18" fill="#18181B"/><use href="#a-mono" x="502" y="202" width="64" height="64"/>
+    <rect x="622" y="186" width="96" height="96" rx="18" fill="#303035"/><use href="#a-color" x="638" y="202" width="64" height="64"/>
+    <rect x="758" y="186" width="96" height="96" rx="18" fill="#18181B"/><use href="#a-mono" x="790" y="218" width="32" height="32"/>
+    <rect x="894" y="186" width="96" height="96" rx="18" fill="#18181B"/><use href="#a-mono" x="934" y="226" width="16" height="16"/>
+    <use href="#a-color" x="1035" y="184" width="84" height="84"/>
+    <text x="1124" y="240" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="34" font-weight="720" letter-spacing="-1.5">IA Usage</text>
+  </g>
+
+  <!-- Direction B -->
+  <g transform="translate(60 535)">
+    <rect width="1280" height="330" rx="28" fill="#202023" stroke="#35353A"/>
+    <rect x="26" y="26" width="278" height="278" rx="58" fill="#18181B" stroke="#303035"/>
+    <use href="#b-color" x="62" y="62" width="206" height="206"/>
+    <text x="344" y="62" fill="#71717A" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="750" letter-spacing="2.5">DIRECTION B</text>
+    <text x="344" y="112" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="40" font-weight="750">Usage Mark</text>
+    <text x="344" y="150" fill="#9B9BA4" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18">The ascending usage stack constructs the A; more data-forward, less literal.</text>
+    <use href="#b-color" x="350" y="186" width="96" height="96"/>
+    <rect x="486" y="186" width="96" height="96" rx="18" fill="#18181B"/><use href="#b-mono" x="502" y="202" width="64" height="64"/>
+    <rect x="622" y="186" width="96" height="96" rx="18" fill="#303035"/><use href="#b-color" x="638" y="202" width="64" height="64"/>
+    <rect x="758" y="186" width="96" height="96" rx="18" fill="#18181B"/><use href="#b-mono" x="790" y="218" width="32" height="32"/>
+    <rect x="894" y="186" width="96" height="96" rx="18" fill="#18181B"/><use href="#b-mono" x="934" y="226" width="16" height="16"/>
+    <use href="#b-color" x="1035" y="184" width="84" height="84"/>
+    <text x="1124" y="240" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="34" font-weight="720" letter-spacing="-1.5">IA Usage</text>
+  </g>
+
+  <!-- Direction C -->
+  <g transform="translate(60 895)">
+    <rect width="1280" height="330" rx="28" fill="#202023" stroke="#35353A"/>
+    <rect x="26" y="26" width="278" height="278" rx="58" fill="#18181B" stroke="#303035"/>
+    <use href="#c-color" x="62" y="62" width="206" height="206"/>
+    <text x="344" y="62" fill="#71717A" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="750" letter-spacing="2.5">DIRECTION C</text>
+    <text x="344" y="112" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="40" font-weight="750">IA Cutout</text>
+    <text x="344" y="150" fill="#9B9BA4" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18">A coral utility block with the identity cut from negative space; strongest at large size.</text>
+    <use href="#c-color" x="350" y="186" width="96" height="96"/>
+    <rect x="486" y="186" width="96" height="96" rx="18" fill="#18181B"/><use href="#c-mono" x="502" y="202" width="64" height="64"/>
+    <rect x="622" y="186" width="96" height="96" rx="18" fill="#303035"/><use href="#c-color" x="638" y="202" width="64" height="64"/>
+    <rect x="758" y="186" width="96" height="96" rx="18" fill="#18181B"/><use href="#c-mono" x="790" y="218" width="32" height="32"/>
+    <rect x="894" y="186" width="96" height="96" rx="18" fill="#18181B"/><use href="#c-mono" x="934" y="226" width="16" height="16"/>
+    <use href="#c-color" x="1035" y="184" width="84" height="84"/>
+    <text x="1124" y="240" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="34" font-weight="720" letter-spacing="-1.5">IA Usage</text>
+  </g>
+
+  <rect x="60" y="1260" width="1280" height="82" rx="20" fill="#2A201E" stroke="#6F3525"/>
+  <circle cx="102" cy="1301" r="9" fill="#34D399"/>
+  <text x="126" y="1309" fill="#F5F5F5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="23" font-weight="650">Final recommendation: Direction A — clearest IA reading, best 16 px silhouette, least decorative.</text>
+</svg>

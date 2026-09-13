@@ -7,7 +7,8 @@ use std::sync::atomic::Ordering;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Manager};
+use tauri::path::BaseDirectory;
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
 use crate::config;
@@ -430,6 +431,181 @@ pub(crate) fn open_logs_folder() {
     reveal_in_explorer(&crate::logfile::dir());
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CliInstallStatus {
+    binary_exists: bool,
+    binary_path: String,
+    path_configured: bool,
+    version: Option<String>,
+}
+
+fn normalized_path_segment(value: &str) -> String {
+    let trimmed = value.trim().trim_matches('"');
+    let without_trailing = trimmed.trim_end_matches(['\\', '/']);
+    if without_trailing.len() == 2 && without_trailing.ends_with(':') {
+        format!("{without_trailing}\\")
+    } else {
+        without_trailing.to_string()
+    }
+}
+
+fn same_path_segment(left: &str, right: &str) -> bool {
+    normalized_path_segment(left).eq_ignore_ascii_case(&normalized_path_segment(right))
+}
+
+fn path_has_segment(path: &str, target: &str) -> bool {
+    path.split(';')
+        .any(|segment| !segment.trim().is_empty() && same_path_segment(segment, target))
+}
+
+/// Adds the exact directory once. Similar substrings (for example `bin` and
+/// `binary`) remain distinct; duplicate exact segments are collapsed.
+fn add_path_segment(path: &str, target: &str) -> String {
+    let target = normalized_path_segment(target);
+    let mut out = Vec::new();
+    let mut found = false;
+    for segment in path
+        .split(';')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        if same_path_segment(segment, &target) {
+            if !found {
+                out.push(target.clone());
+                found = true;
+            }
+        } else {
+            out.push(segment.to_string());
+        }
+    }
+    if !found {
+        out.push(target);
+    }
+    out.join(";")
+}
+
+const CLI_RESOURCE_RELATIVE_PATH: &str = "resources/bin/iausage.exe";
+
+fn cli_binary_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .resolve(CLI_RESOURCE_RELATIVE_PATH, BaseDirectory::Resource)
+        .map_err(|error| format!("No se pudo localizar IA Usage CLI: {error}"))
+}
+
+fn cli_version(path: &std::path::Path) -> Option<String> {
+    let output = Command::new(path).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+#[cfg(windows)]
+fn read_user_path() -> Result<String, String> {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
+    let environment = winreg::RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey_with_flags("Environment", KEY_READ)
+        .map_err(|error| format!("No se pudo leer el PATH de usuario: {error}"))?;
+    Ok(environment.get_value("Path").unwrap_or_default())
+}
+
+#[cfg(not(windows))]
+fn read_user_path() -> Result<String, String> {
+    Ok(std::env::var("PATH").unwrap_or_default())
+}
+
+#[cfg(windows)]
+fn write_user_path(value: &str) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use winreg::enums::{RegType, HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
+    use winreg::RegValue;
+
+    let environment = winreg::RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey_with_flags("Environment", KEY_READ | KEY_WRITE)
+        .map_err(|error| format!("No se pudo abrir el PATH de usuario: {error}"))?;
+    // Keep PATH as REG_EXPAND_SZ so existing %VARIABLE% segments retain their
+    // Windows semantics. Encode the complete untruncated UTF-16 value.
+    let mut bytes = Vec::new();
+    for word in OsStr::new(value).encode_wide().chain(std::iter::once(0)) {
+        bytes.extend_from_slice(&word.to_le_bytes());
+    }
+    environment
+        .set_raw_value(
+            "Path",
+            &RegValue {
+                bytes,
+                vtype: RegType::REG_EXPAND_SZ,
+            },
+        )
+        .map_err(|error| format!("No se pudo actualizar el PATH de usuario: {error}"))?;
+    broadcast_environment_change();
+    Ok(())
+}
+
+#[cfg(windows)]
+fn broadcast_environment_change() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
+    };
+    let environment: Vec<u16> = "Environment\0".encode_utf16().collect();
+    unsafe {
+        SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            0,
+            environment.as_ptr() as isize,
+            SMTO_ABORTIFHUNG,
+            5_000,
+            std::ptr::null_mut(),
+        );
+    }
+}
+
+#[tauri::command]
+pub(crate) fn cli_install_status(app: AppHandle) -> Result<CliInstallStatus, String> {
+    let binary = cli_binary_path(&app)?;
+    let binary_exists = binary.is_file();
+    let user_path = read_user_path().unwrap_or_default();
+    let directory = binary.parent().unwrap_or(&binary);
+    Ok(CliInstallStatus {
+        binary_exists,
+        binary_path: binary.display().to_string(),
+        path_configured: path_has_segment(&user_path, &directory.display().to_string()),
+        version: binary_exists.then(|| cli_version(&binary)).flatten(),
+    })
+}
+
+#[tauri::command]
+pub(crate) fn repair_cli_path(app: AppHandle) -> Result<(), String> {
+    let binary = cli_binary_path(&app)?;
+    if !binary.is_file() {
+        return Err(format!("IA Usage CLI no existe en {}", binary.display()));
+    }
+    let directory = binary
+        .parent()
+        .ok_or_else(|| "La ruta de IA Usage CLI no tiene directorio".to_string())?;
+    let current = read_user_path()?;
+    let repaired = add_path_segment(&current, &directory.display().to_string());
+    #[cfg(windows)]
+    write_user_path(&repaired)?;
+    #[cfg(not(windows))]
+    return Err("La reparación automática de PATH solo está disponible en Windows".into());
+    #[cfg(windows)]
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn cli_test(app: AppHandle) -> Result<String, String> {
+    let binary = cli_binary_path(&app)?;
+    if !binary.is_file() {
+        return Err(format!("IA Usage CLI no existe en {}", binary.display()));
+    }
+    cli_version(&binary).ok_or_else(|| "IA Usage CLI no respondió correctamente".to_string())
+}
+
 #[tauri::command]
 pub(crate) fn clear_logs() {
     crate::logfile::clear();
@@ -504,6 +680,206 @@ fn version_parts(value: &str) -> Vec<u64> {
         .collect()
 }
 
+/// Fases estables del updater emitidas al frontend vía `updater-status`.
+/// El protocolo IPC transporta el identificador snake_case, nunca el texto
+/// localizado: el frontend mapea cada fase a su clave i18n.
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum UpdaterPhase {
+    Downloading,
+    Verifying,
+    Preparing,
+    Restarting,
+}
+
+fn emit_updater_phase(app: &AppHandle, phase: UpdaterPhase) {
+    // El progreso es informativo: un listener ausente o una ventana ya
+    // cerrada nunca debe abortar la actualización.
+    let _ = app.emit("updater-status", phase);
+}
+
+/// Escapa una ruta Windows para interpolarla como literal single-quoted de
+/// PowerShell (`'` → `''`). Se aplica a installer, current_exe y log.
+fn ps_quote(path: &std::path::Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "''"))
+}
+
+/// Extrae el hash SHA-256 publicado para `asset_name` desde el contenido de
+/// `SHA256SUMS.txt`. Tolera el prefijo `*` de modo binario y exige 64
+/// dígitos hexadecimales. Función pura para poder testearla sin red.
+fn parse_checksum(body: &str, asset_name: &str) -> Option<String> {
+    body.lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let hash = fields.next()?;
+            let name = fields.next()?;
+            // GitHub sustituye espacios por puntos al subir assets; el
+            // checksum ya viene con el nombre con puntos, igual que la API.
+            (name.trim_start_matches('*') == asset_name).then(|| hash.to_ascii_lowercase())
+        })
+        .next()
+        .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+/// Sanea una versión para usarla en nombres de fichero del helper/log.
+fn sanitize_version_tag(tag: &str) -> String {
+    let trimmed = tag.trim_start_matches('v').trim();
+    let mut out: String = trimmed
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if out.is_empty() {
+        out.push_str("unknown");
+    }
+    // Evita `..` o separadores accidentales aunque el tag viniera corrupto.
+    out.replace("..", "__")
+}
+
+fn updater_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("iausagebar-update")
+}
+
+/// Construye el script PowerShell del helper de relanzamiento.
+///
+/// El helper es un proceso independiente que sobrevive a `app.exit(0)`:
+/// espera a que el PID padre termine de verdad (no un `Sleep` mágico),
+/// ejecuta el instalador silencioso con `-Wait`, comprueba su `ExitCode`
+/// y solo entonces relanza `current_exe` si sigue existiendo.
+fn build_relaunch_ps1(
+    installer: &std::path::Path,
+    current_exe: &std::path::Path,
+    log: &std::path::Path,
+    parent_pid: u32,
+) -> String {
+    let installer_q = ps_quote(installer);
+    let app_q = ps_quote(current_exe);
+    let log_q = ps_quote(log);
+    format!(
+        "$Installer = {installer_q}\r\n\
+         $App = {app_q}\r\n\
+         $Log = {log_q}\r\n\
+         $ParentPid = {parent_pid}\r\n\
+         Add-Content -Path $Log -Value \"helper started\"\r\n\
+         try {{\r\n\
+         \x20   Wait-Process -Id $ParentPid -Timeout 30 -ErrorAction SilentlyContinue\r\n\
+         }} catch {{}}\r\n\
+         Start-Sleep -Milliseconds 300\r\n\
+         $proc = Start-Process -FilePath $Installer -ArgumentList \"/S\" -PassThru -Wait\r\n\
+         Add-Content -Path $Log -Value (\"installer exit code: \" + $proc.ExitCode)\r\n\
+         if ($proc.ExitCode -eq 0) {{\r\n\
+         \x20   Add-Content -Path $Log -Value \"installer ok, relaunching\"\r\n\
+         \x20   Start-Process -FilePath $App\r\n\
+         }} else {{\r\n\
+         \x20   Add-Content -Path $Log -Value \"installer failed\"\r\n\
+         \x20   if (Test-Path $App) {{\r\n\
+         \x20       Add-Content -Path $Log -Value \"previous exe still present, relaunching\"\r\n\
+         \x20       Start-Process -FilePath $App\r\n\
+         \x20   }}\r\n\
+         }}\r\n"
+    )
+}
+
+fn download_verified_installer(
+    app: &AppHandle,
+    release: &GitHubRelease,
+) -> Result<std::path::PathBuf, String> {
+    let installer = windows_installer(release)?;
+    let asset_name = installer.name.clone();
+    let download_url = installer.browser_download_url.clone();
+    emit_updater_phase(app, UpdaterPhase::Downloading);
+    crate::logfile::append(&format!("updater: downloading {asset_name}"));
+    let expected_hash = published_checksum(release, &asset_name)?;
+    let file_name = std::path::Path::new(&asset_name)
+        .file_name()
+        .ok_or_else(|| "Nombre de instalador no válido".to_string())?;
+    let dir = updater_dir();
+    std::fs::create_dir_all(&dir).map_err(|_| "No se pudo preparar la descarga".to_string())?;
+    let path = dir.join(file_name);
+    let mut response = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .user_agent("IA-Usage-Bar")
+        .build()
+        .map_err(|_| "No se pudo preparar la descarga".to_string())?
+        .get(&download_url)
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|_| "No se pudo descargar el instalador".to_string())?;
+    let mut file =
+        File::create(&path).map_err(|_| "No se pudo guardar el instalador".to_string())?;
+    response
+        .copy_to(&mut file)
+        .map_err(|_| "La descarga del instalador se interrumpió".to_string())?;
+    drop(file);
+    emit_updater_phase(app, UpdaterPhase::Verifying);
+    crate::logfile::append(&format!("updater: verifying {asset_name}"));
+    let actual = file_sha256(&path)?;
+    if actual != expected_hash {
+        let _ = std::fs::remove_file(&path);
+        crate::logfile::append("updater: checksum mismatch");
+        return Err("La verificación de seguridad del instalador falló".into());
+    }
+    let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    crate::logfile::append(&format!("updater: verified installer ({bytes} bytes)"));
+    Ok(path)
+}
+
+/// Escribe el helper `.ps1` y lo lanza desacoplado (detached) para que
+/// sobreviva a `app.exit(0)`. Devuelve `Err` sin cerrar la app si algo falla.
+fn spawn_relaunch_helper(
+    app: &AppHandle,
+    installer: &std::path::Path,
+    current_exe: &std::path::Path,
+    version_tag: &str,
+) -> Result<(), String> {
+    emit_updater_phase(app, UpdaterPhase::Preparing);
+    crate::logfile::append("updater: preparing relaunch helper");
+    let dir = updater_dir();
+    std::fs::create_dir_all(&dir).map_err(|_| "No se pudo preparar la instalación".to_string())?;
+    let safe = sanitize_version_tag(version_tag);
+    let ps1_path = dir.join(format!("relaunch-{safe}.ps1"));
+    let log_path = dir.join(format!("updater-{safe}.log"));
+    let parent_pid = std::process::id();
+    let script = build_relaunch_ps1(installer, current_exe, &log_path, parent_pid);
+    std::fs::write(&ps1_path, script)
+        .map_err(|_| "No se pudo preparar la instalación".to_string())?;
+    crate::logfile::append("updater: relaunch helper created");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: el helper no muere
+        // con la app y no muestra consola (el .ps1 además corre oculto).
+        const DETACHED: u32 = 0x0000_0008;
+        const NEW_GROUP: u32 = 0x0000_0200;
+        Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-File",
+                &ps1_path.to_string_lossy(),
+            ])
+            .creation_flags(DETACHED | NEW_GROUP)
+            .spawn()
+            .map_err(|_| "No se pudo preparar la instalación".to_string())?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (&ps1_path, &log_path, parent_pid);
+        return Err("La actualización automática solo está disponible en Windows".into());
+    }
+    crate::logfile::append("updater: helper spawned");
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn check_for_updates(app: AppHandle) -> Result<UpdateCheck, String> {
     let current = app.package_info().version.to_string();
@@ -557,20 +933,12 @@ fn published_checksum(release: &GitHubRelease, asset_name: &str) -> Result<Strin
         .map_err(|_| "No se pudo descargar SHA256SUMS.txt".to_string())?
         .text()
         .map_err(|_| "No se pudo leer SHA256SUMS.txt".to_string())?;
-    body.lines()
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let hash = fields.next()?;
-            let name = fields.next()?;
-            (name.trim_start_matches('*') == asset_name).then(|| hash.to_ascii_lowercase())
-        })
-        .next()
-        .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .ok_or_else(|| format!("No hay checksum para {asset_name}"))
+    parse_checksum(&body, asset_name).ok_or_else(|| format!("No hay checksum para {asset_name}"))
 }
 
 fn file_sha256(path: &std::path::Path) -> Result<String, String> {
-    let mut file = File::open(path).map_err(|_| "No se pudo abrir el instalador descargado".to_string())?;
+    let mut file =
+        File::open(path).map_err(|_| "No se pudo abrir el instalador descargado".to_string())?;
     let mut hash = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -585,49 +953,29 @@ fn file_sha256(path: &std::path::Path) -> Result<String, String> {
     Ok(format!("{:x}", hash.finalize()))
 }
 
-fn download_and_start_update() -> Result<(), String> {
-    let release = latest_release()?;
-    let installer = windows_installer(&release)?;
-    let expected_hash = published_checksum(&release, &installer.name)?;
-    let file_name = std::path::Path::new(&installer.name)
-        .file_name()
-        .ok_or_else(|| "Nombre de instalador no válido".to_string())?;
-    let dir = std::env::temp_dir().join("iausagebar-update");
-    std::fs::create_dir_all(&dir).map_err(|_| "No se pudo preparar la descarga".to_string())?;
-    let path = dir.join(file_name);
-    let mut response = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
-        .user_agent("IA-Usage-Bar")
-        .build()
-        .map_err(|_| "No se pudo preparar la descarga".to_string())?
-        .get(&installer.browser_download_url)
-        .send()
-        .and_then(|response| response.error_for_status())
-        .map_err(|_| "No se pudo descargar el instalador".to_string())?;
-    let mut file = File::create(&path).map_err(|_| "No se pudo guardar el instalador".to_string())?;
-    response
-        .copy_to(&mut file)
-        .map_err(|_| "La descarga del instalador se interrumpió".to_string())?;
-    drop(file);
-    if file_sha256(&path)? != expected_hash {
-        let _ = std::fs::remove_file(&path);
-        return Err("La verificación de seguridad del instalador falló".into());
-    }
-    Command::new(&path)
-        .arg("/S")
-        .spawn()
-        .map_err(|_| "No se pudo iniciar el instalador descargado".to_string())?;
-    Ok(())
-}
-
 #[tauri::command]
 pub(crate) fn install_update(app: AppHandle) -> Result<(), String> {
     let current = app.package_info().version.to_string();
     let release = latest_release()?;
-    if version_parts(release.tag_name.trim_start_matches('v')) <= version_parts(&current) {
+    let latest_tag = release.tag_name.clone();
+    if version_parts(latest_tag.trim_start_matches('v')) <= version_parts(&current) {
         return Err("Ya estás usando la versión más reciente".into());
     }
-    download_and_start_update()?;
+    // 1-2. Descarga + verificación SHA-256. Cualquier fallo devuelve Err
+    // con la app todavía abierta: nunca se cierra en este punto.
+    let installer_path = download_verified_installer(&app, &release)?;
+    // 3. Ruta instalada actual: el helper la relanzará cuando NSIS termine.
+    let current_exe = std::env::current_exe()
+        .map_err(|_| "No se pudo localizar la aplicación instalada".to_string())?;
+    // 4. Helper externo desacoplado. Si no se puede crear/lanzar, NO salir.
+    spawn_relaunch_helper(&app, &installer_path, &current_exe, &latest_tag)?;
+    // 5. Salida limpia: marcar allow_exit para no chocar con el
+    // comportamiento tray (CloseRequested/ExitRequested la ocultarían).
+    emit_updater_phase(&app, UpdaterPhase::Restarting);
+    crate::logfile::append("updater: exiting for update");
+    app.state::<AppState>()
+        .allow_exit
+        .store(true, Ordering::SeqCst);
     app.exit(0);
     Ok(())
 }
@@ -700,7 +1048,7 @@ pub(crate) fn sync_set_enabled(
     enabled: bool,
 ) -> Result<(), String> {
     if enabled && !crate::sync::has_passphrase() {
-        return Err("sync: primero guarda una passphrase".into());
+        return Err("sync: primero guarda una frase secreta".into());
     }
     let mut cfg = lock_or_recover(&state.config).clone();
     cfg.sync_enabled = enabled;
@@ -763,13 +1111,32 @@ pub(crate) fn sync_set_lan(
 }
 
 #[tauri::command]
-pub(crate) fn sync_get_pairing(lan: bool) -> Result<SyncPairing, String> {
+pub(crate) fn sync_get_pairing(
+    state: tauri::State<AppState>,
+    lan: bool,
+) -> Result<SyncPairing, String> {
+    if !lan {
+        return Err("sync: la vinculación móvil requiere la red local".into());
+    }
+    let cfg = lock_or_recover(&state.config).clone();
+    if !crate::sync::has_passphrase() {
+        return Err("sync: primero guarda una frase secreta".into());
+    }
+    if !cfg.sync_lan {
+        return Err("sync: activa Exponer en la red local".into());
+    }
+    if !cfg.sync_enabled {
+        return Err("sync: activa la sincronización antes de vincular".into());
+    }
+    {
+        let server = lock_or_recover(&state.sync_server);
+        if !server.running || !server.lan {
+            return Err("sync: el servidor LAN todavía no está listo".into());
+        }
+    }
     let device_id = crate::sync::load_or_create_device_id()?;
-    let host = if lan {
-        crate::sync_server::lan_ip().ok_or_else(|| "sync: sin IP LAN detectable".to_string())?
-    } else {
-        "127.0.0.1".to_string()
-    };
+    let host =
+        crate::sync_server::lan_ip().ok_or_else(|| "sync: sin IP LAN detectable".to_string())?;
     let info = crate::sync_server::PairingInfo::new(
         host.clone(),
         crate::sync_server::SYNC_DEFAULT_PORT,
@@ -803,19 +1170,77 @@ pub(crate) fn sync_export_now(
 
 #[cfg(test)]
 mod update_tests {
-    use super::{provider_login_command, version_parts};
+    use super::{
+        add_path_segment, build_relaunch_ps1, parse_checksum, path_has_segment,
+        provider_login_command, ps_quote, sanitize_version_tag, version_parts, UpdaterPhase,
+        CLI_RESOURCE_RELATIVE_PATH,
+    };
     use crate::model::VendorId;
 
     #[test]
     fn compares_release_versions_numerically() {
         assert!(version_parts("v0.10.0") > version_parts("0.2.9"));
         assert_eq!(version_parts("v0.2.0"), vec![0, 2, 0]);
+        // Casos borde: prefijo v, sufijos pre-release, longitudes distintas.
+        assert_eq!(version_parts("1.2"), vec![1, 2]);
+        assert!(version_parts("v1.2.0") > version_parts("1.2"));
+        assert_eq!(version_parts("v1.0.0-beta"), version_parts("1.0.0"));
+        assert!(version_parts("v0.2.8") > version_parts("v0.2.7"));
+        assert!(!(version_parts("v0.2.7") > version_parts("v0.2.7")));
+    }
+
+    #[test]
+    fn user_path_matches_complete_segments_only() {
+        let cli = r"C:\Program Files\IA Usage Bar\resources\bin";
+        assert!(!path_has_segment("", cli));
+        assert!(path_has_segment(
+            &format!(r"C:\Windows;{cli};C:\Tools"),
+            cli
+        ));
+        assert!(path_has_segment(
+            r"C:\Windows;c:\program files\ia usage bar\resources\bin\",
+            cli
+        ));
+        assert!(!path_has_segment(
+            r"C:\Program Files\IA Usage Bar\resources\binary",
+            cli
+        ));
+    }
+
+    #[test]
+    fn cli_status_resolves_the_installer_resource_contract() {
+        let path = std::path::Path::new(CLI_RESOURCE_RELATIVE_PATH);
+        assert_eq!(path.file_name().unwrap(), "iausage.exe");
+        assert_eq!(
+            path.parent().unwrap(),
+            std::path::Path::new("resources/bin")
+        );
+    }
+
+    #[test]
+    fn adding_cli_path_is_idempotent_and_collapses_duplicates() {
+        let cli = r"C:\Apps\IA Usage Bar\resources\bin";
+        assert_eq!(add_path_segment("", cli), cli);
+        assert_eq!(
+            add_path_segment(&format!(r"C:\Tools;{cli};{cli};"), cli),
+            format!(r"C:\Tools;{cli}")
+        );
+        assert_eq!(
+            add_path_segment(r"C:\Tools;C:\Apps\IA Usage Bar\resources\binary;", cli),
+            format!(r"C:\Tools;C:\Apps\IA Usage Bar\resources\binary;{cli}")
+        );
     }
 
     #[test]
     fn oauth_login_actions_use_the_official_clients() {
-        assert_eq!(provider_login_command(VendorId::Anthropic), Ok(("claude", &[][..])));
-        assert_eq!(provider_login_command(VendorId::Openai), Ok(("codex", &["login"][..])));
+        assert_eq!(
+            provider_login_command(VendorId::Anthropic),
+            Ok(("claude", &[][..]))
+        );
+        assert_eq!(
+            provider_login_command(VendorId::Openai),
+            Ok(("codex", &["login"][..]))
+        );
         assert!(provider_login_command(VendorId::Cursor).is_err());
     }
 
@@ -838,6 +1263,106 @@ mod update_tests {
         assert_eq!(
             super::windows_installer(&release).unwrap().name,
             "IA_Usage_Bar_0.2.2_x64-setup.exe"
+        );
+    }
+
+    #[test]
+    fn updater_installer_selection_is_case_insensitive_and_exe_only() {
+        let release = super::GitHubRelease {
+            tag_name: "v0.2.8".into(),
+            html_url: "https://example.invalid/release".into(),
+            assets: vec![
+                super::ReleaseAsset {
+                    name: "IA-Usage-0.2.8.msi".into(),
+                    browser_download_url: "https://example.invalid/msi".into(),
+                },
+                super::ReleaseAsset {
+                    name: "IA.Usage.Bar_0.2.8_x64-SETUP.EXE".into(),
+                    browser_download_url: "https://example.invalid/exe".into(),
+                },
+            ],
+        };
+        assert_eq!(
+            super::windows_installer(&release).unwrap().name,
+            "IA.Usage.Bar_0.2.8_x64-SETUP.EXE"
+        );
+        let empty = super::GitHubRelease {
+            tag_name: "v0.2.8".into(),
+            html_url: "https://example.invalid/release".into(),
+            assets: vec![super::ReleaseAsset {
+                name: "SHA256SUMS.txt".into(),
+                browser_download_url: "https://example.invalid/sums".into(),
+            }],
+        };
+        assert!(super::windows_installer(&empty).is_err());
+    }
+
+    #[test]
+    fn parses_checksums_with_dots_star_and_invalid_hashes() {
+        let good = "deadbeef".repeat(8);
+        let body = format!(
+            "{good}  IA.Usage.Bar_0.2.8_x64-setup.exe\n{good} *other.exe\nshort  bad.exe\n"
+        );
+        assert_eq!(
+            parse_checksum(&body, "IA.Usage.Bar_0.2.8_x64-setup.exe"),
+            Some(good.clone())
+        );
+        assert_eq!(parse_checksum(&body, "other.exe"), Some(good));
+        assert_eq!(parse_checksum(&body, "missing.exe"), None);
+        assert_eq!(parse_checksum(&body, "bad.exe"), None);
+        // Mayúsculas del checksum se normalizan a minúsculas.
+        let upper = format!("{}  a.exe\n", "ABCDEF01".repeat(8));
+        assert_eq!(parse_checksum(&upper, "a.exe"), Some("abcdef01".repeat(8)));
+    }
+
+    #[test]
+    fn ps_quote_escapes_single_quotes() {
+        let path = std::path::Path::new(r"C:\Users\O'Brien\IA Usage Bar.exe");
+        assert_eq!(ps_quote(path), r"'C:\Users\O''Brien\IA Usage Bar.exe'");
+    }
+
+    #[test]
+    fn sanitize_version_tag_never_escapes_temp_dir() {
+        assert_eq!(sanitize_version_tag("v0.2.8"), "0.2.8");
+        assert_eq!(sanitize_version_tag(""), "unknown");
+        assert!(!sanitize_version_tag("../../evil").contains('/'));
+        assert!(!sanitize_version_tag("../../evil").contains('\\'));
+        assert!(!sanitize_version_tag("a..b").contains(".."));
+    }
+
+    #[test]
+    fn relaunch_script_waits_for_parent_checks_exit_code_and_relaunches() {
+        let installer = std::path::Path::new(r"C:\Temp\iausagebar-update\setup.exe");
+        let exe = std::path::Path::new(r"C:\Program Files\IA Usage Bar\IA Usage Bar.exe");
+        let log = std::path::Path::new(r"C:\Temp\iausagebar-update\updater-0.2.8.log");
+        let script = build_relaunch_ps1(installer, exe, log, 1234);
+        assert!(script.contains("Wait-Process -Id $ParentPid"));
+        assert!(script.contains("$ParentPid = 1234"));
+        assert!(script.contains("-ArgumentList \"/S\""));
+        assert!(script.contains("-PassThru -Wait"));
+        assert!(script.contains("installer exit code:"));
+        assert!(script.contains("Test-Path $App"));
+        // Rutas entrecomilladas con ps_quote, sin secretos.
+        assert!(script.contains("'C:\\Temp\\iausagebar-update\\setup.exe'"));
+        assert!(script.contains("'C:\\Program Files\\IA Usage Bar\\IA Usage Bar.exe'"));
+        assert!(!script.contains("api.github.com"));
+    }
+
+    #[test]
+    fn updater_phases_serialize_to_stable_snake_case() {
+        let phase = serde_json::to_value(UpdaterPhase::Downloading).unwrap();
+        assert_eq!(phase, serde_json::json!("downloading"));
+        assert_eq!(
+            serde_json::to_value(UpdaterPhase::Verifying).unwrap(),
+            serde_json::json!("verifying")
+        );
+        assert_eq!(
+            serde_json::to_value(UpdaterPhase::Preparing).unwrap(),
+            serde_json::json!("preparing")
+        );
+        assert_eq!(
+            serde_json::to_value(UpdaterPhase::Restarting).unwrap(),
+            serde_json::json!("restarting")
         );
     }
 }

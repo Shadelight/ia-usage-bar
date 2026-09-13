@@ -160,7 +160,11 @@ fn fetch_cloud_context(token: &str) -> (String, Option<String>) {
 }
 
 fn project_from(body: &Value) -> Option<String> {
-    json_str(body, &["cloudaicompanionProject", "cloudAiCompanionProject"]).or_else(|| {
+    json_str(
+        body,
+        &["cloudaicompanionProject", "cloudAiCompanionProject"],
+    )
+    .or_else(|| {
         body.pointer("/cloudaicompanionProject")
             .and_then(|value| value.as_str())
             .map(str::to_string)
@@ -208,15 +212,24 @@ fn process_csrf_token() -> Option<String> {
         let script = "Get-CimInstance Win32_Process | Select-Object Name,CommandLine | ConvertTo-Json -Compress";
         let raw = run_hidden("powershell", &["-NoProfile", "-Command", script])?;
         let processes: Value = serde_json::from_str(&raw).ok()?;
-        let candidates = processes.as_array().cloned().unwrap_or_else(|| vec![processes]);
+        let candidates = processes
+            .as_array()
+            .cloned()
+            .unwrap_or_else(|| vec![processes]);
         candidates.iter().find_map(|process| {
-            let name = process.get("Name").and_then(|value| value.as_str()).unwrap_or("");
-            let command = process.get("CommandLine").and_then(|value| value.as_str()).unwrap_or("");
+            let name = process
+                .get("Name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            let command = process
+                .get("CommandLine")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
             let lower = command.to_ascii_lowercase();
             (is_antigravity_process(name) && lower.contains("antigravity")
                 || lower.contains("--app_data_dir antigravity"))
-                .then(|| command_flag(command, "--csrf_token"))
-                .flatten()
+            .then(|| command_flag(command, "--csrf_token"))
+            .flatten()
         })
     }
     #[cfg(not(windows))]
@@ -497,17 +510,23 @@ mod tests {
 
     #[test]
     fn missing_bucket_measurement_is_omitted() {
-        let snapshot = snapshot_from_quota(&serde_json::json!({
-            "plan": "Pro",
-            "groups": [{"displayName": "Gemini", "fiveHour": {}}]
-        }), "Pro");
+        let snapshot = snapshot_from_quota(
+            &serde_json::json!({
+                "plan": "Pro",
+                "groups": [{"displayName": "Gemini", "fiveHour": {}}]
+            }),
+            "Pro",
+        );
         assert!(snapshot.quotas.is_empty());
     }
 
     #[test]
     fn extracts_csrf_token_from_language_server_arguments() {
         assert_eq!(
-            command_flag("language_server --app_data_dir antigravity --csrf_token csrf-123", "--csrf_token"),
+            command_flag(
+                "language_server --app_data_dir antigravity --csrf_token csrf-123",
+                "--csrf_token"
+            ),
             Some("csrf-123".into())
         );
         assert_eq!(

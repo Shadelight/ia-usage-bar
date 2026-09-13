@@ -7,8 +7,9 @@ use crate::config::AppConfig;
 use crate::cost;
 use crate::http::{self, FetchError};
 use crate::model::{
-    json_f64, json_str, progress_pct, snapshot_needs_auth, snapshot_ok, snapshot_with_status, values_line, ProductUsage,
-    ProviderSnapshot, ProviderStatus, ProviderStatusReason, UsageCost, VendorId,
+    json_f64, json_str, progress_pct, snapshot_needs_auth, snapshot_ok, snapshot_with_status,
+    values_line, ProductUsage, ProviderSnapshot, ProviderStatus, ProviderStatusReason, UsageCost,
+    VendorId,
 };
 use crate::paths::claude_dir;
 
@@ -238,11 +239,25 @@ pub fn snapshot_from_json(plan: &str, body: &Value) -> ProviderSnapshot {
     if let Some(ex) = body.get("extra_usage") {
         if let Some((used, limit)) = json_f64(
             ex,
-            &["used_credits", "used_usd", "used", "spent", "amount", "current"],
+            &[
+                "used_credits",
+                "used_usd",
+                "used",
+                "spent",
+                "amount",
+                "current",
+            ],
         )
         .zip(json_f64(
             ex,
-            &["monthly_limit", "limit_usd", "limit", "cap", "max", "budget"],
+            &[
+                "monthly_limit",
+                "limit_usd",
+                "limit",
+                "cap",
+                "max",
+                "budget",
+            ],
         ))
         .filter(|(_, limit)| *limit > 0.0)
         {

@@ -15,7 +15,7 @@ class ProtocolCrypto {
     fun decrypt(blob: EncryptedBlob, passphrase: CharArray): String {
         require(blob.version == SUPPORTED_BLOB_VERSION) { "La versión del blob no es compatible." }
         require(blob.algorithm == SUPPORTED_ALGORITHM) { "El algoritmo del blob no es compatible." }
-        require(passphrase.isNotEmpty()) { "La passphrase es obligatoria." }
+        require(passphrase.isNotEmpty()) { "La frase secreta es obligatoria." }
         val salt = decode(blob.salt, "salt", 16)
         val nonce = decode(blob.nonce, "nonce", 24)
         val ciphertext = decode(blob.ciphertext, "ciphertext", null)
@@ -27,7 +27,7 @@ class ProtocolCrypto {
                 nonce,
                 Key.fromBytes(key),
                 AEAD.Method.XCHACHA20_POLY1305_IETF,
-            ) ?: throw SecurityException("No se pudo descifrar: revisa la passphrase.")
+            ) ?: throw SecurityException("No se pudo descifrar: revisa la frase secreta.")
         } finally {
             passphrase.fill('\u0000')
         }

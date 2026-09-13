@@ -104,17 +104,27 @@ pub(crate) fn ensure_sync_server(app: &AppHandle) {
             let state = handle.state::<AppState>();
             let snaps = lock_or_recover(&state.snapshots).clone();
             let catalog = lock_or_recover(&state.catalog).clone();
-            let snapshot = crate::snapshot_v1::build(&snaps, &catalog, now_iso(), Some(version.clone()));
-            Ok(crate::sync::build_payload(device.clone(), now_iso(), snapshot))
+            let snapshot =
+                crate::snapshot_v1::build(&snaps, &catalog, now_iso(), Some(version.clone()));
+            Ok(crate::sync::build_payload(
+                device.clone(),
+                now_iso(),
+                snapshot,
+            ))
         })
     };
     let stop = server.stop.clone();
     let addr = serve_cfg.addr();
     let lan = serve_cfg.lan;
     let handle = std::thread::spawn(move || {
-        if let Err(error) =
-            crate::sync_server::run_server(&serve_cfg, &app_version, &device_id, supplier, &passphrase, stop)
-        {
+        if let Err(error) = crate::sync_server::run_server(
+            &serve_cfg,
+            &app_version,
+            &device_id,
+            supplier,
+            &passphrase,
+            stop,
+        ) {
             eprintln!("sync server stopped with error: {error}");
         }
     });

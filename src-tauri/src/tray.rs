@@ -3,9 +3,7 @@
 //! En Windows la bandeja no muestra texto al lado del icono (como en macOS),
 //! asi que "pintamos" el numero dentro del propio icono.
 
-use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
 use std::collections::HashMap;
-use std::sync::OnceLock;
 use tauri::image::Image;
 use tauri::menu::CheckMenuItem;
 use tauri::{AppHandle, Manager};
@@ -14,34 +12,6 @@ use crate::model::{Dashboard, ProviderSnapshot, VendorInfo};
 use crate::state::TrayMenuState;
 
 const SIZE: u32 = 32;
-
-static FONT: OnceLock<Option<FontVec>> = OnceLock::new();
-
-fn font() -> Option<&'static FontVec> {
-    FONT.get_or_init(|| {
-        // Fuentes del sistema de Windows (negrita para legibilidad pequena).
-        let font_dir = std::env::var_os("WINDIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
-            .join("Fonts");
-        let candidates = [
-            "segoeuib.ttf",
-            "arialbd.ttf",
-            "seguisb.ttf",
-            "segoeui.ttf",
-            "arial.ttf",
-        ];
-        for c in candidates.map(|name| font_dir.join(name)) {
-            if let Ok(bytes) = std::fs::read(c) {
-                if let Ok(f) = FontVec::try_from_vec(bytes) {
-                    return Some(f);
-                }
-            }
-        }
-        None
-    })
-    .as_ref()
-}
 
 #[inline]
 fn blend(buf: &mut [u8], x: i32, y: i32, color: [u8; 3], alpha: f32) {
@@ -89,8 +59,8 @@ fn stroke_ring(buf: &mut [u8], color: [u8; 3], r: f32, width: f32) {
     }
 }
 
-/// Rectangulo redondeado relleno (SDF con antialias de ~1px), usado para el
-/// glifo de "sin datos" (3 barras — icono de marca, sin numero que mostrar).
+/// Rectangulo redondeado relleno (SDF con antialias de ~1px), compartido por
+/// la barra del small mark y la tipografia numerica minima del tray.
 fn fill_rounded_rect(buf: &mut [u8], color: [u8; 3], x: f32, y: f32, w: f32, h: f32, r: f32) {
     let cx = x + w / 2.0;
     let cy = y + h / 2.0;
@@ -109,18 +79,80 @@ fn fill_rounded_rect(buf: &mut [u8], color: [u8; 3], x: f32, y: f32, w: f32, h: 
     }
 }
 
-/// Glifo de marca: 3 barras de cuota (alturas media/alta/media-baja), sin
-/// fondo, en blanco puro para contraste — usado cuando aun no hay datos.
-fn draw_bars_glyph(buf: &mut [u8]) {
-    let s = SIZE as f32 / 100.0;
-    let bars: [(f32, f32, f32); 3] = [
-        // (x, y, h) en el espacio de diseno 0..100; ancho fijo 14, rx 4.
-        (19.0, 46.0, 30.0),
-        (43.0, 34.0, 42.0),
-        (67.0, 54.0, 22.0),
-    ];
-    for (x, y, h) in bars {
-        fill_rounded_rect(buf, [255, 255, 255], x * s, y * s, 14.0 * s, h * s, 4.0 * s);
+/// Segmento redondeado antialias. Permite dibujar el small mark oficial sin
+/// depender de un raster que Windows pueda escalar de forma distinta.
+fn stroke_segment(buf: &mut [u8], color: [u8; 3], a: (f32, f32), b: (f32, f32), width: f32) {
+    let vx = b.0 - a.0;
+    let vy = b.1 - a.1;
+    let length_sq = vx * vx + vy * vy;
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let t = (((px - a.0) * vx + (py - a.1) * vy) / length_sq).clamp(0.0, 1.0);
+            let dx = px - (a.0 + t * vx);
+            let dy = py - (a.1 + t * vy);
+            let distance = (dx * dx + dy * dy).sqrt();
+            let coverage = (width / 2.0 - distance + 0.5).clamp(0.0, 1.0);
+            blend(buf, x as i32, y as i32, color, coverage);
+        }
+    }
+}
+
+/// Small mark monocromatico: I + A con una sola barra. Se mantiene simple para
+/// que sobreviva cuando Windows reduce el bitmap de 32 px a 16–24 px.
+fn draw_small_mark(buf: &mut [u8]) {
+    let white = [245, 245, 245];
+    stroke_segment(buf, white, (7.0, 8.5), (7.0, 23.5), 4.0);
+    stroke_segment(buf, white, (11.5, 23.5), (18.0, 7.5), 4.0);
+    stroke_segment(buf, white, (18.0, 7.5), (26.0, 23.5), 4.0);
+    fill_rounded_rect(buf, white, 14.0, 16.5, 8.0, 3.0, 1.0);
+}
+
+const DIGITS_3X5: [[u8; 5]; 10] = [
+    [0b111, 0b101, 0b101, 0b101, 0b111],
+    [0b010, 0b110, 0b010, 0b010, 0b111],
+    [0b111, 0b001, 0b111, 0b100, 0b111],
+    [0b111, 0b001, 0b111, 0b001, 0b111],
+    [0b101, 0b101, 0b111, 0b001, 0b001],
+    [0b111, 0b100, 0b111, 0b001, 0b111],
+    [0b111, 0b100, 0b111, 0b101, 0b111],
+    [0b111, 0b001, 0b010, 0b010, 0b010],
+    [0b111, 0b101, 0b111, 0b101, 0b111],
+    [0b111, 0b101, 0b111, 0b001, 0b111],
+];
+
+fn draw_usage_number(buf: &mut [u8], percent: f64) {
+    let value = percent.round().clamp(0.0, 100.0) as u32;
+    let digits: Vec<usize> = value
+        .to_string()
+        .bytes()
+        .map(|digit| (digit - b'0') as usize)
+        .collect();
+    let pixel = if digits.len() == 3 { 1.65 } else { 2.2 };
+    let gap = pixel * 0.55;
+    let digit_width = pixel * 3.0;
+    let total_width = digit_width * digits.len() as f32 + gap * (digits.len() - 1) as f32;
+    let origin_x = (SIZE as f32 - total_width) / 2.0;
+    let origin_y = (SIZE as f32 - pixel * 5.0) / 2.0;
+
+    for (index, digit) in digits.into_iter().enumerate() {
+        let digit_x = origin_x + index as f32 * (digit_width + gap);
+        for (row, bits) in DIGITS_3X5[digit].iter().enumerate() {
+            for column in 0..3 {
+                if *bits & (1_u8 << (2 - column)) != 0 {
+                    fill_rounded_rect(
+                        buf,
+                        [245, 245, 245],
+                        digit_x + column as f32 * pixel,
+                        origin_y + row as f32 * pixel,
+                        pixel * 0.82,
+                        pixel * 0.82,
+                        0.35,
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -137,69 +169,17 @@ fn severity_color(util: f64) -> [u8; 3] {
     }
 }
 
-fn draw_text(buf: &mut [u8], text: &str, font: &FontVec) {
-    let max_w = SIZE as f32 - 4.0;
-    // Tamano base; se reduce si el texto es muy ancho (ej "100").
-    let mut px = 22.0_f32;
-    for _ in 0..6 {
-        let scaled = font.as_scaled(PxScale::from(px));
-        let total: f32 = text
-            .chars()
-            .map(|c| scaled.h_advance(font.glyph_id(c)))
-            .sum();
-        if total <= max_w {
-            break;
-        }
-        px *= max_w / total;
-    }
-
-    let scaled = font.as_scaled(PxScale::from(px));
-    let total_w: f32 = text
-        .chars()
-        .map(|c| scaled.h_advance(font.glyph_id(c)))
-        .sum();
-    let ascent = scaled.ascent();
-    let descent = scaled.descent();
-    let text_h = ascent - descent;
-    let baseline_y = (SIZE as f32 - text_h) / 2.0 + ascent;
-    let mut pen_x = (SIZE as f32 - total_w) / 2.0;
-
-    for c in text.chars() {
-        let id = font.glyph_id(c);
-        let glyph =
-            id.with_scale_and_position(PxScale::from(px), ab_glyph::point(pen_x, baseline_y));
-        if let Some(outline) = font.outline_glyph(glyph) {
-            let bb = outline.px_bounds();
-            outline.draw(|gx, gy, cov| {
-                let x = bb.min.x as i32 + gx as i32;
-                let y = bb.min.y as i32 + gy as i32;
-                blend(buf, x, y, [255, 255, 255], cov);
-            });
-        }
-        pen_x += scaled.h_advance(id);
-    }
-}
-
-/// Crea el icono. `percent` = utilizacion de la sesion (0-100) o None si no hay
-/// datos todavia.
+/// Sin datos muestra el small mark mono. Con datos prioriza la utilidad: valor
+/// redondeado al centro y anillo de severidad; el porcentaje exacto queda en el
+/// tooltip.
 pub fn render(percent: Option<f64>) -> Image<'static> {
     let mut buf = vec![0u8; (SIZE * SIZE * 4) as usize];
-
-    let Some(p) = percent else {
-        // Sin datos todavia (ningun proveedor activo/respondido): el glifo de
-        // marca (3 barras), sin fondo ni numero que mostrar.
-        draw_bars_glyph(&mut buf);
-        return Image::new_owned(buf, SIZE, SIZE);
-    };
-    let p = p.clamp(0.0, 100.0);
-    let ring = severity_color(p);
-    let txt = format!("{}", p.round() as i64);
-
-    // Centro oscuro translucido + anillo de color + numero en blanco.
-    fill_circle(&mut buf, [20, 24, 38], 0.92, 15.0);
-    stroke_ring(&mut buf, ring, 13.8, 2.4);
-    if let Some(f) = font() {
-        draw_text(&mut buf, &txt, f);
+    fill_circle(&mut buf, [24, 24, 27], 0.97, 15.0);
+    if let Some(value) = percent {
+        stroke_ring(&mut buf, severity_color(value), 13.8, 2.2);
+        draw_usage_number(&mut buf, value);
+    } else {
+        draw_small_mark(&mut buf);
     }
 
     Image::new_owned(buf, SIZE, SIZE)
@@ -268,8 +248,13 @@ pub(crate) fn on_tray_left_click(app: &AppHandle, x: f64, y: f64) {
     }
 }
 
+/// Native Windows tray tooltip: plain text, no styling, proportional font
+/// (so column alignment via spaces would not actually line up). The only
+/// levers available are line breaks and ordering, so each provider gets its
+/// own row under a short title instead of one crowded "CLD 65% · CDX 18%"
+/// line.
 pub(crate) fn tooltip(dash: &Dashboard) -> String {
-    let bits: Vec<String> = dash
+    let rows: Vec<String> = dash
         .providers
         .iter()
         .filter(|p| p.is_connected())
@@ -279,10 +264,10 @@ pub(crate) fn tooltip(dash: &Dashboard) -> String {
         })
         .take(4)
         .collect();
-    let full = if bits.is_empty() {
-        "IA Usage Bar".into()
+    let full = if rows.is_empty() {
+        "IA Usage".into()
     } else {
-        format!("IA Usage Bar — {}", bits.join(" · "))
+        format!("IA Usage\n\n{}", rows.join("\n"))
     };
     // Windows truncates long tray tooltips; cut elegantly ourselves.
     const MAX_TOOLTIP: usize = 128;
@@ -305,7 +290,10 @@ pub(crate) fn header_text(enabled_count: usize) -> String {
 /// One submenu line per ENABLED vendor (activar != conectado): percent
 /// when there is data, otherwise a short actionable state. Pure function
 /// so the wording is unit-tested, not eyeballed.
-pub(crate) fn provider_menu_text(vendor: &VendorInfo, snapshot: Option<&ProviderSnapshot>) -> String {
+pub(crate) fn provider_menu_text(
+    vendor: &VendorInfo,
+    snapshot: Option<&ProviderSnapshot>,
+) -> String {
     const SEP: &str = "  ·  ";
     match snapshot {
         Some(s) if s.is_connected() => match s.primary_utilization {
@@ -315,7 +303,9 @@ pub(crate) fn provider_menu_text(vendor: &VendorInfo, snapshot: Option<&Provider
         Some(s) => {
             let state = match s.status {
                 crate::model::ProviderStatus::NeedsAuth => {
-                    if s.status_reason == Some(crate::model::ProviderStatusReason::InvalidCredential) {
+                    if s.status_reason
+                        == Some(crate::model::ProviderStatusReason::InvalidCredential)
+                    {
                         "Sesión no válida"
                     } else if !vendor.has_credential && vendor.needs_key {
                         "Falta API key"
@@ -518,7 +508,10 @@ mod tests {
         let claude = test_vendor(VendorId::Anthropic, true, true);
         let mut connected = snapshot_ok(VendorId::Anthropic, "Max", vec![]);
         connected.primary_utilization = Some(92.4);
-        assert_eq!(provider_menu_text(&claude, Some(&connected)), "Claude Code  ·  92%");
+        assert_eq!(
+            provider_menu_text(&claude, Some(&connected)),
+            "Claude Code  ·  92%"
+        );
 
         let deepseek = test_vendor(VendorId::Deepseek, true, false);
         let missing = snapshot_with_status(
@@ -527,7 +520,10 @@ mod tests {
             ProviderStatusReason::MissingCredential,
             "",
         );
-        assert_eq!(provider_menu_text(&deepseek, Some(&missing)), "DeepSeek  ·  Falta API key");
+        assert_eq!(
+            provider_menu_text(&deepseek, Some(&missing)),
+            "DeepSeek  ·  Falta API key"
+        );
 
         let invalid = snapshot_with_status(
             VendorId::Anthropic,
@@ -541,7 +537,10 @@ mod tests {
         );
 
         // Enabled without data and without credential: actionable, not blank.
-        assert_eq!(provider_menu_text(&deepseek, None), "DeepSeek  ·  Falta API key");
+        assert_eq!(
+            provider_menu_text(&deepseek, None),
+            "DeepSeek  ·  Falta API key"
+        );
     }
 
     #[test]

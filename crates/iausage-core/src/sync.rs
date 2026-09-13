@@ -18,7 +18,7 @@ use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::config::{atomic_write, AppConfig, SYNC_PASSPHRASE_ACCOUNT};
+use crate::config::{atomic_write, read_keyring_entry, AppConfig, SYNC_PASSPHRASE_ACCOUNT};
 use crate::paths::{app_config_dir, sync_device_path};
 use crate::snapshot_v1::DashboardSnapshotV1;
 use crate::SNAPSHOT_SCHEMA_VERSION;
@@ -184,10 +184,12 @@ fn sync_entry() -> Result<keyring::Entry, String> {
 }
 
 /// Guarda la passphrase de sync en el Credential Manager. Vacía = olvidar.
+/// Usa el lector tolerante al NUL final de Windows (igual que las API keys):
+/// `get_password()` puede fallar aunque la credencial exista.
 pub fn store_passphrase(value: &str) -> Result<(), String> {
     let entry = sync_entry()?;
     if value.trim().is_empty() {
-        if entry.get_password().is_ok() {
+        if read_keyring_entry(&entry).is_some() {
             entry.delete_credential().map_err(|e| e.to_string())?;
         }
     } else {
@@ -199,17 +201,20 @@ pub fn store_passphrase(value: &str) -> Result<(), String> {
 /// Solo responde si hay passphrase guardada, nunca su valor.
 pub fn has_passphrase() -> bool {
     sync_entry()
-        .and_then(|e| e.get_password().map_err(|e| e.to_string()))
-        .map(|v| !v.trim().is_empty())
+        .ok()
+        .and_then(|entry| read_keyring_entry(&entry))
+        .map(|value| !value.trim().is_empty())
         .unwrap_or(false)
 }
 
 pub fn load_passphrase() -> Result<String, String> {
-    let pw = sync_entry()?.get_password().map_err(|e| e.to_string())?;
-    if pw.trim().is_empty() {
-        return Err("sync: no hay passphrase guardada".into());
+    let entry = sync_entry()?;
+    let value = read_keyring_entry(&entry)
+        .ok_or_else(|| "sync: no hay frase secreta guardada".to_string())?;
+    if value.trim().is_empty() {
+        return Err("sync: no hay frase secreta guardada".into());
     }
-    Ok(pw)
+    Ok(value)
 }
 
 /// Carpeta del blob. Por defecto `<config-dir>/ia-sync`; el usuario la

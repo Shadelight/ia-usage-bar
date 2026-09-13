@@ -1,4 +1,4 @@
-//! `iausage`: CLI de IA Usage Bar sobre el mismo pipeline que la GUI.
+//! `iausage`: CLI de IA Usage sobre el mismo pipeline que la GUI.
 //!
 //! ```powershell
 //! iausage usage --json
@@ -93,7 +93,13 @@ fn print_usage_human(snaps: &HashMap<String, ProviderSnapshot>, only: Option<&st
         } else {
             "sin conexión"
         };
-        println!("{} — {} ({}){}", s.name, s.plan, state, if s.stale { " [antiguo]" } else { "" });
+        println!(
+            "{} — {} ({}){}",
+            s.name,
+            s.plan,
+            state,
+            if s.stale { " [antiguo]" } else { "" }
+        );
         for q in &s.quotas {
             let used = q.used_percent.map(fmt_pct).unwrap_or_else(|| "—".into());
             let reset = q.reset_at.as_deref().unwrap_or("sin reset");
@@ -175,8 +181,7 @@ fn cmd_providers(args: &[String]) -> ExitCode {
     catalog.sort_by(|a, b| a.id.cmp(&b.id));
     for v in &catalog {
         let d = descriptor(snapshot_v1::parse_id(&v.id).unwrap_or(VendorId::Anthropic));
-        let strategies: Vec<&str> =
-            d.strategies.iter().map(|s| s.label()).collect();
+        let strategies: Vec<&str> = d.strategies.iter().map(|s| s.label()).collect();
         let pref: String = cfg
             .source_preference(snapshot_v1::parse_id(&v.id).unwrap_or(VendorId::Anthropic))
             .map(|s: FetchStrategyKind| format!(" [fuente: {}]", s.label()))
@@ -211,7 +216,8 @@ fn cmd_best(args: &[String]) -> ExitCode {
         }
         Some((id, name, left)) => {
             if json {
-                let v = serde_json::json!({"best": {"id": id, "name": name, "remainingPercent": left}});
+                let v =
+                    serde_json::json!({"best": {"id": id, "name": name, "remainingPercent": left}});
                 println!("{}", serde_json::to_string_pretty(&v).unwrap());
             } else {
                 println!("{name} ({id}): {:.0}% disponible", left);
@@ -264,7 +270,11 @@ fn cmd_doctor(args: &[String]) -> ExitCode {
             }
         }
     }
-    if ok_all { ExitCode::SUCCESS } else { ExitCode::from(1) }
+    if ok_all {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
 }
 
 fn cmd_refresh(args: &[String]) -> ExitCode {
@@ -324,7 +334,10 @@ fn cmd_watch(args: &[String]) -> ExitCode {
     }
     let root = watch::codex_sessions_dir();
     if !root.is_dir() {
-        return fail(&format!("watch: no existe el directorio de sesiones Codex ({})", root.display()));
+        return fail(&format!(
+            "watch: no existe el directorio de sesiones Codex ({})",
+            root.display()
+        ));
     }
 
     let (cfg, mut snapshots) = load_state(false, None);
@@ -356,9 +369,17 @@ fn cmd_watch(args: &[String]) -> ExitCode {
     }
 }
 
-fn emit_watch_snapshot(source: &str, cfg: &AppConfig, snapshots: &HashMap<String, ProviderSnapshot>) {
-    let snapshot: serde_json::Value = serde_json::from_str(&snapshot_v1_json(cfg, snapshots)).unwrap_or_else(|_| serde_json::json!({}));
-    println!("{}", serde_json::json!({ "type": "snapshot", "source": source, "snapshot": snapshot }));
+fn emit_watch_snapshot(
+    source: &str,
+    cfg: &AppConfig,
+    snapshots: &HashMap<String, ProviderSnapshot>,
+) {
+    let snapshot: serde_json::Value = serde_json::from_str(&snapshot_v1_json(cfg, snapshots))
+        .unwrap_or_else(|_| serde_json::json!({}));
+    println!(
+        "{}",
+        serde_json::json!({ "type": "snapshot", "source": source, "snapshot": snapshot })
+    );
 }
 
 fn cmd_guard(args: &[String]) -> ExitCode {
@@ -396,11 +417,17 @@ fn cmd_guard(args: &[String]) -> ExitCode {
     let (_cfg, snaps) = load_state(false, None);
     match guard::evaluate(snaps.get(&p), window.as_deref(), min_remaining) {
         guard::GuardVerdict::Ok { remaining } => {
-            println!("OK: {p} tiene {:.0}% disponible (mínimo {min_remaining:.0}%).", remaining);
+            println!(
+                "OK: {p} tiene {:.0}% disponible (mínimo {min_remaining:.0}%).",
+                remaining
+            );
             ExitCode::from(guard::EXIT_OK as u8)
         }
         guard::GuardVerdict::Below { remaining, min } => {
-            println!("BAJO LÍMITE: {p} tiene {:.0}% disponible (mínimo {min:.0}%).", remaining);
+            println!(
+                "BAJO LÍMITE: {p} tiene {:.0}% disponible (mínimo {min:.0}%).",
+                remaining
+            );
             ExitCode::from(guard::EXIT_BELOW as u8)
         }
         guard::GuardVerdict::Unavailable { reason } => {
@@ -423,8 +450,12 @@ fn cmd_config(args: &[String]) -> ExitCode {
             warnings += 1;
         }
     }
-    if !(1..=30).contains(&cfg.refresh_minutes) && ![1, 2, 5, 15, 30].contains(&cfg.refresh_minutes) {
-        eprintln!("aviso: refresh_minutes fuera de rango: {}", cfg.refresh_minutes);
+    if !(1..=30).contains(&cfg.refresh_minutes) && ![1, 2, 5, 15, 30].contains(&cfg.refresh_minutes)
+    {
+        eprintln!(
+            "aviso: refresh_minutes fuera de rango: {}",
+            cfg.refresh_minutes
+        );
         warnings += 1;
     }
     if warnings == 0 {
@@ -792,7 +823,10 @@ fn main() -> ExitCode {
         "config" => cmd_config(&argv[1..]),
         "sync" => cmd_sync(&argv[1..]),
         "version" | "--version" | "-V" => {
-            println!("iausage {VERSION} (snapshot v{})", iausage_core::SNAPSHOT_SCHEMA_VERSION);
+            println!(
+                "iausage {VERSION} (snapshot v{})",
+                iausage_core::SNAPSHOT_SCHEMA_VERSION
+            );
             ExitCode::SUCCESS
         }
         other => fail(&format!("comando desconocido {other}")),

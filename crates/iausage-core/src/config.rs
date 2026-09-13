@@ -249,12 +249,18 @@ impl AppConfig {
 /// trailing NUL, which fails get_password()'s strict UTF-8 decode even
 /// though the credential was written correctly. keyring-rs's own docs point
 /// at get_secret() as the fallback for exactly this case.
-fn read_keyring_entry(entry: &keyring::Entry) -> Option<String> {
+pub(crate) fn read_keyring_entry(entry: &keyring::Entry) -> Option<String> {
     if let Ok(value) = entry.get_password() {
         return Some(value);
     }
     let secret = entry.get_secret().ok()?;
-    Some(String::from_utf8_lossy(&secret).trim_end_matches('\0').to_string())
+    Some(decode_keyring_secret(&secret))
+}
+
+fn decode_keyring_secret(secret: &[u8]) -> String {
+    String::from_utf8_lossy(secret)
+        .trim_end_matches('\0')
+        .to_string()
 }
 
 /// Reads a credential from the OS keyring only. It never falls back to an
@@ -269,8 +275,9 @@ pub fn keyring_api_key(id: VendorId) -> Option<String> {
 /// environment variable must not hide a failed keyring round-trip.
 pub fn verify_keyring_api_key(id: VendorId, expected: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(CREDENTIAL_SERVICE, id.slug()).map_err(|e| e.to_string())?;
-    let stored = read_keyring_entry(&entry)
-        .ok_or_else(|| "La credencial se escribió pero no pudo recuperarse del almacén seguro".to_string())?;
+    let stored = read_keyring_entry(&entry).ok_or_else(|| {
+        "La credencial se escribió pero no pudo recuperarse del almacén seguro".to_string()
+    })?;
     if stored.trim().is_empty() || stored.trim() != expected.trim() {
         return Err("La credencial guardada no coincide con la que se escribió".into());
     }
@@ -280,7 +287,10 @@ pub fn verify_keyring_api_key(id: VendorId, expected: &str) -> Result<(), String
 pub fn store_api_key(id: VendorId, value: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(CREDENTIAL_SERVICE, id.slug()).map_err(|e| e.to_string())?;
     if value.trim().is_empty() {
-        if entry.get_password().is_ok() {
+        // Misma guarda NUL que en sync: get_password() puede fallar aunque
+        // la credencial exista, así que la existencia se comprueba con el
+        // lector tolerante antes de borrar.
+        if read_keyring_entry(&entry).is_some() {
             entry.delete_credential().map_err(|e| e.to_string())?;
         }
     } else {
@@ -451,6 +461,16 @@ mod tests {
         let cfg = AppConfig::default();
         assert!(cfg.always_on_top, "window has always opened always-on-top");
         assert!(!cfg.compact_mode);
+    }
+
+    #[test]
+    fn keyring_secret_decoder_tolerates_windows_nul_padding() {
+        assert_eq!(
+            decode_keyring_secret(b"cuatro-palabras-123\0"),
+            "cuatro-palabras-123"
+        );
+        assert_eq!(decode_keyring_secret(b"sk-abc123\0\0"), "sk-abc123");
+        assert_eq!(decode_keyring_secret(b"plain"), "plain");
     }
 
     #[test]

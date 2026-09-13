@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ia_usage_background">#18181B</color>
+    <color name="ia_usage_surface">#202023</color>
+    <color name="ia_usage_primary">#FF7043</color>
+    <color name="ia_usage_text">#F5F5F5</color>
+    <color name="ia_usage_muted">#71717A</color>
+    <color name="ia_usage_data">#34D399</color>
+</resources>

@@ -136,7 +136,9 @@ fn fetch_kimi(token: &str) -> Result<ProviderSnapshot, FetchError> {
     if let Some((w, pct)) = body
         .get("five_hour")
         .or_else(|| body.get("rate_limit"))
-        .and_then(|value| json_f64(value, &["utilization", "usedPercent", "percent"]).map(|pct| (value, pct)))
+        .and_then(|value| {
+            json_f64(value, &["utilization", "usedPercent", "percent"]).map(|pct| (value, pct))
+        })
     {
         let reset = json_str(w, &["resets_at", "resetAt"]);
         lines.push(progress_pct(
@@ -172,7 +174,9 @@ fn fetch_supergrok(key: &str) -> Result<ProviderSnapshot, FetchError> {
     if let Some((w, pct)) = body
         .get("weekly")
         .or_else(|| body.get("included"))
-        .and_then(|value| json_f64(value, &["percent", "utilization", "usedPercent"]).map(|pct| (value, pct)))
+        .and_then(|value| {
+            json_f64(value, &["percent", "utilization", "usedPercent"]).map(|pct| (value, pct))
+        })
     {
         let reset = json_str(w, &["resets_at", "resetAt"]);
         lines.push(progress_pct(
@@ -274,9 +278,13 @@ fn fetch_nous(token: &str) -> Result<ProviderSnapshot, FetchError> {
         &[("Authorization", &format!("Bearer {token}"))],
     )?;
     let mut lines = Vec::new();
-    if let Some((monthly, remaining)) = json_f64(&body, &["monthly_credits", "subscription_credits"])
-        .zip(json_f64(&body, &["subscription_credits_remaining", "remaining"]))
-        .filter(|(monthly, _)| *monthly > 0.0)
+    if let Some((monthly, remaining)) =
+        json_f64(&body, &["monthly_credits", "subscription_credits"])
+            .zip(json_f64(
+                &body,
+                &["subscription_credits_remaining", "remaining"],
+            ))
+            .filter(|(monthly, _)| *monthly > 0.0)
     {
         lines.push(progress_pct(
             "sub",

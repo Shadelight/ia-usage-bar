@@ -1,6 +1,6 @@
 # IA Usage para Android
 
-El módulo `android/` es el visor móvil de IA Usage Bar. No contiene claves de
+El módulo `android/` es el visor móvil de IA Usage. No contiene claves de
 proveedores, cookies ni sesiones: solo obtiene y abre localmente el blob M5
 que el PC ya cifra.
 

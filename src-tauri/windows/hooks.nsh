@@ -1,4 +1,4 @@
-; IA Usage Bar — NSIS uninstall extension.
+; IA Usage — NSIS uninstall extension.
 ;
 ; Included via bundle.windows.nsis.installerHooks (NOT a template fork:
 ; the stock Tauri installer.nsi stays untouched, so Tauri upgrades keep
@@ -21,12 +21,74 @@
 ;   Google/external credentials, or anything outside IA Usage.
 
 ; The CLI is bundled by Tauri at $INSTDIR\resources\bin\iausage.exe. Add
-; exactly that per-user directory, never the machine PATH. StrFunc is shipped
-; with NSIS and lets updates avoid duplicate entries.
+; exactly that per-user directory, never the machine PATH. Both install and
+; uninstall compare complete semicolon-delimited segments: `bin` must never
+; match `binary`, and an update must never append a duplicate.
 !include "LogicLib.nsh"
-!include "StrFunc.nsh"
 !include "WinMessages.nsh"
-${StrStr}
+
+Function AddCliToPath
+  ReadRegStr $0 HKCU "Environment" "Path"
+  StrCpy $6 $0
+  StrCpy $1 "$INSTDIR\resources\bin"
+  StrCpy $2 ""
+  StrCpy $3 ""
+  StrCpy $5 "0"
+
+path_add_next:
+  StrCpy $4 $0 1
+  StrCmp $4 "" path_add_finish
+  StrCmp $4 ";" path_add_boundary
+  StrCpy $3 "$3$4"
+  StrCpy $0 $0 "" 1
+  Goto path_add_next
+
+path_add_boundary:
+  StrCmp $3 "" path_add_advance
+  StrCmp $3 $1 path_add_target path_add_other
+path_add_target:
+  StrCmp $5 "1" path_add_advance
+  StrCpy $3 $1
+  StrCpy $5 "1"
+path_add_other:
+  StrCmp $2 "" path_add_first path_add_more
+path_add_first:
+  StrCpy $2 "$3"
+  Goto path_add_advance
+path_add_more:
+  StrCpy $2 "$2;$3"
+path_add_advance:
+  StrCpy $3 ""
+  StrCpy $0 $0 "" 1
+  Goto path_add_next
+
+path_add_finish:
+  StrCmp $3 "" path_add_missing
+  StrCmp $3 $1 path_add_last_target path_add_last_other
+path_add_last_target:
+  StrCmp $5 "1" path_add_write
+  StrCpy $3 $1
+  StrCpy $5 "1"
+path_add_last_other:
+  StrCmp $2 "" path_add_last_first path_add_last_more
+path_add_last_first:
+  StrCpy $2 "$3"
+  Goto path_add_missing
+path_add_last_more:
+  StrCpy $2 "$2;$3"
+path_add_missing:
+  StrCmp $5 "1" path_add_write
+  StrCmp $2 "" path_add_only path_add_append
+path_add_only:
+  StrCpy $2 "$1"
+  Goto path_add_write
+path_add_append:
+  StrCpy $2 "$2;$1"
+path_add_write:
+  StrCmp $2 $6 path_add_done
+  WriteRegExpandStr HKCU "Environment" "Path" "$2"
+path_add_done:
+FunctionEnd
 
 ; StrFunc only ships the install-section version of StrRep in the NSIS
 ; distribution used by Tauri. Keep the uninstall self-contained: split the
@@ -75,16 +137,13 @@ FunctionEnd
 
 !macro NSIS_HOOK_POSTINSTALL
   SetShellVarContext current
-  ReadRegStr $0 HKCU "Environment" "Path"
-  ${StrStr} $1 "$0" "$INSTDIR\resources\bin"
-  ${If} $1 == ""
-    ${If} $0 == ""
-      WriteRegExpandStr HKCU "Environment" "Path" "$INSTDIR\resources\bin"
-    ${Else}
-      WriteRegExpandStr HKCU "Environment" "Path" "$0;$INSTDIR\resources\bin"
-    ${EndIf}
-    SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
-  ${EndIf}
+  IfFileExists "$INSTDIR\resources\bin\iausage.exe" cli_file_present cli_file_missing
+cli_file_missing:
+  DetailPrint "ERROR: bundled IA Usage CLI is missing"
+  Abort "IA Usage CLI no fue incluido en el instalador. La instalación no puede continuar."
+cli_file_present:
+  Call AddCliToPath
+  SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL

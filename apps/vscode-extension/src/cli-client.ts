@@ -2,8 +2,11 @@ import { ChildProcessWithoutNullStreams, execFile, spawn } from "node:child_proc
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import * as vscode from "vscode";
+import { t } from "./i18n";
 import { settings } from "./settings";
 import { WatchMessage } from "./types";
+
+export type CliErrorKind = "cli-not-found" | "generic";
 
 export class CliClient implements vscode.Disposable {
   private process?: ChildProcessWithoutNullStreams;
@@ -11,7 +14,7 @@ export class CliClient implements vscode.Disposable {
   private restartTimer?: NodeJS.Timeout;
   private stopped = false;
 
-  constructor(private readonly onSnapshot: (message: WatchMessage) => void, private readonly onError: (message: string) => void) {}
+  constructor(private readonly onSnapshot: (message: WatchMessage) => void, private readonly onError: (message: string, kind: CliErrorKind) => void) {}
 
   start(): void {
     this.stopped = false;
@@ -19,22 +22,22 @@ export class CliClient implements vscode.Disposable {
     const config = settings();
     const executable = resolveExecutable(config.cliPath);
     if (!executable) {
-      this.onError(notFoundMessage());
+      this.onError(t("error.cliNotFound"), "cli-not-found");
       return;
     }
     try {
       this.process = spawn(executable, ["watch", "--jsonl", "--poll-seconds", String(config.remotePollSeconds)], { windowsHide: true });
     } catch (error) {
-      this.onError(`IA Usage: no se pudo iniciar el CLI (${String(error)}).`);
+      this.onError(t("error.cliStartFailed", { error: String(error) }), "generic");
       return;
     }
     this.process.stdout.on("data", (chunk: Buffer) => this.consume(chunk.toString("utf8")));
-    this.process.stderr.on("data", (chunk: Buffer) => this.onError(`IA Usage CLI: ${chunk.toString("utf8").trim()}`));
-    this.process.on("error", () => this.onError(notFoundMessage()));
+    this.process.stderr.on("data", (chunk: Buffer) => this.onError(`IA Usage CLI: ${chunk.toString("utf8").trim()}`, "generic"));
+    this.process.on("error", () => this.onError(t("error.cliNotFound"), "cli-not-found"));
     this.process.on("exit", (code) => {
       this.process = undefined;
       if (!this.stopped) {
-        this.onError(`IA Usage: el stream terminó (${code ?? "desconocido"}); reintentando.`);
+        this.onError(t("error.streamEnded", { code: code ?? "?" }), "generic");
         this.restartTimer = setTimeout(() => this.start(), 5_000);
       }
     });
@@ -42,7 +45,7 @@ export class CliClient implements vscode.Disposable {
 
   refresh(): Promise<void> {
     const executable = resolveExecutable(settings().cliPath);
-    if (!executable) return Promise.reject(new Error(notFoundMessage()));
+    if (!executable) return Promise.reject(new Error(t("error.cliNotFound")));
     return new Promise((resolve, reject) => execFile(executable, ["refresh"], { windowsHide: true }, (error) => {
       if (error) reject(error); else { this.start(); resolve(); }
     }));
@@ -58,7 +61,7 @@ export class CliClient implements vscode.Disposable {
         const message = JSON.parse(line) as WatchMessage;
         if (message.type === "snapshot" && message.snapshot?.schemaVersion === 1) this.onSnapshot(message);
       } catch {
-        this.onError("IA Usage: el CLI emitió una línea JSON inválida.");
+        this.onError(t("error.invalidJson"), "generic");
       }
     }
   }
@@ -88,14 +91,14 @@ function findOnPath(): string | undefined {
 function knownDesktopInstallations(): string[] {
   if (process.platform !== "win32") return [];
   const roots = [
+    process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "Programs", "IA Usage"),
+    process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "IA Usage"),
+    process.env.ProgramFiles && join(process.env.ProgramFiles, "IA Usage"),
+    process.env["ProgramFiles(x86)"] && join(process.env["ProgramFiles(x86)"], "IA Usage"),
     process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "Programs", "IA Usage Bar"),
     process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "IA Usage Bar"),
     process.env.ProgramFiles && join(process.env.ProgramFiles, "IA Usage Bar"),
     process.env["ProgramFiles(x86)"] && join(process.env["ProgramFiles(x86)"], "IA Usage Bar"),
   ].filter((root): root is string => Boolean(root));
   return roots.map((root) => join(root, "resources", "bin", "iausage.exe"));
-}
-
-function notFoundMessage(): string {
-  return "IA Usage: CLI no encontrado. Configura iaUsage.cliPath, añade iausage al PATH o instala IA Usage Desktop.";
 }

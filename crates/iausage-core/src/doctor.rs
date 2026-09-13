@@ -84,7 +84,11 @@ pub fn diagnose_provider(
                 },
             ));
             if snap.stale {
-                checks.push(check("freshness", true, "datos antiguos (stale-while-refresh)"));
+                checks.push(check(
+                    "freshness",
+                    true,
+                    "datos antiguos (stale-while-refresh)",
+                ));
             }
         }
     }

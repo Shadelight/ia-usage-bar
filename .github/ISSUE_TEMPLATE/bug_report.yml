@@ -1,15 +1,15 @@
 name: Bug report
-description: Report a reproducible problem in IA Usage Bar
+description: Report a reproducible problem in IA Usage
 title: "[Bug]: "
 labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: Thanks for helping improve IA Usage Bar. Remove tokens, cookies, API keys, and private provider responses before submitting.
+      value: Thanks for helping improve IA Usage. Remove tokens, cookies, API keys, and private provider responses before submitting.
   - type: input
     id: version
     attributes:
-      label: IA Usage Bar version
+      label: IA Usage version
       placeholder: 0.2.0
     validations:
       required: true

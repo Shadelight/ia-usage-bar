@@ -21,13 +21,14 @@ class UsageSyncRepository(private val context: Context) {
 
     fun refresh(): SyncPayload {
         val pairing = store.pairing() ?: error("No hay un PC vinculado.")
-        val passphrase = store.passphrase() ?: error("La passphrase segura ya no está disponible.")
+        val passphrase = store.passphrase() ?: error("La frase secreta segura ya no está disponible.")
         val verified = fetch(pairing, passphrase)
         store.savePayload(verified.second)
         return verified.first
     }
 
     fun disconnect() = store.clear()
+    fun clearCachedPayload() = store.clearPayload()
     fun pairing() = store.pairing()
 
     private fun fetch(pairing: PairingInfo, passphrase: CharArray): Pair<SyncPayload, String> {
@@ -35,7 +36,7 @@ class UsageSyncRepository(private val context: Context) {
         val meta = ServerMeta.fromJson(getJson("$baseUrl/v1/meta"))
         require(meta.schemaVersion == SUPPORTED_SCHEMA_VERSION && meta.blobVersion == SUPPORTED_BLOB_VERSION) { "El PC usa una versión de sync no compatible." }
         require(meta.lan) { "El servidor del PC no está expuesto a la red local." }
-        require(meta.deviceId.equals(pairing.deviceId, true) && meta.fingerprint == pairing.fingerprint) { "El PC no coincide con el QR. No continúes el pareo." }
+        require(meta.deviceId.equals(pairing.deviceId, true) && meta.fingerprint == pairing.fingerprint) { "El PC no coincide con el QR. No continúes la vinculación." }
         require(versionAtLeast(BuildConfig.VERSION_NAME, pairing.minAppVersion)) { "Actualiza IA Usage en Android para este PC." }
         val blob = EncryptedBlob.fromJson(getJson("$baseUrl/v1/snapshot"))
         val raw = crypto.decrypt(blob, passphrase)

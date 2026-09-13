@@ -27,6 +27,10 @@ class SecureStateStore(context: Context) {
     fun passphrase(): CharArray? = read("passphrase")?.toCharArray()
     fun savePayload(rawPayload: String) = write("payload", rawPayload)
     fun payload(): String? = read("payload")
+    /** Drops only the cached snapshot — pairing/passphrase survive. Distinct
+     * from `clear()`: "clear local data" in Settings must not silently
+     * unlink the PC the way "Disconnect" does. */
+    fun clearPayload() = preferences.edit().remove("payload").apply()
     fun clear() = preferences.edit().clear().apply()
 
     private fun write(name: String, cleartext: String) {

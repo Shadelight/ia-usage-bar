@@ -95,8 +95,16 @@ fn fetch_openrouter(key: &str) -> Result<ProviderSnapshot, FetchError> {
     )
     .ok();
     let data = credits.get("data").unwrap_or(&credits);
-    let total = required_number(data, &["total_credits", "total"], "OpenRouter: faltan créditos totales")?;
-    let used = required_number(data, &["total_usage", "usage"], "OpenRouter: falta uso de créditos")?;
+    let total = required_number(
+        data,
+        &["total_credits", "total"],
+        "OpenRouter: faltan créditos totales",
+    )?;
+    let used = required_number(
+        data,
+        &["total_usage", "usage"],
+        "OpenRouter: falta uso de créditos",
+    )?;
     let remaining = total - used;
     let mut lines = vec![values_line(
         "balance",
@@ -142,9 +150,10 @@ fn fetch_zai(key: &str) -> Result<ProviderSnapshot, FetchError> {
     push_zai_window(
         &mut lines, data, "weekly", "weekly", "Semanal", 604_800, "always",
     );
-    if let Some(pct) = data.get("mcp").and_then(|value| {
-        json_f64(value, &["utilization", "usedPercent", "percent"])
-    }) {
+    if let Some(pct) = data
+        .get("mcp")
+        .and_then(|value| json_f64(value, &["utilization", "usedPercent", "percent"]))
+    {
         lines.push(progress_pct("mcp", "MCP", pct, None, 2_592_000, "demand"));
     }
     let plan = json_str(data, &["plan", "planName"]).unwrap_or_else(|| "GLM".into());
@@ -213,7 +222,11 @@ fn fetch_grok(key: &str, cfg: &AppConfig) -> Result<ProviderSnapshot, FetchError
     };
     let url = format!("https://management-api.x.ai/v1/billing/teams/{team}/prepaid/balance");
     let body = http::get_json(&url, &[("Authorization", &format!("Bearer {key}"))])?;
-    let bal = required_number(&body, &["balance", "amount", "prepaid_balance"], "xAI: respuesta sin saldo")?;
+    let bal = required_number(
+        &body,
+        &["balance", "amount", "prepaid_balance"],
+        "xAI: respuesta sin saldo",
+    )?;
     Ok(money(
         VendorId::Grok,
         "xAI",
@@ -237,7 +250,11 @@ fn fetch_kilo(key: &str) -> Result<ProviderSnapshot, FetchError> {
         &[("Authorization", &format!("Bearer {key}"))],
     )?;
     let data = body.get("data").unwrap_or(&body);
-    let bal = required_number(data, &["balance", "credits", "remaining"], "Kilo: respuesta sin saldo")?;
+    let bal = required_number(
+        data,
+        &["balance", "credits", "remaining"],
+        "Kilo: respuesta sin saldo",
+    )?;
     Ok(money(VendorId::Kilo, "Kilo", "Saldo", bal))
 }
 
@@ -247,7 +264,11 @@ fn fetch_novita(key: &str) -> Result<ProviderSnapshot, FetchError> {
         &[("Authorization", &format!("Bearer {key}"))],
     )?;
     let data = body.get("data").unwrap_or(&body);
-    let bal = required_number(data, &["balance", "credit_balance", "remaining"], "Novita: respuesta sin saldo")?;
+    let bal = required_number(
+        data,
+        &["balance", "credit_balance", "remaining"],
+        "Novita: respuesta sin saldo",
+    )?;
     Ok(money(VendorId::Novita, "Novita", "Saldo", bal))
 }
 
@@ -268,7 +289,11 @@ fn fetch_moonshot(key: &str, cfg: &AppConfig) -> Result<ProviderSnapshot, FetchE
         &[("Authorization", &format!("Bearer {key}"))],
     )?;
     let data = body.get("data").unwrap_or(&body);
-    let bal = required_number(data, &["available_balance", "balance", "cash_balance"], "Moonshot: respuesta sin saldo")?;
+    let bal = required_number(
+        data,
+        &["available_balance", "balance", "cash_balance"],
+        "Moonshot: respuesta sin saldo",
+    )?;
     let label = if cn { "Saldo (¥)" } else { "Saldo" };
     let text = if cn {
         format!("¥{bal:.2}")
@@ -374,7 +399,9 @@ fn fetch_anthropic_api(key: &str) -> Result<ProviderSnapshot, FetchError> {
         }
     }
     if !found {
-        return Err(FetchError::Parse("Anthropic API: respuesta sin importes".into()));
+        return Err(FetchError::Parse(
+            "Anthropic API: respuesta sin importes".into(),
+        ));
     }
     let usd = total / 100.0;
     Ok(snapshot_ok(
@@ -442,7 +469,9 @@ fn parse_opencode_go_usage(body: &Value) -> Result<ProviderSnapshot, FetchError>
         }
     }
     if lines.is_empty() {
-        return Err(FetchError::Parse("OpenCode Go: respuesta sin ventanas de uso".into()));
+        return Err(FetchError::Parse(
+            "OpenCode Go: respuesta sin ventanas de uso".into(),
+        ));
     }
     Ok(snapshot_ok(VendorId::OpenCodeGo, "OpenCode Go", lines))
 }
@@ -464,7 +493,10 @@ mod tests {
 
         let snapshot = parse_opencode_go_usage(&body).expect("nested usage must parse");
         assert_eq!(snapshot.lines.len(), 3);
-        let crate::model::MetricLine::Progress { label, resets_at, .. } = &snapshot.lines[0] else {
+        let crate::model::MetricLine::Progress {
+            label, resets_at, ..
+        } = &snapshot.lines[0]
+        else {
             panic!("rolling window must be progress data");
         };
         assert_eq!(label, "5 horas");

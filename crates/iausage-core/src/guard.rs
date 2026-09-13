@@ -58,9 +58,7 @@ pub fn remaining_for(snapshot: &ProviderSnapshot, window: Option<&str>) -> Optio
         .quotas
         .iter()
         .filter_map(|q| q.remaining_percent)
-        .fold(None::<f64>, |acc, r| {
-            Some(acc.map_or(r, |a: f64| a.min(r)))
-        })
+        .fold(None::<f64>, |acc, r| Some(acc.map_or(r, |a: f64| a.min(r))))
         .or_else(|| snapshot.primary_utilization.map(|u| (100.0 - u).max(0.0)))
 }
 
@@ -80,7 +78,9 @@ pub fn evaluate(
         return GuardVerdict::Unavailable { reason: "no-data" };
     };
     if !snap.is_connected() {
-        return GuardVerdict::Unavailable { reason: "not-connected" };
+        return GuardVerdict::Unavailable {
+            reason: "not-connected",
+        };
     }
     match remaining_for(snap, window) {
         None => GuardVerdict::Unavailable {
@@ -138,7 +138,10 @@ mod tests {
             exit_code(&evaluate(Some(&s), Some("session"), 15.0)),
             EXIT_BELOW
         );
-        assert_eq!(exit_code(&evaluate(Some(&s), Some("session"), 10.0)), EXIT_OK);
+        assert_eq!(
+            exit_code(&evaluate(Some(&s), Some("session"), 10.0)),
+            EXIT_OK
+        );
         assert_eq!(exit_code(&evaluate(None, None, 10.0)), EXIT_UNAVAILABLE);
     }
 }

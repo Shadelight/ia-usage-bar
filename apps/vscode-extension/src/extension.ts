@@ -1,21 +1,35 @@
 import * as vscode from "vscode";
 import { CliClient } from "./cli-client";
+import { setLang, t } from "./i18n";
+import { isRenderOnlyChange } from "./settings";
+import { reorderProviders } from "./status/quick-menu";
+import { showQuickSettings } from "./status/quick-settings";
 import { StatusBar } from "./status/status-bar";
 
 export function activate(context: vscode.ExtensionContext): void {
+  setLang(vscode.env.language.toLowerCase().startsWith("es") ? "es" : "en");
   const status = new StatusBar(context.extensionUri);
+  let lastSnapshot: Parameters<StatusBar["update"]>[0] | undefined;
   const client = new CliClient(
-    (message) => status.update(message.snapshot),
-    (error) => {
+    (message) => {
+      lastSnapshot = message.snapshot;
+      status.update(message.snapshot);
+    },
+    (error, kind) => {
       status.setError(error);
-      if (error.startsWith("IA Usage: CLI no encontrado")) {
-        void vscode.window.showErrorMessage(error, "Configurar CLI").then((choice) => {
-          if (choice === "Configurar CLI") void vscode.commands.executeCommand("workbench.action.openSettings", "iaUsage.cliPath");
+      if (kind === "cli-not-found") {
+        void vscode.window.showErrorMessage(error, t("error.configureCli")).then((choice) => {
+          if (choice === t("error.configureCli")) void vscode.commands.executeCommand("workbench.action.openSettings", "iaUsage.cliPath");
         });
       }
     },
   );
-  const refresh = () => void client.refresh().catch((error) => vscode.window.showErrorMessage(`IA Usage: no se pudo actualizar (${error.message ?? error}).`));
+  const refresh = () => {
+    status.setRefreshing(true);
+    void client.refresh()
+      .catch((error) => vscode.window.showErrorMessage(t("error.refreshFailed", { error: error.message ?? String(error) })))
+      .finally(() => status.setRefreshing(false));
+  };
   context.subscriptions.push(
     status,
     client,
@@ -24,7 +38,20 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("iaUsage.restart", () => client.start()),
     vscode.commands.registerCommand("iaUsage.configureCli", () => void vscode.commands.executeCommand("workbench.action.openSettings", "iaUsage.cliPath")),
     vscode.commands.registerCommand("iaUsage.configureProviders", status.configureProviders),
-    vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration("iaUsage")) client.start(); }),
+    vscode.commands.registerCommand("iaUsage.customizeStatusBar", () => void showQuickSettings(lastSnapshot)),
+    vscode.commands.registerCommand("iaUsage.reorderProviders", () => void reorderProviders(lastSnapshot)),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (!event.affectsConfiguration("iaUsage")) return;
+      // Cosmetic settings (display density, percentage mode, primary metric,
+      // etc.) only need a re-render; restarting the CLI process would drop
+      // the live watch stream for no reason. Only cliPath/remotePollSeconds
+      // actually require reconnecting.
+      if (isRenderOnlyChange(event)) {
+        if (lastSnapshot) status.update(lastSnapshot);
+      } else {
+        client.start();
+      }
+    }),
   );
   client.start();
 }

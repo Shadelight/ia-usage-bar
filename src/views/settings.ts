@@ -2,7 +2,7 @@
 // Apariencia/Datos y registros/Acerca de) over the same underlying config.
 
 import { $, escapeHtml, invokeCmd } from "../api";
-import type { Dashboard, ProviderSnapshot, SyncPairingDto, SyncStatusDto, VendorInfo } from "../api";
+import type { CliInstallStatusDto, Dashboard, ProviderSnapshot, SyncPairingDto, SyncStatusDto, VendorInfo } from "../api";
 import { lang, t } from "../i18n";
 import { providerVisual } from "../providers";
 import { actionIconSvg, getProviderActions } from "../provider-actions";
@@ -54,6 +54,45 @@ export function setCredentialDraft(id: string, value: string): void {
 export function clearCredentialDraft(id: string): void {
   delete credentialDrafts[id];
   revealedCredentials.delete(id);
+}
+
+/** Update only the credential controls whose enabled state changed. This is
+ * deliberately DOM-incremental: a provider toggle must not replace the open
+ * detail panel or the API-key input the user is about to type into. */
+export function patchProviderInteractiveState(id: string, enabled: boolean): void {
+  const disabled = isKeyInputDisabled(enabled, savingProvider === id);
+  const input = document.querySelector<HTMLInputElement>(`input[data-key="${id}"]`);
+  const save = document.querySelector<HTMLButtonElement>(`button[data-savekey="${id}"]`);
+  const remove = document.querySelector<HTMLButtonElement>(`button[data-delkey="${id}"]`);
+  const eye = document.querySelector<HTMLButtonElement>(`button[data-toggle-key="${id}"]`);
+  if (input) input.disabled = disabled;
+  if (save) save.disabled = disabled;
+  if (remove) remove.disabled = disabled;
+  if (eye) eye.disabled = disabled;
+}
+
+/** Add/remove the reveal button without rebuilding the input node. */
+export function patchCredentialEye(id: string, value: string): void {
+  const input = document.querySelector<HTMLInputElement>(`input[data-key="${id}"]`);
+  const wrap = input?.closest<HTMLElement>(".credential-input-wrap");
+  if (!input || !wrap) return;
+  let eye = wrap.querySelector<HTMLButtonElement>(`button[data-toggle-key="${id}"]`);
+  if (!value) {
+    eye?.remove();
+    revealedCredentials.delete(id);
+    input.type = "password";
+    return;
+  }
+  if (eye) return;
+  eye = document.createElement("button");
+  eye.type = "button";
+  eye.className = "credential-eye";
+  eye.dataset.toggleKey = id;
+  eye.setAttribute("aria-label", t("showCredential"));
+  eye.setAttribute("aria-pressed", "false");
+  eye.innerHTML = actionIconSvg("eye", 16);
+  eye.disabled = input.disabled;
+  wrap.appendChild(eye);
 }
 
 const CATEGORIES: SettingsCategory[] = ["general", "providers", "notifications", "appearance", "data", "sync", "about"];
@@ -196,7 +235,7 @@ function providerKeyDetail(vendor: VendorInfo): string {
       </div>
       <div class="credential-actions">
         <button type="button" class="primary" data-savekey="${escapeHtml(vendor.id)}" ${disabled ? "disabled" : ""}>${escapeHtml(saveLabel)}</button>
-        ${vendor.hasCredential ? `<button type="button" class="danger" data-delkey="${escapeHtml(vendor.id)}" ${busy ? "disabled" : ""}>${escapeHtml(t("deleteCredential"))}</button>` : ""}
+        ${vendor.hasCredential ? `<button type="button" class="danger" data-delkey="${escapeHtml(vendor.id)}" ${disabled ? "disabled" : ""}>${escapeHtml(t("deleteCredential"))}</button>` : ""}
       </div>
     </div>
     ${credentialLinks(vendor)}
@@ -328,12 +367,47 @@ function appearanceBody(dash: Dashboard): string {
   `;
 }
 
+let cliStatus: CliInstallStatusDto | null = null;
+
 function dataBody(): string {
+  const cliPath = cliStatus?.binaryPath || "—";
+  const cliPathState = cliStatus
+    ? cliStatus.pathConfigured ? t("cliPathConfigured") : t("cliPathMissing")
+    : t("cliChecking");
   return `
     <button class="btn ghost" data-act="open-logs">${t("openLogs")}</button>
     <button class="btn ghost" data-act="clear-logs">${t("clearLogs")}</button>
     <button class="btn ghost" data-act="export-diagnostics">${t("exportDiagnostics")}</button>
+    <section class="cli-diagnostic" aria-labelledby="cli-diagnostic-title">
+      <h3 id="cli-diagnostic-title">CLI</h3>
+      <div class="row"><span>${escapeHtml(t("cliInstalled"))}</span><code id="cli-binary-path">${escapeHtml(cliPath)}</code></div>
+      <div class="row"><span>PATH</span><strong id="cli-path-status" class="${cliStatus?.pathConfigured ? "status-ok" : "status-warn"}">${escapeHtml(cliPathState)}</strong></div>
+      <div class="prov-buttons">
+        <button type="button" data-repair-cli ${cliStatus?.binaryExists === false ? "disabled" : ""}>${escapeHtml(t("cliRepairPath"))}</button>
+        <button type="button" data-copy-cli-path>${escapeHtml(t("cliCopyPath"))}</button>
+        <button type="button" data-test-cli ${cliStatus?.binaryExists === false ? "disabled" : ""}>${escapeHtml(t("cliTest"))}</button>
+      </div>
+      <p id="cli-test-result" class="lede">${cliStatus?.version ? escapeHtml(cliStatus.version) : ""}</p>
+    </section>
   `;
+}
+
+export async function reloadCliStatus(): Promise<void> {
+  const result = await invokeCmd<CliInstallStatusDto>("cli_install_status");
+  if (!result.ok) return;
+  cliStatus = result.value;
+  const path = document.getElementById("cli-binary-path");
+  const status = document.getElementById("cli-path-status");
+  const test = document.getElementById("cli-test-result");
+  if (path) path.textContent = result.value.binaryPath;
+  if (status) {
+    status.textContent = result.value.pathConfigured ? t("cliPathConfigured") : t("cliPathMissing");
+    status.className = result.value.pathConfigured ? "status-ok" : "status-warn";
+  }
+  if (test) test.textContent = result.value.version || "";
+  document.querySelectorAll<HTMLButtonElement>("[data-repair-cli],[data-test-cli]").forEach((button) => {
+    button.disabled = !result.value.binaryExists;
+  });
 }
 
 // --- M5 sync con el teléfono (categoría "sync") ---
@@ -390,9 +464,11 @@ function syncBody(): string {
       <button type="button" data-syncexport ${st?.enabled ? "" : "disabled"} title="${st?.enabled ? "" : escapeHtml(t("syncEnableFirst"))}">${actionIconSvg("refresh", 12)}<span>${escapeHtml(t("syncExportNow"))}</span></button>
     </div>
     <div id="sync-qr" class="sync-qr">${syncPairing ? `
+      <h3>${escapeHtml(t("syncReadyToPair"))}</h3>
       <img src="data:image/png;base64,${syncPairing.qrPngBase64}" alt="QR" />
-      <p class="sync-uri">${escapeHtml(syncPairing.uri)}</p>
-      <p class="lede">${escapeHtml(t("syncFingerprint"))}: <strong>${escapeHtml(syncPairing.fingerprint)}</strong></p>
+      <p class="sync-address">${escapeHtml(syncPairing.host)}:${syncPairing.port}</p>
+      <p class="lede">${escapeHtml(t("syncVerificationCode"))}: <strong>${escapeHtml(syncPairing.fingerprint)}</strong></p>
+      <details class="sync-technical"><summary>${escapeHtml(t("syncTechnicalDetails"))}</summary><p class="sync-uri">${escapeHtml(syncPairing.uri)}</p><button type="button" data-copy-pairing-uri>${escapeHtml(t("syncCopyUri"))}</button></details>
     ` : ""}</div>
   `;
 }
@@ -529,6 +605,7 @@ export function renderSettings(dash: Dashboard | null, category: SettingsCategor
   wireCategoryScroll(categoryChanged, previousCategoryScroll);
   if (category === "about") void paintAboutVersion();
   if (category === "sync") void reloadSyncStatus();
+  if (category === "data") void reloadCliStatus();
 }
 
 /**
@@ -564,6 +641,7 @@ export function patchSettings(dash: Dashboard | null, category: SettingsCategory
         active.classList.add("hidden");
       }
     }
+    patchProviderInteractiveState(vendor.id, vendor.enabled);
   }
 }
 

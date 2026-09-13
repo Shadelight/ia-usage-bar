@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.IAUsage" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/ia_usage_splash</item>
+        <item name="android:colorAccent">@color/ia_usage_primary</item>
+        <item name="android:navigationBarColor">@color/ia_usage_background</item>
+        <item name="android:statusBarColor">@color/ia_usage_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

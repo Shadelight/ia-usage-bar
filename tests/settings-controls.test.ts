@@ -64,9 +64,33 @@ test("the Settings patch does not replace native inputs during a refresh", () =>
   assert.doesNotMatch(patchBody, /innerHTML/);
 });
 
+test("provider enable patches API-key controls in place and rolls them back", () => {
+  assert.match(settings, /export function patchProviderInteractiveState/);
+  const helper = settings.slice(
+    settings.indexOf("export function patchProviderInteractiveState"),
+    settings.indexOf("export function patchCredentialEye"),
+  );
+  assert.match(helper, /input\.disabled = disabled/);
+  assert.match(helper, /save\.disabled = disabled/);
+  assert.match(helper, /remove\.disabled = disabled/);
+  assert.doesNotMatch(helper, /innerHTML/);
+
+  const changeHandler = main.slice(main.indexOf("dataset.enable"), main.indexOf('el.id === "cfg-sync"'));
+  assert.match(changeHandler, /patchProviderInteractiveState\(id, enabled\)/);
+  assert.match(changeHandler, /patchProviderInteractiveState\(id, !enabled\)/);
+});
+
+test("typing a key only updates draft and reveal button, never rerenders", () => {
+  const start = main.indexOf('document.addEventListener("input"');
+  const inputHandler = main.slice(start, main.indexOf('document.addEventListener("change"', start));
+  assert.match(inputHandler, /setCredentialDraft\(keyInput, el\.value\)/);
+  assert.match(inputHandler, /patchCredentialEye\(keyInput, el\.value\)/);
+  assert.doesNotMatch(inputHandler, /renderSettings/);
+});
+
 test("the add buttons open the supported-provider catalog", () => {
   assert.match(main, /case "manage-providers"/);
-  assert.match(main, /settingsCategory = "providers"/);
+  assert.match(main, /openSettingsCategory\("providers"\)/);
 });
 
 test("source preference is optimistic and rolls the native select back on failure", () => {
@@ -95,7 +119,12 @@ test("available updates are installed from the app instead of opening a release 
   assert.match(settings, /data-install-update/);
   assert.match(main, /invokeCmd\("install_update"\)/);
   assert.match(commands, /fn published_checksum/);
-  assert.match(commands, /arg\("\/S"\)/);
+  // Silent install now runs in a detached PowerShell helper that outlives
+  // the app: it waits for the parent PID and inspects the NSIS exit code.
+  assert.match(commands, /ArgumentList/);
+  assert.match(commands, /\/S/);
+  assert.match(commands, /Wait-Process/);
+  assert.match(commands, /allow_exit/);
 });
 
 test("normal dashboard sections persist their open state per provider", () => {

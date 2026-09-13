@@ -8,7 +8,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 // Same family as the desktop app's dark palette, so the two feel related.
-// ponytail: no light/system toggle yet, dark is the only look for now.
+// Dark is the primary experience; light exists for the system/light
+// preference but intentionally keeps the same accent and simpler tokens.
 private val Background = Color(0xFF18181B)
 private val Surface = Color(0xFF202023)
 private val SurfaceElevated = Color(0xFF28282D)
@@ -31,8 +32,28 @@ private val IaUsageDarkScheme = darkColorScheme(
     error = ErrorColor,
 )
 
+private val LightBackground = Color(0xFFFAFAFA)
+private val LightSurface = Color(0xFFFFFFFF)
+private val LightSurfaceVariant = Color(0xFFF0F0F2)
+private val LightBorder = Color(0xFFE0E0E4)
+private val LightTextPrimary = Color(0xFF1A1A1D)
+private val LightTextSecondary = Color(0xFF5A5A63)
+
+private val IaUsageLightScheme = lightColorScheme(
+    background = LightBackground,
+    surface = LightSurface,
+    surfaceVariant = LightSurfaceVariant,
+    onBackground = LightTextPrimary,
+    onSurface = LightTextPrimary,
+    onSurfaceVariant = LightTextSecondary,
+    primary = Accent,
+    onPrimary = Color.White,
+    outline = LightBorder,
+    error = ErrorColor,
+)
+
 @Composable
 fun IaUsageTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    val scheme = if (darkTheme) IaUsageDarkScheme else lightColorScheme(primary = Accent, error = ErrorColor)
+    val scheme = if (darkTheme) IaUsageDarkScheme else IaUsageLightScheme
     MaterialTheme(colorScheme = scheme, content = content)
 }

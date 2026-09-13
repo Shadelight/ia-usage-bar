@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permisos para la ventana principal de IA Usage Bar",
+  "description": "Permisos para la ventana principal de IA Usage",
   "windows": ["main"],
   "permissions": [
     "core:default",

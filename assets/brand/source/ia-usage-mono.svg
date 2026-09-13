@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">IA Usage mono mark</title>
+  <rect x="30" y="50" width="38" height="158" rx="6" fill="#F5F5F5"/>
+  <path d="M82 204 143 55c3-8 9-12 17-12s14 4 18 12l68 149h-44L159 98l-35 106Z" fill="#F5F5F5"/>
+  <rect x="130" y="151" width="47" height="18" rx="3" fill="#F5F5F5"/>
+</svg>

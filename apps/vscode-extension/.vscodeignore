@@ -1,5 +1,7 @@
 .vscode/**
 src/**
+test/**
+.test-out/**
 scripts/**
 media/font-src/**
 media/provider-icons/provider-icons.json

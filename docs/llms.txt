@@ -1,4 +1,4 @@
-# IA Usage Bar
+# IA Usage
 
 Windows desktop app and CLI for monitoring AI usage limits, quota resets,
 credits and provider health.

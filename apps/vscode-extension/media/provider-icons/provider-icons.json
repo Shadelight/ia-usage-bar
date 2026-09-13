@@ -1,5 +1,21 @@
 {
-    "openai": 61697,
-    "cursor": 61698,
-    "anthropic": 61699
+    "zai": 61697,
+    "windsurf": 61698,
+    "openrouter": 61699,
+    "opencode_go": 61700,
+    "openai": 61701,
+    "novita": 61702,
+    "nous": 61703,
+    "moonshot": 61704,
+    "minimax": 61705,
+    "kiro": 61706,
+    "kimi": 61707,
+    "kilo": 61708,
+    "groq": 61709,
+    "grok": 61710,
+    "deepseek": 61711,
+    "cursor": 61712,
+    "copilot": 61713,
+    "antigravity": 61714,
+    "anthropic": 61715
 }

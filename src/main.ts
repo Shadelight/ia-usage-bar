@@ -1,12 +1,12 @@
 import "./styles.css";
 
 import { $, escapeHtml, invokeCmd, isTauri } from "./api";
-import type { Dashboard, ProviderStatus, SyncPairingDto } from "./api";
+import type { Dashboard, ProviderStatus, SyncPairingDto, SyncStatusDto } from "./api";
 import { sanitizeTechnicalDetails, shouldShowRecoveryToast } from "./errors";
 import { setLang, t } from "./i18n";
 import { buildSanitizedDiagnosis, renderDash, updateLoadingClocks, updateResetClocks } from "./views/dash";
 import { actionIconSvg } from "./provider-actions";
-import { checkForUpdates, clearCredentialDraft, clearSyncPassphraseDraft, focusProviderInSettings, isCredentialValidating, patchSettings, persistConfig, refreshSyncView, renderSettings, setCredentialDraft, setCredentialValidating, setExpandedProvider, setSavingProvider, setSyncPairing, setSyncPassphraseDraft, toggleCredentialRevealed } from "./views/settings";
+import { checkForUpdates, clearCredentialDraft, clearSyncPassphraseDraft, focusProviderInSettings, isCredentialValidating, patchCredentialEye, patchProviderInteractiveState, patchSettings, persistConfig, refreshSyncView, reloadCliStatus, renderSettings, setCredentialDraft, setCredentialValidating, setExpandedProvider, setSavingProvider, setSyncPairing, setSyncPassphraseDraft, toggleCredentialRevealed } from "./views/settings";
 import type { SettingsCategory } from "./views/settings";
 import { previewDashboard, renderSpend } from "./views/spend";
 
@@ -136,24 +136,40 @@ function closeHeadMenu(): void {
   $("head-menu").classList.add("hidden");
 }
 
+// El menú superior navega a secciones de Ajustes/vistas: nunca muta estado
+// directamente (la única excepción es el toggle de Modo compacto).
+function openSettingsCategory(category: SettingsCategory): void {
+  view = "settings";
+  settingsCategory = category;
+  localStorage.setItem("settingsCategory", settingsCategory);
+  renderSettings(dash, settingsCategory);
+  paintDash();
+}
+
 function paintHeadMenu() {
   $("btn-pin").classList.toggle("active", !!dash?.alwaysOnTop);
-  const vendor = dash?.catalog.find((v) => v.id === selectedId);
-  const links = vendor?.links;
   const rows = [
     `<button data-act="compact"><span>${t("compactMode")}</span>${dash?.compactMode ? `<span class="menu-check">${actionIconSvg("check", 13)}</span>` : ""}</button>`,
-    `<button data-act="toggle-notif"><span>${t("notifications")}</span>${dash?.notifications ? `<span class="menu-check">${actionIconSvg("check", 13)}</span>` : ""}</button>`,
-    `<button data-act="spend">${t("spend")}</button>`,
-    links?.usageUrl
-      ? `<button data-open-url="${escapeHtml(links.usageUrl)}">${t("providerPanel")}</button>`
-      : "",
-    links?.statusUrl
-      ? `<button data-open-url="${escapeHtml(links.statusUrl)}">${t("serviceStatus")}</button>`
-      : "",
-    `<button data-act="open-logs">${t("openLogs")}</button>`,
-    `<button data-act="settings">${t("settings")}</button>`,
+    `<button data-act="settings-notifications"><span class="menu-label">${actionIconSvg("bell", 14)}<span>${t("notifications")}</span></span></button>`,
+    `<button data-act="spend"><span>${t("spend")}</span></button>`,
+    `<button data-act="pair-phone"><span class="menu-label">${actionIconSvg("phone", 14)}<span>${t("syncPhoneMenu")}</span></span></button>`,
+    `<button data-act="settings-data"><span class="menu-label">${actionIconSvg("folder", 14)}<span>${t("settingsData")}</span></span></button>`,
+    `<button data-act="settings-general"><span class="menu-label">${actionIconSvg("settings", 14)}<span>${t("settings")}</span></span></button>`,
   ].filter(Boolean);
   $("head-menu").innerHTML = rows.join("");
+}
+
+async function paintAppVersion(): Promise<void> {
+  const footer = document.getElementById("app-version");
+  if (!footer) return;
+  footer.textContent = "IA Usage";
+  if (!isTauri()) return;
+  try {
+    const { getVersion } = await import("@tauri-apps/api/app");
+    footer.textContent = `IA Usage · v${await getVersion()}`;
+  } catch {
+    // Browser/dev fallback stays as the product name only.
+  }
 }
 
 function paintDash() {
@@ -240,6 +256,60 @@ async function applyWindowMode(compact: boolean) {
   }
 }
 
+/** The one "Vincular teléfono" flow, shared by the in-app menu and the tray
+ * item — never duplicated between the two entry points. */
+async function pairPhoneFlow(): Promise<void> {
+  openSettingsCategory("sync");
+  await refreshSyncView();
+  let status = await invokeCmd<SyncStatusDto>("sync_get_status");
+  if (!status.ok) {
+    showCommandError(status.error ?? t("commandFailed"));
+    return;
+  }
+  // 1. Sin frase secreta no hay nada que vincular: enfocar el input.
+  if (!status.value.hasPassphrase) {
+    showToast(t("syncEnableNeedsPassphrase"), 4000);
+    requestAnimationFrame(() => document.getElementById("sync-pass")?.focus());
+    return;
+  }
+  // 2. Sin LAN el QR sería un localhost inútil: no generarlo, pedir
+  // explícitamente la exposición (nunca se auto-activa por seguridad).
+  if (!status.value.lan) {
+    showToast(t("syncPairNeedsLan"), 4000);
+    requestAnimationFrame(() => document.getElementById("cfg-sync-lan")?.focus());
+    return;
+  }
+  // 3. Vincular implica servidor activo: auto-activar sync (intención
+  // explícita del usuario) y re-leer el estado antes del pareo.
+  if (!status.value.enabled) {
+    const enabled = await invokeCmd("sync_set_enabled", { enabled: true });
+    if (!enabled.ok) {
+      showCommandError(enabled.error ?? t("commandFailed"));
+      return;
+    }
+    await refreshSyncView();
+    status = await invokeCmd<SyncStatusDto>("sync_get_status");
+    if (!status.ok) {
+      showCommandError(status.error ?? t("commandFailed"));
+      return;
+    }
+  }
+  if (!status.value.enabled || !status.value.lan || !status.value.serverRunning) {
+    showCommandError(t("syncServerNotReady"));
+    return;
+  }
+  const pairing = await invokeCmd<SyncPairingDto>("sync_get_pairing", { lan: true });
+  if (!pairing.ok) {
+    showCommandError(pairing.error ?? t("commandFailed"));
+    return;
+  }
+  setSyncPairing(pairing.value);
+  await refreshSyncView();
+  requestAnimationFrame(() => {
+    document.getElementById("sync-qr")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+}
+
 async function handleAction(act: string) {
   if (act !== "toggle-menu") closeHeadMenu();
   switch (act) {
@@ -263,12 +333,26 @@ async function handleAction(act: string) {
       break;
     }
     case "toggle-notif": {
-      const enabled = !dash?.notifications;
-      await invokeCmd("set_notifications", { enabled });
-      if (dash) dash.notifications = enabled;
-      paintHeadMenu();
+      // Compatibilidad: el menú ya no alterna notificaciones (navega a la
+      // sección); el toggle vive en Ajustes → Notificaciones (cfg-notif).
+      openSettingsCategory("notifications");
       break;
     }
+    case "settings-notifications":
+      openSettingsCategory("notifications");
+      break;
+    case "settings-data":
+      openSettingsCategory("data");
+      break;
+    case "settings-sync":
+      openSettingsCategory("sync");
+      break;
+    case "settings-general":
+      openSettingsCategory("general");
+      break;
+    case "pair-phone":
+      await pairPhoneFlow();
+      break;
     case "open-logs":
       await invokeCmd("open_logs_folder");
       break;
@@ -305,19 +389,13 @@ async function handleAction(act: string) {
       await invokeCmd("detect_providers");
       break;
     case "settings":
-      view = "settings";
-      renderSettings(dash, settingsCategory);
-      paintDash();
+      openSettingsCategory("general");
       break;
     case "manage-providers":
       // The provider catalog is intentionally curated by VendorId::all();
       // “Add” means enable one of those supported integrations, rather than
       // pretending that an arbitrary custom provider can be queried.
-      view = "settings";
-      settingsCategory = "providers";
-      localStorage.setItem("settingsCategory", settingsCategory);
-      renderSettings(dash, settingsCategory);
-      paintDash();
+      openSettingsCategory("providers");
       break;
     case "spend":
       view = "spend";
@@ -357,6 +435,7 @@ async function handleAction(act: string) {
 
 async function main() {
   applyTheme();
+  void paintAppVersion();
   window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
     if ((localStorage.getItem("theme") || "system") === "system") applyTheme("system");
   });
@@ -383,19 +462,15 @@ async function main() {
 
   document.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
-    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-toggle-key],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-install-update],[data-redeem-reset],[data-savesyncpass],[data-forgetsyncpass],[data-syncqr],[data-syncexport]");
+    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-toggle-key],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-install-update],[data-redeem-reset],[data-savesyncpass],[data-forgetsyncpass],[data-syncqr],[data-syncexport],[data-copy-pairing-uri],[data-repair-cli],[data-copy-cli-path],[data-test-cli]");
     if (!btn) {
       if (!target.closest("#head-menu, #btn-menu")) closeHeadMenu();
       return;
     }
     if (btn.dataset.act === "configure-provider") {
       const providerId = btn.dataset.providerId || selectedId;
-      view = "settings";
-      settingsCategory = "providers";
-      localStorage.setItem("settingsCategory", settingsCategory);
       setExpandedProvider(providerId || null);
-      renderSettings(dash, settingsCategory);
-      paintDash();
+      openSettingsCategory("providers");
       focusProviderInSettings(providerId);
       return;
     }
@@ -429,9 +504,7 @@ async function main() {
       paintDash();
     }
     if (btn.dataset.setcat) {
-      settingsCategory = btn.dataset.setcat as SettingsCategory;
-      localStorage.setItem("settingsCategory", settingsCategory);
-      renderSettings(dash, settingsCategory);
+      openSettingsCategory(btn.dataset.setcat as SettingsCategory);
     }
     if (btn.dataset.toggleKey) {
       // Eye toggle: pure DOM flip, never a re-render (the input keeps focus).
@@ -513,6 +586,34 @@ async function main() {
       const copied = await copyToClipboard(btn.dataset.copyCli);
       if (copied) showToast(t("copiedCliCmd"));
     }
+    if (btn.hasAttribute("data-copy-pairing-uri")) {
+      const technicalUri = document.querySelector<HTMLElement>("#sync-qr .sync-uri")?.textContent || "";
+      if (technicalUri && await copyToClipboard(technicalUri)) showToast(t("syncUriCopied"));
+      return;
+    }
+    if (btn.hasAttribute("data-copy-cli-path")) {
+      const binaryPath = document.getElementById("cli-binary-path")?.textContent || "";
+      if (binaryPath && binaryPath !== "—" && await copyToClipboard(binaryPath)) showToast(t("cliPathCopied"));
+      return;
+    }
+    if (btn.hasAttribute("data-repair-cli")) {
+      const result = await invokeCmd("repair_cli_path");
+      if (result.ok) showToast(t("cliPathRepaired"));
+      else showCommandError(result.error ?? t("commandFailed"));
+      await reloadCliStatus();
+      return;
+    }
+    if (btn.hasAttribute("data-test-cli")) {
+      const result = await invokeCmd<string>("cli_test");
+      const output = document.getElementById("cli-test-result");
+      if (result.ok) {
+        if (output) output.textContent = result.value;
+        showToast(t("cliTestPassed"));
+      } else {
+        showCommandError(result.error ?? t("commandFailed"));
+      }
+      return;
+    }
     // NOTE: <html> always carries data-theme (applyTheme sets it on load),
     // so an unscoped [data-theme] match would catch EVERY click via
     // closest() fallthrough and rebuild settings mid-gesture — killing
@@ -527,7 +628,10 @@ async function main() {
       const result = document.getElementById("update-result");
       const installButton = btn as HTMLButtonElement;
       installButton.disabled = true;
-      if (result) result.textContent = t("downloadingUpdate");
+      if (result) {
+        result.classList.remove("hidden");
+        result.textContent = t("updateDownloading");
+      }
       const installed = await invokeCmd("install_update");
       if (!installed.ok) {
         installButton.disabled = false;
@@ -535,6 +639,10 @@ async function main() {
           result.textContent = installed.error ?? t("updateInstallFailed");
           result.classList.add("update-error");
         }
+      } else if (result) {
+        // El backend ya emitió `restarting`; este texto cubre el hueco
+        // hasta que la app se cierre sola para dejar paso al instalador.
+        result.textContent = t("updateRestarting");
       }
       return;
     }
@@ -549,7 +657,7 @@ async function main() {
       } else {
         showCommandError(result.error ?? t("commandFailed"));
       }
-      if (view === "settings") refreshSyncView();
+      if (view === "settings") await refreshSyncView();
     }
     if (btn.hasAttribute("data-forgetsyncpass")) {
       const result = await invokeCmd("sync_set_passphrase", { passphrase: "" });
@@ -560,20 +668,17 @@ async function main() {
       } else {
         showCommandError(result.error ?? t("commandFailed"));
       }
-      if (view === "settings") refreshSyncView();
+      if (view === "settings") await refreshSyncView();
     }
     if (btn.hasAttribute("data-syncqr")) {
-      const lanToggle = document.getElementById("cfg-sync-lan") as HTMLInputElement | null;
-      const pairing = await invokeCmd<SyncPairingDto>("sync_get_pairing", { lan: lanToggle?.checked ?? false });
-      if (pairing.ok) setSyncPairing(pairing.value);
-      else showCommandError(pairing.error ?? t("commandFailed"));
-      if (view === "settings") refreshSyncView();
+      await pairPhoneFlow();
+      return;
     }
     if (btn.hasAttribute("data-syncexport")) {
       const path = await invokeCmd<string>("sync_export_now");
       if (path.ok) showToast(`${t("syncExported")} ${path.value}`);
       else showCommandError(path.error ?? t("commandFailed"));
-      if (view === "settings") refreshSyncView();
+      if (view === "settings") await refreshSyncView();
     }
     if (btn.dataset.redeemReset && btn.dataset.resetUrl) {
       // The reset is owned by ChatGPT's Usage screen. Do not depend on a
@@ -604,10 +709,8 @@ async function main() {
     const keyInput = (el as HTMLInputElement).dataset?.key;
     if (keyInput && el instanceof HTMLInputElement) {
       setCredentialDraft(keyInput, el.value);
-      // The eye only exists while something is typed: patch its visibility
-      // directly so typing never loses focus to a re-render.
-      const eye = document.querySelector<HTMLElement>(`[data-toggle-key="${keyInput}"]`);
-      if (eye) eye.style.display = el.value ? "" : "none";
+      // The eye follows the draft in place; the input node and focus survive.
+      patchCredentialEye(keyInput, el.value);
     }
     if ((el as HTMLInputElement).dataset?.syncPass !== undefined && el instanceof HTMLInputElement) {
       setSyncPassphraseDraft(el.value);
@@ -643,6 +746,7 @@ async function main() {
       const vendor = dash?.catalog.find((v) => v.id === id);
       pendingProviderEnabled.set(id, enabled);
       if (vendor) vendor.enabled = enabled;
+      patchProviderInteractiveState(id, enabled);
       // Preserve the checkbox node that was just changed. The next dashboard
       // event patches status text only; it never replaces this form.
       const ok = (await invokeCmd("set_provider_enabled", { id, enabled })).ok;
@@ -651,21 +755,25 @@ async function main() {
         // Backend rejected: revert model AND node so the UI never lies checked.
         if (vendor) vendor.enabled = !enabled;
         input.checked = !enabled;
+        patchProviderInteractiveState(id, !enabled);
         showCommandError(t("commandFailed"));
       }
     }
     if (el.id === "cfg-sync") {
-      const enabled = (el as HTMLInputElement).checked;
-      const ok = (await invokeCmd("sync_set_enabled", { enabled })).ok;
-      if (!ok && isTauri()) {
-        showCommandError(t("syncNeedPassphrase"));
+      const input = el as HTMLInputElement;
+      const enabled = input.checked;
+      const result = await invokeCmd("sync_set_enabled", { enabled });
+      if (!result.ok && isTauri()) {
+        // Revertir de inmediato: la UI nunca debe afirmar ON si Rust dijo NO.
+        input.checked = !enabled;
+        showCommandError(result.error ?? t("syncNeedPassphrase"));
       }
-      if (view === "settings") refreshSyncView();
+      if (view === "settings") await refreshSyncView();
     } else if (el.id === "cfg-sync-lan") {
       const lan = (el as HTMLInputElement).checked;
       const result = await invokeCmd("sync_set_lan", { lan });
       if (!result.ok && isTauri()) showCommandError(result.error ?? t("commandFailed"));
-      if (view === "settings") refreshSyncView();
+      if (view === "settings") await refreshSyncView();
     } else if (el.id === "cfg-autostart") {
       const enabled = (el as HTMLInputElement).checked;
       await invokeCmd("set_autostart_enabled", { enabled });
@@ -697,19 +805,37 @@ async function main() {
 
   const { listen } = await import("@tauri-apps/api/event");
   await listen<Dashboard>("dashboard-updated", (ev) => applyDashboard(ev.payload));
-  await listen<string>("tray-cmd", (ev) => {
-    // Payloads: "settings" | "settings:<category>" (e.g. from the tray
-    // "Manage providers…" / "About" entries).
+  // Progreso real del updater: el backend emite la fase estable
+  // (downloading/verifying/preparing/restarting) y aquí se mapea a i18n.
+  // `downloadingUpdate` queda como fallback para payloads desconocidos.
+  await listen<string>("updater-status", (ev) => {
+    const messages: Record<string, string> = {
+      downloading: t("updateDownloading"),
+      verifying: t("updateVerifying"),
+      preparing: t("updatePreparing"),
+      restarting: t("updateRestarting"),
+    };
+    const result = document.getElementById("update-result");
+    if (result && messages[ev.payload]) {
+      result.classList.remove("hidden");
+      result.textContent = messages[ev.payload];
+    }
+  });
+  await listen<string>("tray-cmd", async (ev) => {
+    // Payloads: "settings" | "settings:<category>" (from the tray "Manage
+    // providers…" / "About" entries) | "pair-phone" (from "Vincular
+    // teléfono"). This used to end with a call that re-ran the bare
+    // "settings" case and reset settingsCategory back to "general" right
+    // after the branch above had just applied the requested category —
+    // removed, since it fought with the arg it just applied.
     const [cmd, arg] = (ev.payload || "").split(":");
     if (cmd === "settings") {
-      view = "settings";
-      if (arg === "providers" || arg === "about" || arg === "general" || arg === "data" || arg === "sync") {
-        settingsCategory = arg as SettingsCategory;
-        localStorage.setItem("settingsCategory", settingsCategory);
-      }
-      renderSettings(dash, settingsCategory);
-      paintDash();
-      handleAction("settings");
+      const category = arg && ["general", "providers", "notifications", "appearance", "data", "sync", "about"].includes(arg)
+        ? arg as SettingsCategory
+        : "general";
+      openSettingsCategory(category);
+    } else if (cmd === "pair-phone") {
+      await pairPhoneFlow();
     }
   });
 

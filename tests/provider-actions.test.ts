@@ -184,6 +184,21 @@ test("getProviderActions excludes unavailable links for providers without URLs",
   assert.ok(actions.some((a) => a.kind === "diagnosis"));
 });
 
+test("getProviderActions emits only one action for duplicate URLs", () => {
+  const vendor: VendorInfo = {
+    ...fullVendor,
+    links: {
+      ...fullVendor.links,
+      usageUrl: "https://claude.ai/",
+      appUrl: "https://claude.ai",
+    },
+  };
+  const urls = getProviderActions(vendor)
+    .filter((action) => action.kind === "external")
+    .map((action) => action.url);
+  assert.equal(urls.filter((url) => url?.replace(/\/$/, "") === "https://claude.ai").length, 1);
+});
+
 test("getProviderCliCommand formats dedicated CLI command without emojis", () => {
   const cmd = getProviderCliCommand(fullVendor);
   assert.equal(cmd, "iausage usage anthropic");
