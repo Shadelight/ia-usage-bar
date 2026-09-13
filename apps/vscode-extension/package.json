@@ -2,34 +2,109 @@
   "name": "ia-usage",
   "displayName": "IA Usage - AI Quota Monitor",
   "description": "Monitor Claude Code, Codex, Cursor and other AI usage limits directly from your VS Code status bar.",
-  "version": "0.2.7",
+  "version": "0.3.1",
   "publisher": "shadelightdev",
   "icon": "images/icon.png",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/Shadelight/ia-usage-bar" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Shadelight/ia-usage-bar"
+  },
   "homepage": "https://github.com/Shadelight/ia-usage-bar",
-  "bugs": { "url": "https://github.com/Shadelight/ia-usage-bar/issues" },
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Machine Learning", "Other"],
-  "keywords": ["Claude", "Claude Code", "Codex", "ChatGPT", "Cursor", "AI usage", "AI quota", "usage monitor", "rate limits", "OpenAI", "Anthropic"],
-  "galleryBanner": { "color": "#1e1e1e", "theme": "dark" },
-  "activationEvents": ["onStartupFinished"],
+  "bugs": {
+    "url": "https://github.com/Shadelight/ia-usage-bar/issues"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "Claude",
+    "Claude Code",
+    "Codex",
+    "ChatGPT",
+    "Cursor",
+    "AI usage",
+    "AI quota",
+    "usage monitor",
+    "rate limits",
+    "OpenAI",
+    "Anthropic"
+  ],
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
-      { "command": "iaUsage.show", "title": "Show usage", "category": "IA Usage" },
-      { "command": "iaUsage.refresh", "title": "Refresh now", "category": "IA Usage" },
-      { "command": "iaUsage.restart", "title": "Reconnect CLI", "category": "IA Usage" },
-      { "command": "iaUsage.configureCli", "title": "Configure CLI path", "category": "IA Usage" }
+      {
+        "command": "iaUsage.show",
+        "title": "Show usage",
+        "category": "IA Usage"
+      },
+      {
+        "command": "iaUsage.refresh",
+        "title": "Refresh now",
+        "category": "IA Usage"
+      },
+      {
+        "command": "iaUsage.restart",
+        "title": "Reconnect CLI",
+        "category": "IA Usage"
+      },
+      {
+        "command": "iaUsage.configureCli",
+        "title": "Configure CLI path",
+        "category": "IA Usage"
+      }
     ],
     "configuration": {
       "title": "IA Usage",
       "properties": {
-        "iaUsage.cliPath": { "type": "string", "default": "", "description": "Absolute path to iausage.exe. Empty checks PATH and known IA Usage Desktop installations." },
-        "iaUsage.providers": { "type": "array", "items": { "type": "string" }, "default": ["anthropic", "openai", "cursor"], "description": "Provider IDs visible in the status bar." },
-        "iaUsage.display": { "type": "string", "enum": ["compact", "full"], "default": "compact", "description": "Status bar label density." },
-        "iaUsage.remotePollSeconds": { "type": "number", "default": 60, "minimum": 15, "description": "Remote fallback polling interval used by iausage watch." },
-        "iaUsage.showAllMetrics": { "type": "boolean", "default": false, "description": "Show every quota in the tooltip, including secondary metrics at 0%." }
+        "iaUsage.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to iausage.exe. Empty checks PATH and known IA Usage Desktop installations."
+        },
+        "iaUsage.providers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "anthropic",
+            "openai",
+            "cursor"
+          ],
+          "description": "Provider IDs visible in the status bar."
+        },
+        "iaUsage.display": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "full"
+          ],
+          "default": "compact",
+          "description": "Status bar label density."
+        },
+        "iaUsage.remotePollSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 15,
+          "description": "Remote fallback polling interval used by iausage watch."
+        },
+        "iaUsage.showAllMetrics": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show every quota in the tooltip, including secondary metrics at 0%."
+        }
       }
     }
   },

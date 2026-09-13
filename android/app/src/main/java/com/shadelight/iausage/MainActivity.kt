@@ -26,9 +26,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -112,8 +114,12 @@ class UsageViewModel(private val repository: UsageSyncRepository, private val ap
 @Composable
 private fun UsageApp(viewModel: UsageViewModel, scanQr: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var manualUri by mutableStateOf("")
-    var passphrase by mutableStateOf("")
+    // ponytail: without remember, every recomposition (i.e. every keystroke,
+    // since typing changes state) re-ran this function body and reset these
+    // back to "" — the fields looked like they refused input entirely.
+    var manualUri by remember { mutableStateOf("") }
+    var passphrase by remember(state.pairing) { mutableStateOf("") }
+    var passphraseVisible by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("IA Usage", style = MaterialTheme.typography.headlineMedium)
         state.error?.let { Card { Row(Modifier.padding(12.dp)) { Text(it, Modifier.weight(1f)); TextButton(viewModel::dismissError) { Text("Cerrar") } } } }
@@ -136,7 +142,13 @@ private fun UsageApp(viewModel: UsageViewModel, scanQr: () -> Unit) {
                     Text("Fingerprint: ${pairing.fingerprint}", style = MaterialTheme.typography.labelLarge)
                 } }
                 Text("Comprueba que el fingerprint coincide con el mostrado en el PC.")
-                OutlinedTextField(passphrase, { passphrase = it }, Modifier.fillMaxWidth(), label = { Text("Passphrase") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+                OutlinedTextField(
+                    passphrase, { passphrase = it }, Modifier.fillMaxWidth(),
+                    label = { Text("Frase secreta") },
+                    visualTransformation = if (passphraseVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    singleLine = true,
+                    trailingIcon = { TextButton(onClick = { passphraseVisible = !passphraseVisible }) { Text(if (passphraseVisible) "Ocultar" else "Mostrar") } },
+                )
                 Button(onClick = { viewModel.pair(passphrase) }, enabled = passphrase.isNotBlank() && !state.loading, modifier = Modifier.fillMaxWidth()) { Text(if (state.loading) "Vinculando…" else "Vincular") }
                 TextButton(onClick = viewModel::clearPendingPair) { Text("Usar otro QR") }
             }
@@ -159,7 +171,7 @@ private fun Dashboard(payload: SyncPayload, loading: Boolean, refresh: () -> Uni
 
 @Composable
 private fun ProviderCard(provider: ProviderUsage) {
-    var expanded by mutableStateOf(false)
+    var expanded by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().clickable { expanded = !expanded }) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row { Text(provider.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium); if (provider.stale) Text("Antiguo", color = MaterialTheme.colorScheme.error) }
         provider.connectionStatus?.takeUnless { it == "connected" }?.let { Text("Estado: $it${provider.connectionReason?.let { reason -> " ($reason)" } ?: ""}") }
