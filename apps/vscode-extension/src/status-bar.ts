@@ -76,18 +76,25 @@ function label(provider: Provider, mode: "compact" | "full"): string {
 
 function percent(provider: Provider): string { return provider.quotas[0]?.usedPercent?.toFixed(0).concat("%") ?? "—"; }
 
+/** Neutralizes Markdown syntax in CLI-supplied text. isTrusted stays off (no
+ * command: links), but escaping still stops a crafted provider/quota name
+ * from breaking out of the bold/image markup it's interpolated into. */
+function escapeMd(text: string): string {
+  return text.replace(/[\\`*_{}[\]()#+\-.!<>|]/g, (ch) => `\\${ch}`);
+}
+
 function tooltip(snapshot: DashboardSnapshot, providers: Provider[], logos: Record<string, string>): vscode.MarkdownString {
   const showAll = settings().showAllMetrics;
   const content = new vscode.MarkdownString(undefined, true);
-  content.isTrusted = true;
   content.appendMarkdown("### IA Usage\n\n");
   for (const provider of providers) {
+    const name = escapeMd(provider.name);
     const logo = logos[provider.id];
-    const badge = logo ? `![${provider.name}](${logo}) **${provider.name}**` : `**${provider.name}**`;
+    const badge = logo ? `![${name}](${logo}) **${name}**` : `**${name}**`;
     content.appendMarkdown(`${badge}  ${statusBadge(provider)}\n\n`);
     const quotas = showAll ? provider.quotas : provider.quotas.filter((quota, index) => index === 0 || (quota.usedPercent ?? 0) > 0);
     for (const quota of quotas) {
-      content.appendMarkdown(`${quota.label}: **${quota.usedPercent?.toFixed(0) ?? "—"}% usado**${quota.resetInSeconds ? ` · reinicia en ${formatDuration(quota.resetInSeconds)}` : ""}\n\n`);
+      content.appendMarkdown(`${escapeMd(quota.label)}: **${quota.usedPercent?.toFixed(0) ?? "—"}% usado**${quota.resetInSeconds ? ` · reinicia en ${formatDuration(quota.resetInSeconds)}` : ""}\n\n`);
     }
   }
   content.appendMarkdown(`Actualizado: ${new Date(snapshot.generatedAt).toLocaleString()}`);
