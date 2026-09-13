@@ -46,6 +46,10 @@ pub struct AppConfig {
     /// Exponer el sync HTTP en LAN (0.0.0.0). Solo con opt-in explícito.
     #[serde(default)]
     pub sync_lan: bool,
+    /// Teléfonos vinculados por Sync V2. Los secretos NUNCA viven aquí — solo
+    /// en Credential Manager, cuenta `device-secret-<client_device_id>`.
+    #[serde(default)]
+    pub paired_devices: Vec<PairedDevice>,
     /// True when `load()` could not parse `config.toml` and fell back to
     /// defaults after backing the bad file aside. Never persisted; callers
     /// must not overwrite `config.toml` while this is set.
@@ -85,6 +89,17 @@ pub struct ProviderConfig {
     pub region: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairedDevice {
+    pub client_device_id: String,
+    pub name: String,
+    pub created_at: String,
+    #[serde(default)]
+    pub last_seen_at: Option<String>,
+    #[serde(default)]
+    pub revoked: bool,
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -99,6 +114,7 @@ impl Default for AppConfig {
             sync_enabled: false,
             sync_export_dir: None,
             sync_lan: false,
+            paired_devices: Vec::new(),
             load_recovered: false,
         }
     }
@@ -243,6 +259,46 @@ impl AppConfig {
             .filter(|id| self.is_enabled(*id))
             .collect()
     }
+
+    pub fn upsert_paired_device(&mut self, client_device_id: &str, name: &str) -> &PairedDevice {
+        if let Some(existing) = self
+            .paired_devices
+            .iter_mut()
+            .find(|d| d.client_device_id == client_device_id)
+        {
+            existing.name = name.to_string();
+            existing.revoked = false;
+            existing.last_seen_at = None;
+        } else {
+            self.paired_devices.push(PairedDevice {
+                client_device_id: client_device_id.to_string(),
+                name: name.to_string(),
+                created_at: crate::model::now_iso(),
+                last_seen_at: None,
+                revoked: false,
+            });
+        }
+        self.paired_devices
+            .iter()
+            .find(|d| d.client_device_id == client_device_id)
+            .expect("just inserted or updated above")
+    }
+
+    pub fn revoke_device(&mut self, client_device_id: &str) -> bool {
+        let Some(device) = self
+            .paired_devices
+            .iter_mut()
+            .find(|d| d.client_device_id == client_device_id)
+        else {
+            return false;
+        };
+        device.revoked = true;
+        true
+    }
+
+    pub fn has_active_paired_device(&self) -> bool {
+        self.paired_devices.iter().any(|d| !d.revoked)
+    }
 }
 
 /// Windows can pad a Credential Manager blob to an even byte count with a
@@ -278,7 +334,11 @@ pub fn verify_keyring_api_key(id: VendorId, expected: &str) -> Result<(), String
     let (stored, password_err, secret_err) = match entry.get_password() {
         Ok(value) => (Some(value), None, None),
         Err(password_err) => match entry.get_secret() {
-            Ok(secret) => (Some(decode_keyring_secret(&secret)), Some(password_err), None),
+            Ok(secret) => (
+                Some(decode_keyring_secret(&secret)),
+                Some(password_err),
+                None,
+            ),
             Err(secret_err) => (None, Some(password_err), Some(secret_err)),
         },
     };
@@ -336,6 +396,38 @@ pub fn migrate_legacy_credentials(cfg: &mut AppConfig) -> bool {
         }
     }
     changed
+}
+
+fn device_secret_account(client_device_id: &str) -> String {
+    format!("device-secret-{client_device_id}")
+}
+
+/// Raw 256-bit secret storage — deliberately `set_secret`/`get_secret`
+/// (bytes), not the NUL-tolerant string path `read_keyring_entry` uses for
+/// API keys: a random secret is not a NUL-terminated string, so there's no
+/// padding quirk to work around here in the first place.
+pub fn store_device_secret(client_device_id: &str, secret: &[u8; 32]) -> Result<(), String> {
+    let entry = keyring::Entry::new(CREDENTIAL_SERVICE, &device_secret_account(client_device_id))
+        .map_err(|e| e.to_string())?;
+    entry.set_secret(secret).map_err(|e| e.to_string())
+}
+
+pub fn read_device_secret(client_device_id: &str) -> Option<[u8; 32]> {
+    let entry =
+        keyring::Entry::new(CREDENTIAL_SERVICE, &device_secret_account(client_device_id)).ok()?;
+    entry.get_secret().ok()?.try_into().ok()
+}
+
+/// Idempotent: revoking a device that was already deleted (or never had a
+/// secret) is not an error.
+pub fn delete_device_secret(client_device_id: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new(CREDENTIAL_SERVICE, &device_secret_account(client_device_id))
+        .map_err(|e| e.to_string())?;
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -565,5 +657,80 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), b"new complete value");
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn upsert_paired_device_inserts_then_updates_in_place() {
+        let mut cfg = AppConfig::default();
+        cfg.upsert_paired_device("phone-1", "Galaxy S26");
+        assert_eq!(cfg.paired_devices.len(), 1);
+        let created_at = cfg.paired_devices[0].created_at.clone();
+        assert!(!cfg.paired_devices[0].revoked);
+        assert!(cfg.paired_devices[0].last_seen_at.is_none());
+
+        cfg.revoke_device("phone-1");
+        assert!(cfg.paired_devices[0].revoked);
+
+        // Re-pairing the same phone: upsert, not a second row.
+        cfg.upsert_paired_device("phone-1", "Galaxy S26 (renamed)");
+        assert_eq!(
+            cfg.paired_devices.len(),
+            1,
+            "re-pairing must not create a second row"
+        );
+        assert!(!cfg.paired_devices[0].revoked, "re-pairing clears revoked");
+        assert_eq!(cfg.paired_devices[0].name, "Galaxy S26 (renamed)");
+        assert_eq!(
+            cfg.paired_devices[0].created_at, created_at,
+            "first-paired date is preserved"
+        );
+        assert!(
+            cfg.paired_devices[0].last_seen_at.is_none(),
+            "fresh secret resets last_seen_at"
+        );
+    }
+
+    #[test]
+    fn has_active_paired_device_ignores_revoked_rows() {
+        let mut cfg = AppConfig::default();
+        assert!(!cfg.has_active_paired_device());
+        cfg.upsert_paired_device("phone-1", "Galaxy");
+        assert!(cfg.has_active_paired_device());
+        cfg.revoke_device("phone-1");
+        assert!(!cfg.has_active_paired_device());
+    }
+
+    #[test]
+    fn revoke_device_reports_whether_a_row_existed() {
+        let mut cfg = AppConfig::default();
+        assert!(!cfg.revoke_device("no-such-device"));
+        cfg.upsert_paired_device("phone-1", "Galaxy");
+        assert!(cfg.revoke_device("phone-1"));
+    }
+
+    #[test]
+    fn paired_devices_survive_a_config_reload() {
+        let dir = scratch_dir("paired-devices");
+        let path = dir.join("config.toml");
+        let mut cfg = AppConfig::default();
+        cfg.upsert_paired_device("phone-1", "Galaxy S26");
+        atomic_write(&path, toml::to_string_pretty(&cfg).unwrap().as_bytes()).unwrap();
+
+        let reloaded = AppConfig::load_from(&path);
+        assert_eq!(reloaded.paired_devices.len(), 1);
+        assert_eq!(reloaded.paired_devices[0].client_device_id, "phone-1");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn device_secret_round_trips_through_credential_manager() {
+        let id = format!("pairing-smoke-{}", std::process::id());
+        let secret = [7u8; 32];
+        store_device_secret(&id, &secret).unwrap();
+        assert_eq!(read_device_secret(&id), Some(secret));
+        delete_device_secret(&id).unwrap();
+        assert_eq!(read_device_secret(&id), None);
+        // Deleting an already-absent secret is not an error (revoke is idempotent).
+        assert!(delete_device_secret(&id).is_ok());
     }
 }
