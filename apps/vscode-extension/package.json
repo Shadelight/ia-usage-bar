@@ -110,8 +110,9 @@
   },
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
+    "check-version": "node scripts/check-published-version.mjs",
     "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20",
-    "package": "npm run check && npm run bundle && vsce package --no-dependencies"
+    "package": "npm run check-version && npm run check && npm run bundle && vsce package --no-dependencies"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
