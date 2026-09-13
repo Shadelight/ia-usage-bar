@@ -428,6 +428,10 @@ fn merge_snapshot(
 pub(crate) fn run_loop(app: AppHandle) {
     loop {
         refresh_sync(&app, None);
+        if let Err(error) = crate::sync_service::ensure_sync_server(&app) {
+            eprintln!("sync server tick: {error}");
+        }
+        crate::sync_service::flush_last_seen(&app);
         let state = app.state::<AppState>();
         let (adaptive, manual, idle) = {
             let cfg = lock_or_recover(&state.config);

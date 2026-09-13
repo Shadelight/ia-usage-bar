@@ -6,8 +6,8 @@
 //! CLI). Este crate solo conserva ventana/tray/notificaciones/comandos.
 
 pub use iausage_core::{
-    cache, config, cost, descriptor, doctor, guard, health, http, jwt, logfile, model, pace,
-    paths, pricing, providers, recommend, refresh_policy, snapshot_v1, sync, sync_server, watch,
+    cache, config, cost, descriptor, doctor, guard, health, http, jwt, logfile, model, pace, paths,
+    pricing, providers, recommend, refresh_policy, snapshot_v1, sync, sync_server, watch,
 };
 mod commands;
 mod dashboard;
@@ -105,6 +105,8 @@ pub fn run() {
                 rerun_requested: AtomicBool::new(false),
                 backoff_until: Mutex::new(HashMap::new()),
                 sync_server: Mutex::new(sync_service::SyncServerState::default()),
+                pending_pairing: Mutex::new(None),
+                last_seen: Mutex::new(HashMap::new()),
             });
 
             let tray_header =

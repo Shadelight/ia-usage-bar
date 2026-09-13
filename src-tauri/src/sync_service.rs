@@ -48,11 +48,27 @@ fn stop_locked(state: &mut SyncServerState) {
     state.addr.clear();
 }
 
-/// Arranca, reinicia o detiene el servidor según la config actual.
-/// Idempotente: si ya corre con los mismos ajustes no hace nada.
+/// Pure decision the rest of `ensure_sync_server` acts on. Kept as its own
+/// function so the truth table can be tested without a Tauri AppHandle.
+pub(crate) fn server_needed(
+    sync_enabled: bool,
+    has_pending_pairing: bool,
+    has_active_paired_device: bool,
+) -> bool {
+    sync_enabled || has_pending_pairing || has_active_paired_device
+}
+
+pub(crate) struct PendingPairingRuntime {
+    pub(crate) core: iausage_core::pairing::PendingPairing,
+    pub(crate) expires_at_iso: String,
+}
+
+/// Arranca, reinicia o detiene el servidor según la config actual y el
+/// pareo V2 en curso. Idempotente: si ya corre con los mismos ajustes no
+/// hace nada.
 ///
-/// `Err` = se pidió sync activo pero el servidor no quedó escuchando de
-/// verdad (bind ocupado, passphrase ilegible, sin device id). El llamador
+/// `Err` = se necesitaba el servidor pero no quedó escuchando de verdad
+/// (bind ocupado, passphrase V1 ilegible, sin device id). El llamador
 /// decide si eso debe revertir un toggle de la UI; este fn nunca deja
 /// `running = true` sin un socket real detrás.
 pub(crate) fn ensure_sync_server(app: &AppHandle) -> Result<(), String> {
@@ -60,23 +76,41 @@ pub(crate) fn ensure_sync_server(app: &AppHandle) -> Result<(), String> {
     let cfg = lock_or_recover(&state.config).clone();
     let mut server = lock_or_recover(&state.sync_server);
 
-    if !cfg.sync_enabled || cfg.load_recovered {
+    // Descarta un pairing pendiente que ya venció ANTES de decidir si el
+    // servidor sigue haciendo falta — el tick del refresh loop es lo que
+    // hace que esto se vuelva a evaluar sin intervención del usuario.
+    {
+        let mut pending = lock_or_recover(&state.pending_pairing);
+        if pending.as_ref().is_some_and(|p| p.core.is_expired()) {
+            *pending = None;
+        }
+    }
+    let has_pending_pairing = lock_or_recover(&state.pending_pairing).is_some();
+    let needed = server_needed(
+        cfg.sync_enabled,
+        has_pending_pairing,
+        cfg.has_active_paired_device(),
+    );
+
+    if !needed || cfg.load_recovered {
         if server.running {
             stop_locked(&mut server);
         }
         server.last_error = None;
         return Ok(());
     }
-    let passphrase = match crate::sync::load_passphrase() {
-        Ok(passphrase) => passphrase,
-        Err(error) => {
-            if server.running {
-                stop_locked(&mut server);
-            }
-            server.last_error = Some(error.clone());
-            return Err(error);
-        }
-    };
+
+    // V1 passphrase se sigue cargando solo si V1 realmente lo necesita — un
+    // pareo V2 puro nunca debería fallar por falta de passphrase. Una
+    // passphrase vacía aquí es segura: la ruta `/v1/snapshot` fallará al
+    // descifrar para quien la use sin una passphrase real, pero esa ruta
+    // solo es alcanzable por un teléfono ya emparejado en V1, que por
+    // definición ya tiene una passphrase real guardada; una instalación
+    // solo-V2 (sin `sync_enabled`) nunca dispara este camino porque
+    // `server_needed` no habría arrancado el servidor por razones V1 si no
+    // hubiera una passphrase V1 real que hubiera puesto `sync_enabled =
+    // true`.
+    let passphrase = crate::sync::load_passphrase().unwrap_or_default();
     let device_id = match crate::sync::load_or_create_device_id() {
         Ok(id) => id,
         Err(error) => {
@@ -134,6 +168,7 @@ pub(crate) fn ensure_sync_server(app: &AppHandle) -> Result<(), String> {
             ))
         })
     };
+    let pairing_hooks = build_pairing_hooks(app);
     let stop = server.stop.clone();
     let addr = serve_cfg.addr();
     let lan = serve_cfg.lan;
@@ -148,7 +183,7 @@ pub(crate) fn ensure_sync_server(app: &AppHandle) -> Result<(), String> {
             &supplier,
             &passphrase,
             &stop,
-            None,
+            Some(&pairing_hooks),
         );
         // El hilo terminó: si nadie llamó a stop_locked (que ya deja el
         // estado consistente) esto fue una muerte inesperada del socket.
@@ -171,4 +206,98 @@ pub(crate) fn ensure_sync_server(app: &AppHandle) -> Result<(), String> {
     server.last_error = None;
     eprintln!("sync server listening on {addr}");
     Ok(())
+}
+
+/// V2 pairing hooks backed by real `AppState` — this is the only place that
+/// turns the closures `sync_server` expects into something touching config
+/// and Credential Manager.
+fn build_pairing_hooks(app: &AppHandle) -> iausage_core::sync_server::PairingHooks {
+    use iausage_core::sync_server::PairOutcome;
+
+    let try_consume = app.clone();
+    let snapshot_key_for = app.clone();
+    iausage_core::sync_server::PairingHooks {
+        try_consume_token: Arc::new(move |token, client_device_id, name| {
+            let state = try_consume.state::<AppState>();
+            let mut pending = lock_or_recover(&state.pending_pairing);
+            let Some(runtime) = pending.as_ref() else {
+                return PairOutcome::NoPendingPairing;
+            };
+            if runtime.core.is_expired() || !runtime.core.matches_token(token) {
+                return PairOutcome::Rejected;
+            }
+            let secret = runtime.core.secret;
+            if crate::config::store_device_secret(client_device_id, &secret).is_err() {
+                return PairOutcome::Rejected;
+            }
+            let mut cfg = lock_or_recover(&state.config).clone();
+            cfg.upsert_paired_device(client_device_id, name);
+            if cfg.save().is_err() {
+                return PairOutcome::Rejected;
+            }
+            *lock_or_recover(&state.config) = cfg;
+            *pending = None;
+            PairOutcome::Paired
+        }),
+        snapshot_key_for: Arc::new(move |client_device_id| {
+            let state = snapshot_key_for.state::<AppState>();
+            let cfg = lock_or_recover(&state.config);
+            let active = cfg
+                .paired_devices
+                .iter()
+                .any(|d| d.client_device_id == client_device_id && !d.revoked);
+            if !active {
+                return None;
+            }
+            lock_or_recover(&state.last_seen).insert(client_device_id.to_string(), now_iso());
+            crate::config::read_device_secret(client_device_id)
+        }),
+    }
+}
+
+/// Vuelca `AppState.last_seen` a `config.toml` (piggybacked on the refresh
+/// loop's own tick — see the spec's "last_seen_at is not written on every
+/// /v2/snapshot call" note). No-op, no save, when nothing changed since the
+/// last flush.
+pub(crate) fn flush_last_seen(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let pending: std::collections::HashMap<String, String> =
+        lock_or_recover(&state.last_seen).drain().collect();
+    if pending.is_empty() {
+        return;
+    }
+    let mut cfg = lock_or_recover(&state.config).clone();
+    let mut changed = false;
+    for device in cfg.paired_devices.iter_mut() {
+        if let Some(seen_at) = pending.get(&device.client_device_id) {
+            device.last_seen_at = Some(seen_at.clone());
+            changed = true;
+        }
+    }
+    if changed && cfg.save().is_ok() {
+        *lock_or_recover(&state.config) = cfg;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_needed_truth_table() {
+        assert!(!server_needed(false, false, false));
+        assert!(
+            server_needed(true, false, false),
+            "legacy V1 toggle alone must keep the server up"
+        );
+        assert!(
+            server_needed(false, true, false),
+            "a pending pairing alone must start the server"
+        );
+        assert!(
+            server_needed(false, false, true),
+            "an active V2 device alone must keep the server up"
+        );
+        assert!(server_needed(true, true, true));
+    }
 }

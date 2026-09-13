@@ -37,6 +37,15 @@ pub(crate) struct AppState {
     /// Servidor sync M5 (hilo dedicado). Se arranca/reinicia/detiene con
     /// `sync_service::ensure_sync_server` según la config.
     pub(crate) sync_server: Mutex<crate::sync_service::SyncServerState>,
+    /// Sesión de pareo V2 en curso (RAM únicamente — nunca se serializa, ver
+    /// docs/superpowers/specs/2026-09-13-passwordless-device-pairing.md).
+    pub(crate) pending_pairing: Mutex<Option<crate::sync_service::PendingPairingRuntime>>,
+    /// `last_seen_at` por dispositivo V2, actualizado en cada
+    /// `/v2/snapshot` — no se escribe `config.toml` en cada poll del
+    /// teléfono, solo se vuelca con `flush_last_seen` en el tick del
+    /// refresh loop. Perder unos minutos de precisión aquí en un crash no
+    /// importa: es un campo cosmético, no de seguridad.
+    pub(crate) last_seen: Mutex<HashMap<String, String>>,
 }
 
 pub(crate) struct TrayMenuState {
