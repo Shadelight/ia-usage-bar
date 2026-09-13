@@ -127,11 +127,48 @@ fn handle(
     let _ = request.respond(json_response(body, status));
 }
 
+/// Solo el bind: separado de `serve` para que un llamador (la GUI) pueda
+/// confirmar que el puerto se abrió antes de marcar el servidor "activo" y
+/// recién entonces mover el bucle bloqueante a un hilo de fondo. Sin esto,
+/// un puerto ocupado deja el estado en pantalla diciendo "activo" con
+/// ningún socket real detrás.
+pub fn bind(cfg: &ServeConfig) -> Result<tiny_http::Server, String> {
+    tiny_http::Server::http(&cfg.addr()).map_err(|e| e.to_string())
+}
+
 /// Sirve hasta que `stop` se active. Bloquea el hilo actual.
 ///
 /// La passphrase se carga UNA vez al arrancar (quien llama la lee de
 /// keyring) y solo vive en este hilo: nada de depender del store en cada
 /// petición, y el servidor es testeable sin keyring.
+pub fn serve(
+    server: &tiny_http::Server,
+    app_version: &str,
+    device_id: &str,
+    lan: bool,
+    make_payload: &PayloadFn,
+    passphrase: &str,
+    stop: &Arc<AtomicBool>,
+) -> Result<(), String> {
+    while !stop.load(Ordering::Relaxed) {
+        match server.recv_timeout(Duration::from_millis(200)) {
+            Ok(Some(request)) => handle(
+                request,
+                app_version,
+                device_id,
+                lan,
+                make_payload,
+                passphrase,
+            ),
+            Ok(None) => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(())
+}
+
+/// Bind + serve en una sola llamada bloqueante. Usado por el CLI y los
+/// tests, donde no hace falta separar "¿abrió el puerto?" de "servir".
 pub fn run_server(
     cfg: &ServeConfig,
     app_version: &str,
@@ -140,22 +177,16 @@ pub fn run_server(
     passphrase: &str,
     stop: Arc<AtomicBool>,
 ) -> Result<(), String> {
-    let server = tiny_http::Server::http(&cfg.addr()).map_err(|e| e.to_string())?;
-    while !stop.load(Ordering::Relaxed) {
-        match server.recv_timeout(Duration::from_millis(200)) {
-            Ok(Some(request)) => handle(
-                request,
-                app_version,
-                device_id,
-                cfg.lan,
-                &make_payload,
-                passphrase,
-            ),
-            Ok(None) => {}
-            Err(e) => return Err(e.to_string()),
-        }
-    }
-    Ok(())
+    let server = bind(cfg)?;
+    serve(
+        &server,
+        app_version,
+        device_id,
+        cfg.lan,
+        &make_payload,
+        passphrase,
+        &stop,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -241,8 +272,97 @@ impl PairingInfo {
 
 /// IP LAN para el QR (la que el teléfono debe alcanzar). `None` = sin red
 /// local detectable.
+///
+/// `local_ip_address::local_ip()` toma en Windows la primera interfaz con
+/// ruta por defecto en el orden de enumeración de `GetAdaptersAddresses` —
+/// no la de menor métrica. Probado en hardware real con Wi-Fi + Ethernet
+/// activos a la vez, devolvía la IP de Ethernet aunque el teléfono estaba
+/// en Wi-Fi.
+///
+/// Tampoco basta con preguntarle al SO la ruta por defecto real (probado:
+/// en esta misma máquina la ruta por defecto del sistema también prefiere
+/// Ethernet por métrica). El pareo con el móvil solo puede llegar por la
+/// red a la que el teléfono está conectado, casi siempre Wi-Fi, así que se
+/// prioriza por tipo de adaptador en vez de por métrica de ruta: se
+/// enumeran las interfaces IPv4 privadas, se descartan las virtuales
+/// conocidas (VPN, contenedores, hipervisores) y se prefiere Wi-Fi sobre
+/// Ethernet sobre cualquier otra.
 pub fn lan_ip() -> Option<String> {
-    local_ip_address::local_ip().ok().map(|ip| ip.to_string())
+    lan_candidates()
+        .into_iter()
+        .min_by_key(|c| c.priority())
+        .map(|c| c.ip.to_string())
+}
+
+struct LanCandidate {
+    ip: std::net::Ipv4Addr,
+    name: String,
+}
+
+impl LanCandidate {
+    fn priority(&self) -> u8 {
+        let name = self.name.to_lowercase();
+        if name.contains("wi-fi") || name.contains("wifi") || name.contains("wlan") {
+            0
+        } else if name.contains("ethernet") || name.contains("lan") {
+            1
+        } else {
+            2
+        }
+    }
+}
+
+/// Nombres de adaptadores virtuales que nunca deben ofrecerse como IP LAN
+/// para el pareo móvil: el teléfono no puede alcanzarlos.
+const VIRTUAL_ADAPTER_HINTS: &[&str] = &[
+    "virtualbox",
+    "vmware",
+    "hyper-v",
+    "vethernet",
+    "docker",
+    "wsl",
+    "tailscale",
+    "zerotier",
+    "loopback",
+    "tap-",
+    "tun",
+    "npcap",
+    "vpn",
+];
+
+fn lan_candidates() -> Vec<LanCandidate> {
+    let Ok(interfaces) = local_ip_address::list_afinet_netifas() else {
+        return Vec::new();
+    };
+    interfaces
+        .into_iter()
+        .filter_map(|(name, ip)| as_candidate(&name, ip))
+        .collect()
+}
+
+/// Filtro puro (sin tocar la red) para poder probar las reglas de exclusión
+/// sin depender de las interfaces reales de la máquina que corre el test.
+fn as_candidate(name: &str, ip: std::net::IpAddr) -> Option<LanCandidate> {
+    let std::net::IpAddr::V4(v4) = ip else {
+        return None;
+    };
+    // is_private() cubre 10/8, 172.16/12 y 192.168/16; is_link_local()
+    // descarta el rango APIPA 169.254/16 que Windows asigna cuando la
+    // interfaz no tiene DHCP funcionando.
+    if v4.is_loopback() || v4.is_link_local() || !v4.is_private() {
+        return None;
+    }
+    let lower = name.to_lowercase();
+    if VIRTUAL_ADAPTER_HINTS
+        .iter()
+        .any(|hint| lower.contains(hint))
+    {
+        return None;
+    }
+    Some(LanCandidate {
+        ip: v4,
+        name: name.to_string(),
+    })
 }
 
 /// QR en PNG (zona de silencio incluida) listo para mostrar o guardar.
@@ -343,6 +463,47 @@ mod tests {
         (handle, stop)
     }
 
+    // Regresión: la GUI (sync_service::ensure_sync_server) solo puede marcar
+    // el servidor "activo" DESPUÉS de que `bind` confirme el puerto. Este
+    // test prueba la primitiva de la que depende esa garantía: un puerto ya
+    // ocupado debe fallar aquí, no en silencio.
+    #[test]
+    fn bind_falla_con_puerto_ocupado() {
+        let port = free_port();
+        let _holder = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        let cfg = ServeConfig::loopback(port);
+        assert!(
+            bind(&cfg).is_err(),
+            "el puerto ya estaba ocupado por _holder"
+        );
+    }
+
+    #[test]
+    fn bind_y_serve_atienden_meta() {
+        let port = free_port();
+        let cfg = ServeConfig::loopback(port);
+        let server = bind(&cfg).expect("puerto libre debería bindear");
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = stop.clone();
+        let make_payload = sample_payload_fn();
+        let handle = std::thread::spawn(move || {
+            serve(
+                &server,
+                "test",
+                "testdev",
+                false,
+                &make_payload,
+                "clave-test",
+                &stop_clone,
+            )
+            .unwrap();
+        });
+        let (status, _) = http_get(port, "/v1/meta");
+        stop.store(true, Ordering::Relaxed);
+        let _ = handle.join();
+        assert_eq!(status, 200);
+    }
+
     fn http_get(port: u16, path: &str) -> (u16, String) {
         // Cliente mínimo sobre TCP: el core no depende de un cliente HTTP en tests.
         use std::io::{Read, Write};
@@ -427,5 +588,70 @@ mod tests {
         let png = pairing_qr_png(&info.to_uri(), 256).unwrap();
         assert!(png.starts_with(PNG_MAGIC));
         assert!(png.len() > 500, "QR sospechosamente pequeño");
+    }
+
+    // Regresión: la IP para el QR nunca debe ser loopback ni una interfaz
+    // arbitraria elegida solo porque apareció primero al enumerar adaptadores.
+    #[test]
+    fn lan_ip_no_es_loopback() {
+        if let Some(ip) = lan_ip() {
+            assert_ne!(ip, "127.0.0.1");
+            assert!(ip.parse::<std::net::Ipv4Addr>().is_ok(), "{ip} no es IPv4");
+        }
+        // `None` es válido en runners sin red (CI aislado): no falla el test.
+    }
+
+    fn v4(s: &str) -> std::net::IpAddr {
+        std::net::IpAddr::V4(s.parse().unwrap())
+    }
+
+    #[test]
+    fn loopback_se_descarta() {
+        assert!(as_candidate("Loopback", v4("127.0.0.1")).is_none());
+    }
+
+    #[test]
+    fn apipa_se_descarta() {
+        assert!(as_candidate("Wi-Fi", v4("169.254.1.4")).is_none());
+    }
+
+    #[test]
+    fn ip_publica_se_descarta() {
+        assert!(as_candidate("Ethernet", v4("8.8.8.8")).is_none());
+    }
+
+    #[test]
+    fn adaptadores_virtuales_conocidos_se_descartan() {
+        for name in [
+            "VirtualBox Host-Only Network",
+            "vEthernet (WSL)",
+            "Tailscale",
+            "Hyper-V Virtual Ethernet Adapter",
+            "Docker vEthernet",
+        ] {
+            assert!(
+                as_candidate(name, v4("192.168.56.1")).is_none(),
+                "{name} debería descartarse"
+            );
+        }
+    }
+
+    #[test]
+    fn wifi_gana_a_ethernet_aunque_ethernet_aparezca_primero() {
+        // Reproduce el hardware real: Ethernet 192.168.100.2 y Wi-Fi
+        // 192.168.50.116 activos a la vez, Ethernet enumerado primero.
+        let candidates = vec![
+            as_candidate("Ethernet", v4("192.168.100.2")).unwrap(),
+            as_candidate("Wi-Fi", v4("192.168.50.116")).unwrap(),
+        ];
+        let chosen = candidates.into_iter().min_by_key(|c| c.priority()).unwrap();
+        assert_eq!(chosen.ip.to_string(), "192.168.50.116");
+    }
+
+    #[test]
+    fn seleccion_manual_respeta_una_interfaz_disponible_cuando_no_hay_wifi() {
+        let candidates = vec![as_candidate("Ethernet", v4("192.168.100.2")).unwrap()];
+        let chosen = candidates.into_iter().min_by_key(|c| c.priority()).unwrap();
+        assert_eq!(chosen.ip.to_string(), "192.168.100.2");
     }
 }

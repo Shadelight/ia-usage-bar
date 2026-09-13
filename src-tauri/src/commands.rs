@@ -998,6 +998,7 @@ pub(crate) struct SyncStatus {
     lan: bool,
     server_running: bool,
     server_addr: String,
+    server_error: Option<String>,
     last_export: Option<SyncExportInfo>,
 }
 
@@ -1037,6 +1038,7 @@ pub(crate) fn sync_get_status(
         lan: cfg.sync_lan,
         server_running: server.running,
         server_addr: server.addr.clone(),
+        server_error: server.last_error.clone(),
         last_export: sync_last_export(&cfg, &device_id),
     })
 }
@@ -1051,10 +1053,19 @@ pub(crate) fn sync_set_enabled(
         return Err("sync: primero guarda una frase secreta".into());
     }
     let mut cfg = lock_or_recover(&state.config).clone();
+    let previous = cfg.sync_enabled;
     cfg.sync_enabled = enabled;
     cfg.save()?;
-    *lock_or_recover(&state.config) = cfg;
-    crate::sync_service::ensure_sync_server(&app);
+    *lock_or_recover(&state.config) = cfg.clone();
+    if let Err(error) = crate::sync_service::ensure_sync_server(&app) {
+        // El switch no puede quedar en ON con el servidor muerto: revertir
+        // la config guardada y devolver el error real (no un "detenido"
+        // genérico) para que la UI lo muestre.
+        cfg.sync_enabled = previous;
+        cfg.save()?;
+        *lock_or_recover(&state.config) = cfg;
+        return Err(error);
+    }
     Ok(())
 }
 
@@ -1073,8 +1084,7 @@ pub(crate) fn sync_set_passphrase(
         cfg.save()?;
         *lock_or_recover(&state.config) = cfg;
     }
-    crate::sync_service::ensure_sync_server(&app);
-    Ok(())
+    crate::sync_service::ensure_sync_server(&app)
 }
 
 #[tauri::command]
@@ -1102,11 +1112,17 @@ pub(crate) fn sync_set_lan(
     lan: bool,
 ) -> Result<(), String> {
     let mut cfg = lock_or_recover(&state.config).clone();
+    let previous = cfg.sync_lan;
     cfg.sync_lan = lan;
     cfg.save()?;
-    *lock_or_recover(&state.config) = cfg;
+    *lock_or_recover(&state.config) = cfg.clone();
     // Rebind: el bind (loopback vs 0.0.0.0) exige reiniciar el hilo.
-    crate::sync_service::ensure_sync_server(&app);
+    if let Err(error) = crate::sync_service::ensure_sync_server(&app) {
+        cfg.sync_lan = previous;
+        cfg.save()?;
+        *lock_or_recover(&state.config) = cfg;
+        return Err(error);
+    }
     Ok(())
 }
 

@@ -463,6 +463,35 @@ mod tests {
         assert!(!cfg.compact_mode);
     }
 
+    // Regresión: sin el feature `windows-native` (y equivalentes en otros
+    // SO), la crate `keyring` cae en su backend `mock`, que NO persiste
+    // entre instancias de `Entry` — cada `Entry::new()` es un almacén vacío
+    // propio. `store_api_key()` y `verify_keyring_api_key()` crean cada uno
+    // su propio `Entry`, así que bajo `mock` la escritura "funciona" pero la
+    // lectura inmediata siempre falla con "no pudo recuperarse". Este test
+    // falla bajo `mock` y pasa contra el almacén real del SO.
+    #[test]
+    fn keyring_persists_across_separate_entry_instances() {
+        let account = format!("iausage-keyring-smoke-{}", std::process::id());
+        let service = "com.alberth.iausagebar-test";
+        let secret = "smoke-test-secret-value";
+
+        let write_entry = keyring::Entry::new(service, &account).unwrap();
+        write_entry.set_password(secret).unwrap();
+        drop(write_entry);
+
+        let read_entry = keyring::Entry::new(service, &account).unwrap();
+        let stored = read_keyring_entry(&read_entry);
+        read_entry.delete_credential().ok();
+
+        assert_eq!(
+            stored.as_deref(),
+            Some(secret),
+            "la credencial no sobrevivió entre instancias de Entry: \
+             ¿falta el feature nativo del backend de keyring para este SO?"
+        );
+    }
+
     #[test]
     fn keyring_secret_decoder_tolerates_windows_nul_padding() {
         assert_eq!(

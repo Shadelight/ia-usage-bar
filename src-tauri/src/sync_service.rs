@@ -18,6 +18,9 @@ pub(crate) struct SyncServerState {
     pub(crate) running: bool,
     pub(crate) addr: String,
     pub(crate) lan: bool,
+    /// Motivo de la última falla (bind ocupado, passphrase ilegible, el
+    /// hilo murió solo). `None` cuando `running` es `true` y consistente.
+    pub(crate) last_error: Option<String>,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
 }
@@ -28,6 +31,7 @@ impl Default for SyncServerState {
             running: false,
             addr: String::new(),
             lan: false,
+            last_error: None,
             stop: Arc::new(AtomicBool::new(false)),
             handle: None,
         }
@@ -46,7 +50,12 @@ fn stop_locked(state: &mut SyncServerState) {
 
 /// Arranca, reinicia o detiene el servidor según la config actual.
 /// Idempotente: si ya corre con los mismos ajustes no hace nada.
-pub(crate) fn ensure_sync_server(app: &AppHandle) {
+///
+/// `Err` = se pidió sync activo pero el servidor no quedó escuchando de
+/// verdad (bind ocupado, passphrase ilegible, sin device id). El llamador
+/// decide si eso debe revertir un toggle de la UI; este fn nunca deja
+/// `running = true` sin un socket real detrás.
+pub(crate) fn ensure_sync_server(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let cfg = lock_or_recover(&state.config).clone();
     let mut server = lock_or_recover(&state.sync_server);
@@ -55,26 +64,27 @@ pub(crate) fn ensure_sync_server(app: &AppHandle) {
         if server.running {
             stop_locked(&mut server);
         }
-        return;
+        server.last_error = None;
+        return Ok(());
     }
     let passphrase = match crate::sync::load_passphrase() {
         Ok(passphrase) => passphrase,
         Err(error) => {
-            eprintln!("sync server not started: {error}");
             if server.running {
                 stop_locked(&mut server);
             }
-            return;
+            server.last_error = Some(error.clone());
+            return Err(error);
         }
     };
     let device_id = match crate::sync::load_or_create_device_id() {
         Ok(id) => id,
         Err(error) => {
-            eprintln!("sync server not started: {error}");
             if server.running {
                 stop_locked(&mut server);
             }
-            return;
+            server.last_error = Some(error.clone());
+            return Err(error);
         }
     };
 
@@ -88,11 +98,22 @@ pub(crate) fn ensure_sync_server(app: &AppHandle) {
         crate::sync_server::ServeConfig::loopback(crate::sync_server::SYNC_DEFAULT_PORT)
     };
     if server.running && server.addr == serve_cfg.addr() && server.lan == cfg.sync_lan {
-        return;
+        return Ok(());
     }
     if server.running {
         stop_locked(&mut server);
     }
+
+    // Bind síncrono ANTES de tocar `server.running`: si el puerto está
+    // ocupado (u otra falla de bind), el estado nunca dice "activo" con
+    // nada escuchando detrás.
+    let http_server = match crate::sync_server::bind(&serve_cfg) {
+        Ok(http_server) => http_server,
+        Err(error) => {
+            server.last_error = Some(error.clone());
+            return Err(error);
+        }
+    };
 
     // Foto de versión al arrancar; el snapshot se construye por petición.
     let app_version = app.package_info().version.to_string();
@@ -116,15 +137,29 @@ pub(crate) fn ensure_sync_server(app: &AppHandle) {
     let stop = server.stop.clone();
     let addr = serve_cfg.addr();
     let lan = serve_cfg.lan;
+    let this_stop = stop.clone();
+    let app_for_thread = app.clone();
     let handle = std::thread::spawn(move || {
-        if let Err(error) = crate::sync_server::run_server(
-            &serve_cfg,
+        let result = crate::sync_server::serve(
+            &http_server,
             &app_version,
             &device_id,
-            supplier,
+            serve_cfg.lan,
+            &supplier,
             &passphrase,
-            stop,
-        ) {
+            &stop,
+        );
+        // El hilo terminó: si nadie llamó a stop_locked (que ya deja el
+        // estado consistente) esto fue una muerte inesperada del socket.
+        // No puede quedar "running = true" mintiendo indefinidamente.
+        if let Err(error) = result {
+            let state = app_for_thread.state::<AppState>();
+            let mut server = lock_or_recover(&state.sync_server);
+            if Arc::ptr_eq(&server.stop, &this_stop) {
+                server.running = false;
+                server.addr.clear();
+                server.last_error = Some(error.clone());
+            }
             eprintln!("sync server stopped with error: {error}");
         }
     });
@@ -132,5 +167,7 @@ pub(crate) fn ensure_sync_server(app: &AppHandle) {
     server.running = true;
     server.addr = addr.clone();
     server.lan = lan;
+    server.last_error = None;
     eprintln!("sync server listening on {addr}");
+    Ok(())
 }

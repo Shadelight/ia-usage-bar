@@ -4,6 +4,25 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-13
+
+### Fixed
+
+- El backend de `keyring` no tenía habilitado ningún backend nativo por
+  sistema operativo, así que en Windows caía en su almacén "mock" en
+  memoria: guardar una API key o la frase secreta de sync parecía funcionar
+  pero la lectura inmediata siempre fallaba, y nada sobrevivía a un reinicio.
+  Habilitado `windows-native`/`apple-native`/`linux-native-sync-persistent`.
+- El QR de vinculación móvil podía anunciar la IP de un adaptador Ethernet
+  inactivo en vez de la del Wi-Fi real cuando ambos tenían puerta de enlace
+  por defecto activa. La selección de IP LAN ahora descarta interfaces
+  virtuales y de loopback/APIPA y prioriza Wi-Fi sobre Ethernet sobre
+  cualquier otra.
+- El servidor de sync podía quedar marcado como "activo" en la interfaz
+  aunque el bind del puerto hubiera fallado o el hilo hubiera muerto solo;
+  `sync_set_enabled`/`sync_set_lan` ahora revierten el ajuste y devuelven el
+  error real cuando el servidor no arranca de verdad.
+
 ## [0.3.0] - 2026-09-13
 
 ### Added

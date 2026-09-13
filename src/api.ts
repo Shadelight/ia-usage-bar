@@ -208,6 +208,7 @@ export interface SyncStatusDto {
   lan: boolean;
   serverRunning: boolean;
   serverAddr: string;
+  serverError: string | null;
   lastExport: SyncExportInfo | null;
 }
 

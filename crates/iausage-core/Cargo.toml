@@ -1,6 +1,6 @@
 [package]
 name = "iausage-core"
-version = "0.3.0"
+version = "0.3.1"
 description = "Shared provider pipeline for IA Usage (GUI + CLI)"
 authors = ["Alberth Salazar"]
 edition = "2021"
@@ -16,7 +16,7 @@ dirs = "5"
 toml = "0.8"
 base64 = "0.22"
 rusqlite = { version = "0.32", features = ["bundled"] }
-keyring = "3"
+keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native-sync-persistent"] }
 # M5 sync: Argon2id -> XChaCha20-Poly1305, sales/nonces aleatorios, fingerprint.
 argon2 = "0.5"
 chacha20poly1305 = "0.10"

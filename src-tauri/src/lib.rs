@@ -281,8 +281,12 @@ pub fn run() {
             // con debounce sin adelantar el polling de proveedores remotos.
             start_local_watch(app.handle().clone());
 
-            // Servidor sync M5: solo arranca si está activo en config.
-            sync_service::ensure_sync_server(app.handle());
+            // Servidor sync M5: solo arranca si está activo en config. Un
+            // fallo aquí (passphrase ilegible, puerto ocupado) ya queda en
+            // SyncServerState.last_error para que la UI lo muestre.
+            if let Err(error) = sync_service::ensure_sync_server(app.handle()) {
+                eprintln!("sync server not started at launch: {error}");
+            }
 
             let h2 = app.handle().clone();
             std::thread::spawn(move || {

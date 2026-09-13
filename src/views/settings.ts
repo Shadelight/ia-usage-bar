@@ -433,11 +433,17 @@ function syncStatusRow(label: string, value: string, id: string): string {
   return `<div class="row"><span>${escapeHtml(label)}</span><strong id="${id}">${escapeHtml(value)}</strong></div>`;
 }
 
+/** "detenido" a secas engloba passphrase ilegible, puerto ocupado, hilo
+ * muerto: mostrar el motivo real en vez de mandar al usuario a PowerShell. */
+function syncServerLabel(st: SyncStatusDto): string {
+  if (st.serverRunning) return `${t("syncServerRunning")} · ${st.serverAddr}`;
+  if (st.serverError) return `${t("syncServerStopped")} — ${st.serverError}`;
+  return t("syncServerStopped");
+}
+
 function syncBody(): string {
   const st = syncStatus;
-  const server = st
-    ? `${st.serverRunning ? t("syncServerRunning") : t("syncServerStopped")}${st.serverRunning ? ` · ${st.serverAddr}` : ""}`
-    : "—";
+  const server = st ? syncServerLabel(st) : "—";
   const lastExport = st?.lastExport ? `${st.lastExport.path} (${st.lastExport.bytes} B)` : t("syncNeverExported");
   return `
     <p class="lede">${t("syncLede")}</p>
@@ -484,10 +490,7 @@ export async function reloadSyncStatus(): Promise<void> {
   };
   set("sync-device", `${st.value.deviceId} (${st.value.fingerprint})`);
   set("sync-dir", st.value.exportDir);
-  set(
-    "sync-server",
-    `${st.value.serverRunning ? t("syncServerRunning") : t("syncServerStopped")}${st.value.serverRunning ? ` · ${st.value.serverAddr}` : ""}`,
-  );
+  set("sync-server", syncServerLabel(st.value));
   set("sync-export", st.value.lastExport ? `${st.value.lastExport.path} (${st.value.lastExport.bytes} B)` : t("syncNeverExported"));
   const toggle = document.getElementById("cfg-sync") as HTMLInputElement | null;
   if (toggle && document.activeElement !== toggle) toggle.checked = st.value.enabled;
