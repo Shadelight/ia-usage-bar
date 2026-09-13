@@ -3,7 +3,7 @@ import { CliClient } from "./cli-client";
 import { StatusBar } from "./status-bar";
 
 export function activate(context: vscode.ExtensionContext): void {
-  const status = new StatusBar();
+  const status = new StatusBar(context.extensionUri);
   const client = new CliClient(
     (message) => status.update(message.snapshot),
     (error) => {

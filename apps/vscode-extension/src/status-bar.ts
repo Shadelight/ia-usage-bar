@@ -1,12 +1,31 @@
+import * as fs from "fs";
 import * as vscode from "vscode";
 import { settings } from "./settings";
 import { DashboardSnapshot, Provider } from "./types";
 
+const PROVIDER_LOGOS: Record<string, string> = { anthropic: "anthropic.svg", openai: "openai.svg", cursor: "cursor.svg" };
+
+/** Reads each bundled provider logo once and inlines it as a data: URI the tooltip's Markdown can render as `<img>`. */
+function loadProviderLogos(extensionUri: vscode.Uri): Record<string, string> {
+  const logos: Record<string, string> = {};
+  for (const [id, file] of Object.entries(PROVIDER_LOGOS)) {
+    try {
+      const svg = fs.readFileSync(vscode.Uri.joinPath(extensionUri, "media", "providers", file).fsPath, "utf8");
+      logos[id] = `data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`;
+    } catch {
+      // Missing/unreadable logo: the tooltip falls back to text-only rows.
+    }
+  }
+  return logos;
+}
+
 export class StatusBar implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  private readonly logos: Record<string, string>;
   private snapshot?: DashboardSnapshot;
 
-  constructor() {
+  constructor(extensionUri: vscode.Uri) {
+    this.logos = loadProviderLogos(extensionUri);
     this.item.command = "iaUsage.show";
     this.item.name = "IA Usage";
     this.item.text = "$(pulse) IA Usage";
@@ -20,7 +39,7 @@ export class StatusBar implements vscode.Disposable {
     const providers = visible(snapshot, config.providers);
     const icon = providers.length === 0 ? "pulse" : providers.every((provider) => provider.stale) ? "clock" : "check";
     this.item.text = providers.length ? `$(${icon}) ${providers.map((provider) => label(provider, config.display)).join("  ")}` : "$(pulse) IA Usage";
-    this.item.tooltip = tooltip(snapshot, providers);
+    this.item.tooltip = tooltip(snapshot, providers, this.logos);
     this.item.backgroundColor = providers.length > 0 && providers.every((provider) => provider.stale) ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
   }
 
@@ -57,12 +76,15 @@ function label(provider: Provider, mode: "compact" | "full"): string {
 
 function percent(provider: Provider): string { return provider.quotas[0]?.usedPercent?.toFixed(0).concat("%") ?? "—"; }
 
-function tooltip(snapshot: DashboardSnapshot, providers: Provider[]): vscode.MarkdownString {
+function tooltip(snapshot: DashboardSnapshot, providers: Provider[], logos: Record<string, string>): vscode.MarkdownString {
   const showAll = settings().showAllMetrics;
   const content = new vscode.MarkdownString(undefined, true);
+  content.isTrusted = true;
   content.appendMarkdown("### IA Usage\n\n");
   for (const provider of providers) {
-    content.appendMarkdown(`**${provider.name}**  ${statusBadge(provider)}\n\n`);
+    const logo = logos[provider.id];
+    const badge = logo ? `![${provider.name}](${logo}) **${provider.name}**` : `**${provider.name}**`;
+    content.appendMarkdown(`${badge}  ${statusBadge(provider)}\n\n`);
     const quotas = showAll ? provider.quotas : provider.quotas.filter((quota, index) => index === 0 || (quota.usedPercent ?? 0) > 0);
     for (const quota of quotas) {
       content.appendMarkdown(`${quota.label}: **${quota.usedPercent?.toFixed(0) ?? "—"}% usado**${quota.resetInSeconds ? ` · reinicia en ${formatDuration(quota.resetInSeconds)}` : ""}\n\n`);
