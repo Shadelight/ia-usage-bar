@@ -102,6 +102,27 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
+/// The v2 pairing QR payload. Deliberately separate from
+/// `sync_server::PairingInfo` (the v1 struct): v1 has its own strict
+/// `parse_uri` validation and tests this feature must never touch.
+pub struct PairingInfoV2 {
+    pub host: String,
+    pub port: u16,
+    pub pc_device_id: String,
+    pub fingerprint: String,
+    pub token: String,
+    pub secret: String,
+}
+
+impl PairingInfoV2 {
+    pub fn to_uri(&self) -> String {
+        format!(
+            "iausage://pair?v=2&host={}&port={}&pc={}&fp={}&token={}&secret={}",
+            self.host, self.port, self.pc_device_id, self.fingerprint, self.token, self.secret
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +162,23 @@ mod tests {
         assert_eq!(sanitize_device_name("a\u{0007}b\u{0000}c"), "abc");
         let long = "x".repeat(200);
         assert_eq!(sanitize_device_name(&long).chars().count(), 64);
+    }
+
+    #[test]
+    fn pairing_info_v2_uri_has_the_expected_shape() {
+        let info = PairingInfoV2 {
+            host: "192.168.50.116".into(),
+            port: 28741,
+            pc_device_id: "abc123".into(),
+            fingerprint: "PYYZ-JMJJ".into(),
+            token: "deadbeefdeadbeefdeadbeefdeadbeef".into(),
+            secret: "c2VjcmV0LWJ5dGVzLWZvci10ZXN0aW5nMTIz".into(),
+        };
+        let uri = info.to_uri();
+        assert!(uri.starts_with("iausage://pair?v=2&"));
+        assert!(uri.contains("host=192.168.50.116"));
+        assert!(uri.contains("pc=abc123"));
+        assert!(uri.contains("token=deadbeefdeadbeefdeadbeefdeadbeef"));
+        assert!(uri.contains(&format!("secret={}", info.secret)));
     }
 }
