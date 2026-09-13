@@ -58,6 +58,41 @@ pairing may cross that HTTP channel in a form useful to an eavesdropper**:
   short-lived (2 minutes), single-use, and the PC never stores it in the
   clear — only `SHA-256(token)`, compared in constant time.
 
+**Handling rules for the full v2 URI (it contains the secret, so it is a
+credential, not a diagnostic string) — this is a checklist for the plan,
+not just a principle:**
+
+The full `iausage://pair?...&secret=...` string must never be written to:
+application logs, Android `Log.*` calls, `SavedStateHandle`, Jetpack
+`DataStore`, an Android `Bundle` (including `onSaveInstanceState`/process
+death recreation — the scanned URI is re-derived from the camera result on
+resume, never carried through saved state), crash reports, analytics, the
+system clipboard (no auto-copy — a user-triggered manual copy of the *host
+URI without the secret/token* for diagnostics is fine, see below), or
+Desktop's own diagnostics export.
+
+Android's handling, end to end: receive the deep link → parse it → pull
+`token`/`secret` into local variables → the `Intent`'s own `data` Uri is not
+otherwise touched or logged → hold `secret` in memory only until the pairing
+`POST` succeeds and `SecureStateStore` has written it under Keystore
+encryption → nothing keeps a second copy around afterward (no "last scanned
+URI" field, no debug log of the parsed `PairingInfo`).
+
+Desktop: no "Copiar URI" affordance for the v2 QR (unlike the v1 pairing
+screen's existing `data-copy-pairing-uri` button, which only ever copied a
+passphrase-free URI — the v2 URI is not passphrase-free). If a "technical
+details" expander is shown at all for v2, it lists host/port/version/
+fingerprint and masks the rest:
+
+```
+Host: 192.168.50.116
+Puerto: 28741
+Versión: 2
+Fingerprint: PYYZ-JMJJ
+Token: [oculto]
+Secret: [oculto]
+```
+
 ## Wire protocol
 
 ### Pairing URI (v2)
@@ -87,6 +122,14 @@ Request:
   for the life of the install. Sent on every `/v2/pair` and `/v2/snapshot`
   call.
 - `name`: taken from `android.os.Build.MODEL`, never typed by the user.
+  Sanitized before it ever leaves the phone (it crosses HTTP, gets stored in
+  `config.toml`, and gets rendered on Desktop — treat it as untrusted input,
+  the same way any HTML-escaped value already is): trimmed, control
+  characters stripped, truncated to 64 characters, and `"Android"` used as a
+  fallback if what's left is empty. The PC does not need to re-sanitize on
+  receipt if Android already guarantees this, but the desktop-side render
+  path keeps doing normal HTML-escaping regardless — sanitizing the source
+  does not replace escaping the sink.
 
 Response `200`:
 ```json
@@ -118,7 +161,8 @@ Server-side, in order:
   device id was ever paired and later revoked).
 - Otherwise: load that device's secret from Credential Manager,
   `encrypt_payload_with_key(current_payload, &secret)`, return the blob,
-  update `last_seen_at`.
+  update `last_seen_at` **in memory** (see below — not necessarily a
+  `config.toml` write on every request).
 - `clientDeviceId` is not treated as secret (any LAN client can guess/observe
   it); the actual access control is "do you hold the 256-bit key," same trust
   model `/v1/snapshot` already relies on today.
@@ -149,17 +193,54 @@ pub struct PairedDevice {
 - `PairedDevice` list lives in `AppConfig` (new field, `paired_devices:
   Vec<PairedDevice>`), persisted to `config.toml` exactly like today's
   `providers` map — no secrets in that file.
+- `last_seen_at` is **not** written to `config.toml` on every
+  `/v2/snapshot` call — a phone polling every few seconds/minutes would
+  otherwise mean a disk write (and the atomic-rename dance `atomic_write`
+  already does) per poll. The in-memory `AppState` copy of the device list
+  updates on every request; the on-disk `config.toml` copy is flushed at
+  most once every few minutes (piggybacked on the same refresh-loop tick
+  that already drives the `server_needed` recheck above) and on any event
+  that saves the config for another reason anyway (pairing, revoking). A
+  crash between two flushes loses at most a few minutes of "last seen"
+  precision — a cosmetic field, not a security or correctness one, so
+  losing a little precision here costs nothing.
 - Each device's 256-bit secret lives in Credential Manager (same
   `keyring::Entry` abstraction already fixed this session — `service =
   com.alberth.iausagebar`, `account = device-secret-<client_device_id>`).
   Revoking a device deletes that Credential Manager entry immediately (not
   just the `revoked` flag) — the row stays in `config.toml` with
-  `revoked = true` so a stale/replayed `/v2/pair` for the same
-  `client_device_id` (e.g. a phone that still has the old QR cached) is
-  rejected explicitly rather than silently re-created.
+  `revoked = true` for history/audit (last-seen, when it was paired), not to
+  block the *same* phone from pairing again later (see "Re-pairing" below).
+  What a stale/replayed token can never do is create or touch a device row at
+  all — that rejection happens purely on the token, before any device lookup
+  (see `POST /v2/pair`'s ordered checks above).
 - `PendingPairing` is **RAM-only**, lives in `AppState` next to
   `SyncServerState` (never serialized, never logged — the secret must not
   reach `config.toml`, log files, or diagnostics exports).
+
+### Re-pairing (upsert by `client_device_id`)
+
+Step 4 of `POST /v2/pair` is an **upsert**, keyed on `client_device_id`, not
+a blind insert:
+
+```
+no row with this client_device_id yet
+  → insert: name, created_at = now, last_seen_at = None, revoked = false
+
+row exists (active or revoked)
+  → replace its secret in Credential Manager with the new one
+  → name = the freshly-sent name (phone may have been renamed)
+  → revoked = false
+  → created_at unchanged (it's still "the same phone," first-paired date is real history)
+  → last_seen_at = None (fresh secret means no snapshot has been fetched with it yet)
+```
+
+A phone that was revoked and is paired again this way gets a **brand-new
+secret** — the deleted Credential Manager entry from the revoke is simply
+recreated with fresh random bytes, never resurrected. What is permanently
+dead is the *token* used in a completed or superseded pairing attempt, never
+the `client_device_id` itself: nothing about revocation should require a
+factory-reset Android install just to reconnect the same phone.
 
 ## Pairing lifecycle
 
@@ -195,14 +276,22 @@ Only one `PendingPairing` at a time: pressing "Vincular teléfono" again while
 one is already pending replaces it (old token becomes permanently invalid —
 same effect as expiry).
 
-## Server lifecycle (replaces today's `cfg.sync_enabled` gate)
+## Server lifecycle (`cfg.sync_enabled` stays in the formula during transition)
 
 `ensure_sync_server`'s decision to bind/stay-bound changes from "is sync
-enabled in config" to:
+enabled in config" to a superset that still includes it — **not** a
+replacement. A phone still paired under V1 must not lose its server just
+because zero V2 devices exist yet:
 
+```rust
+let server_needed = cfg.sync_enabled            // legacy V1 toggle, read-only now
+    || pending_pairing.is_some()
+    || cfg.paired_devices.iter().any(|d| !d.revoked);
 ```
-serverNeeded = pending_pairing.is_some() || paired_devices.any(|d| !d.revoked)
-```
+
+`cfg.sync_enabled` is deleted from the formula (and from `AppConfig`) only in
+the future spec that removes V1 entirely — doing it here would silently stop
+the server under any existing V1 pairing the moment this ships.
 
 - Pressing "Vincular teléfono" creates the `PendingPairing` and immediately
   calls `ensure_sync_server` — this is what starts the server the very first
@@ -213,15 +302,19 @@ serverNeeded = pending_pairing.is_some() || paired_devices.any(|d| !d.revoked)
   spawning a new timer thread: each tick calls `ensure_sync_server` again,
   which is already idempotent when nothing changed, and additionally now
   checks `pending_pairing.expires_at` and clears it if elapsed before
-  recomputing `serverNeeded`.
-- Revoking the last non-revoked device flips `serverNeeded` to `false` on
+  recomputing `server_needed`.
+- Revoking the last non-revoked device flips `server_needed` to `false` on
   the next `ensure_sync_server` call (called directly from the revoke
   command, not just on the next tick) → server stops, exactly like today's
-  `stop_locked` path.
-- `AppConfig.sync_enabled` and `sync_set_enabled`/the "Sincronizar con el
-  teléfono" toggle are removed from the desktop UI. `AppConfig.sync_lan`
-  (the LAN-vs-loopback exposure choice) stays — pairing only makes sense
-  over LAN, but which *interface* to expose is unrelated to this spec and
+  `stop_locked` path — but only if `cfg.sync_enabled` is also `false`; a
+  legacy V1 user with `sync_enabled = true` keeps their server up regardless
+  of V2 device count.
+- `sync_set_enabled`/the "Sincronizar con el teléfono" toggle command is
+  removed from the desktop UI — no new code path can set `sync_enabled` to
+  `true` after this ships, it only ever reads as `true` for an install that
+  already had it set before upgrading. `AppConfig.sync_lan` (the
+  LAN-vs-loopback exposure choice) stays — pairing only makes sense over
+  LAN, but which *interface* to expose is unrelated to this spec and
   unchanged (already fixed this session).
 
 ## Cryptography
@@ -233,9 +326,18 @@ pub fn encrypt_payload_with_key(payload: &SyncPayload, key: &[u8; 32]) -> Result
 pub fn decrypt_payload_with_key(blob: &EncryptedBlob, key: &[u8; 32]) -> Result<SyncPayload, String>
 ```
 
-Same XChaCha20-Poly1305 as today, same `EncryptedBlob` shape (salt field
-becomes unused/omitted for v2 blobs — the key is already high-entropy, no KDF
-needed; Argon2id stays reserved for the V1/legacy passphrase path only).
+Same XChaCha20-Poly1305, same wire shape — **no new struct.** `EncryptedBlob`
+(`v`, `alg`, `salt`, `nonce`, `ciphertext`) stays exactly as it is; `salt` is
+a required `String` field today, so a v2 blob still calls
+`rand_salt_nonce_16()` and fills it with 16 random bytes — genuinely unused
+by `decrypt_payload_with_key` (there's no KDF to salt when the key is
+already 256 bits of CSPRNG output), but present and well-formed so nothing
+downstream (Android's `EncryptedBlob.fromJson`, `pairing_qr_png`-adjacent
+code, anything that round-trips the JSON) needs a schema branch. This is a
+deliberate choice over introducing an `EncryptedBlobV2` struct: 16 filler
+bytes is cheaper than a second blob type and the serde/JSON code that comes
+with one. Argon2id (`derive_key`) stays reserved for the V1/legacy
+passphrase path only — `decrypt_payload_with_key` never calls it.
 `decode_keyring_secret`/`read_keyring_entry` (this session's keyring fix) are
 reused as-is for reading each device's secret — no new credential-storage
 code needed on the Rust side.
@@ -338,9 +440,20 @@ Rust (`iausage-core`):
   different 256-bit keys cannot decrypt each other's ciphertext.
 - `/v2/snapshot` for an unknown or revoked device → 404; for an active
   device → decryptable with that device's own key only.
-- `serverNeeded` truth table: 0 devices + no pending → false; pending only →
-  true; ≥1 non-revoked device → true; all devices revoked + no pending →
-  false.
+- Re-pairing (upsert): pairing the same `client_device_id` twice replaces
+  the secret and flips `revoked` back to `false` without creating a second
+  row; `created_at` is preserved across the upsert, `last_seen_at` resets to
+  `None`.
+- `name` sanitization: over-long, control-character-containing, and
+  empty/whitespace-only names all come out trimmed/truncated/defaulted to
+  `"Android"` as specified.
+- `server_needed` truth table (`cfg.sync_enabled || pending.is_some() ||
+  any non-revoked device`): all three `false` → `false`; `sync_enabled`
+  alone `true` with 0 V2 devices and no pending → `true` (the V1-preserving
+  case this round of feedback exists to guarantee); pending only → `true`;
+  ≥1 non-revoked device with `sync_enabled = false` → `true`; all three
+  `false` after revoking the last device and letting any pending expire →
+  `false`.
 - V1 tests already in the suite (`meta_expone_identidad_sin_secretos`,
   `snapshot_sirve_blob_cifrado_descifrable`, passphrase round-trip in
   `sync.rs`) keep passing unmodified — proof V1 wasn't touched.
@@ -354,9 +467,12 @@ Android:
 - v2 URI parse (valid, missing fields, wrong version).
 - Pairing screen has no text-input node for the v2 flow.
 - `clientDeviceId` persists across a simulated process/store recreation.
-- No secret/token appears in any `Log.*` call touched by this change (a grep
-  test over the diff's files, same spirit as the Rust "no secret in logs"
-  check).
+- No secret/token appears in any `Log.*` call, `SavedStateHandle` key, or
+  `DataStore` write touched by this change (a grep test over the diff's
+  files, same spirit as the Rust "no secret in logs" check).
+- Desktop: the v2 QR view renders no "Copiar URI" control, and its optional
+  technical-details expander (if implemented) never contains the raw
+  token/secret values, only the masked placeholders.
 
 ## Open implementation details left to the plan
 
