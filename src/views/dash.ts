@@ -272,10 +272,8 @@ function connectionLabel(provider: ProviderSnapshot, vendor?: VendorInfo): strin
     case "error": return t("statusError");
     case "needs_auth":
     default:
-      if (provider.statusReason === "invalid_credential") {
-        const apiCredential = vendor ? vendor.needsKey || vendor.authKind === "apikey" : false;
-        return apiCredential ? t("statusCredentialInvalid") : t("statusSessionInvalid");
-      }
+      // vendor is always undefined here (the truthy case returned above).
+      if (provider.statusReason === "invalid_credential") return t("statusSessionInvalid");
       return t("statusNeedLogin");
   }
 }

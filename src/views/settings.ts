@@ -72,10 +72,10 @@ function logo(vendor: VendorInfo): string {
   return `<span class="provider-logo-wrap"><img class="provider-logo" src="${visual.icon}" alt="" />${visual.badge ? `<span class="provider-badge">${visual.badge}</span>` : ""}</span>`;
 }
 
-function toggleRow(id: string, label: string, checked: boolean): string {
+function toggleRow(id: string, label: string, checked: boolean, disabled = false): string {
   return `<label class="setting-toggle" for="${id}">
     <span>${escapeHtml(label)}</span>
-    <span class="switch"><input type="checkbox" id="${id}" ${checked ? "checked" : ""} /><span class="switch-track" aria-hidden="true"><span></span></span></span>
+    <span class="switch"><input type="checkbox" id="${id}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} /><span class="switch-track" aria-hidden="true"><span></span></span></span>
   </label>`;
 }
 
@@ -367,17 +367,20 @@ function syncBody(): string {
   const lastExport = st?.lastExport ? `${st.lastExport.path} (${st.lastExport.bytes} B)` : t("syncNeverExported");
   return `
     <p class="lede">${t("syncLede")}</p>
-    ${toggleRow("cfg-sync", t("syncEnable"), st?.enabled ?? false)}
+    ${toggleRow("cfg-sync", t("syncEnable"), st?.enabled ?? false, !st?.hasPassphrase)}
+    ${!st?.hasPassphrase ? `<p class="lede">${t("syncEnableNeedsPassphrase")}</p>` : ""}
     ${syncStatusRow(t("syncDevice"), st ? `${st.deviceId} (${st.fingerprint})` : "—", "sync-device")}
     ${syncStatusRow(t("syncFolder"), st?.exportDir ?? "—", "sync-dir")}
     ${syncStatusRow(t("syncServer"), server, "sync-server")}
     ${syncStatusRow(t("syncLastExport"), lastExport, "sync-export")}
     <label class="key-label" for="sync-pass">${escapeHtml(t("syncPassphrase"))}</label>
+    <p class="lede">${escapeHtml(t("syncPassphraseHint"))}</p>
+    ${st?.hasPassphrase ? `<p class="lede">✓ ${escapeHtml(t("syncPassphraseStored"))}</p>` : ""}
     <div class="key-row">
       <input id="sync-pass" data-sync-pass type="password"
-        placeholder="${escapeHtml(t("syncPassHint"))}" value="${escapeHtml(syncPassphraseDraft)}"
+        placeholder="${escapeHtml(t(st?.hasPassphrase ? "syncPassHintReplace" : "syncPassHint"))}" value="${escapeHtml(syncPassphraseDraft)}"
         autocomplete="new-password" spellcheck="false" />
-      <button type="button" data-savesyncpass>${escapeHtml(t("syncSavePassphrase"))}</button>
+      <button type="button" data-savesyncpass>${escapeHtml(t(st?.hasPassphrase ? "syncChangePassphrase" : "syncSavePassphrase"))}</button>
       ${st?.hasPassphrase ? `<button type="button" class="ghost" data-forgetsyncpass>${escapeHtml(t("syncForgetPassphrase"))}</button>` : ""}
     </div>
     ${toggleRow("cfg-sync-lan", t("syncLanExpose"), st?.lan ?? false)}
@@ -420,16 +423,19 @@ export async function reloadSyncStatus(): Promise<void> {
  * Re-render de la categoría sync tras una acción explícita. Si el usuario
  * está escribiendo la passphrase, solo parchea estado (ver patchSettings).
  */
-export function refreshSyncView(): void {
+export async function refreshSyncView(): Promise<void> {
   if (syncCategory !== "sync") return;
   const typing = (document.activeElement as HTMLElement | null)?.id === "sync-pass";
   if (typing && syncPassphraseDraft) {
-    void reloadSyncStatus();
+    await reloadSyncStatus();
     return;
   }
+  // hasPassphrase/enabled gate markup baked into syncBody() (e.g. the
+  // "Olvidar" button), so the fresh status must land before the rebuild —
+  // reloadSyncStatus() alone only patches a few text nodes by id.
+  await reloadSyncStatus();
   const body = document.getElementById("settings-body");
   if (body) body.innerHTML = syncBody();
-  void reloadSyncStatus();
 }
 
 const REPO_URL = "https://github.com/Shadelight/ia-usage-bar";

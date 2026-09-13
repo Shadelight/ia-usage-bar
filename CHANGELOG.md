@@ -4,6 +4,28 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-09-13
+
+### Fixed
+
+- Guardar una API key podía fallar con "La credencial se escribió pero
+  no pudo recuperarse del almacén seguro" aunque el valor sí se hubiera
+  guardado: Windows Credential Manager puede rellenar el blob con un
+  byte nulo final, lo que rompe la decodificación UTF-8 estricta de
+  `get_password()`. Ahora se usa `get_secret()` como respaldo, tal
+  como recomienda la propia librería `keyring`.
+- Pantalla de sync: guardar la passphrase reconstruía la vista con el
+  estado viejo y recién después pedía el nuevo, así que el botón
+  "Olvidar" y el aviso de guardado no aparecían hasta cambiar de
+  pestaña. `Sincronizar con el teléfono` ahora se deshabilita hasta
+  guardar una passphrase, con aviso explícito.
+
+### Changed
+
+- Copy de la pantalla de sync: "Passphrase" pasa a llamarse "Frase
+  secreta de sincronización", con una explicación de para qué sirve y
+  un aviso "Guardada de forma segura" cuando ya existe una.
+
 ## [0.2.6] - 2026-09-12
 
 ### Added
@@ -173,6 +195,7 @@ monitor.
 - La caché 0.2.0 sigue siendo legible (campos nuevos con default).
 
 [Unreleased]: https://github.com/Shadelight/ia-usage-bar/compare/v0.2.2...HEAD
+[0.2.7]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.7
 [0.2.6]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.6
 [0.2.5]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.5
 [0.2.4]: https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.2.4

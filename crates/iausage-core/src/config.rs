@@ -245,14 +245,23 @@ impl AppConfig {
     }
 }
 
+/// Windows can pad a Credential Manager blob to an even byte count with a
+/// trailing NUL, which fails get_password()'s strict UTF-8 decode even
+/// though the credential was written correctly. keyring-rs's own docs point
+/// at get_secret() as the fallback for exactly this case.
+fn read_keyring_entry(entry: &keyring::Entry) -> Option<String> {
+    if let Ok(value) = entry.get_password() {
+        return Some(value);
+    }
+    let secret = entry.get_secret().ok()?;
+    Some(String::from_utf8_lossy(&secret).trim_end_matches('\0').to_string())
+}
+
 /// Reads a credential from the OS keyring only. It never falls back to an
 /// environment variable or legacy config, so callers can verify persistence.
 pub fn keyring_api_key(id: VendorId) -> Option<String> {
     let entry = keyring::Entry::new(CREDENTIAL_SERVICE, id.slug()).ok()?;
-    entry
-        .get_password()
-        .ok()
-        .filter(|value| !value.trim().is_empty())
+    read_keyring_entry(&entry).filter(|value| !value.trim().is_empty())
 }
 
 /// Proves that the value just written can be read from the OS credential
@@ -260,9 +269,8 @@ pub fn keyring_api_key(id: VendorId) -> Option<String> {
 /// environment variable must not hide a failed keyring round-trip.
 pub fn verify_keyring_api_key(id: VendorId, expected: &str) -> Result<(), String> {
     let entry = keyring::Entry::new(CREDENTIAL_SERVICE, id.slug()).map_err(|e| e.to_string())?;
-    let stored = entry.get_password().map_err(|_| {
-        "La credencial se escribió pero no pudo recuperarse del almacén seguro".to_string()
-    })?;
+    let stored = read_keyring_entry(&entry)
+        .ok_or_else(|| "La credencial se escribió pero no pudo recuperarse del almacén seguro".to_string())?;
     if stored.trim().is_empty() || stored.trim() != expected.trim() {
         return Err("La credencial guardada no coincide con la que se escribió".into());
     }
