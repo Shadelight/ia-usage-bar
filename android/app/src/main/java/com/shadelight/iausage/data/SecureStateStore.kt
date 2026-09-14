@@ -25,13 +25,44 @@ class SecureStateStore(context: Context) {
     }
 
     fun passphrase(): CharArray? = read("passphrase")?.toCharArray()
+
+    fun savePairingV2(pairing: PairingInfo, clientDeviceId: String, secret: ByteArray) {
+        write("pairing", listOf(pairing.host, pairing.port, pairing.deviceId, pairing.fingerprint, pairing.minAppVersion).joinToString("\n"))
+        write("deviceSecret", Base64.encodeToString(secret, Base64.NO_WRAP))
+        preferences.edit().remove("passphrase").apply()
+        secret.fill(0)
+    }
+
+    fun deviceSecret(): ByteArray? = read("deviceSecret")?.let { Base64.decode(it, Base64.NO_WRAP) }
+
+    fun clientDeviceId(): String? = read("clientDeviceId")
+
+    fun ensureClientDeviceId(): String {
+        read("clientDeviceId")?.let { return it }
+        val bytes = ByteArray(16)
+        java.security.SecureRandom().nextBytes(bytes)
+        val id = bytes.joinToString("") { "%02x".format(it) }
+        write("clientDeviceId", id)
+        return id
+    }
+
     fun savePayload(rawPayload: String) = write("payload", rawPayload)
     fun payload(): String? = read("payload")
     /** Drops only the cached snapshot — pairing/passphrase survive. Distinct
      * from `clear()`: "clear local data" in Settings must not silently
      * unlink the PC the way "Disconnect" does. */
     fun clearPayload() = preferences.edit().remove("payload").apply()
-    fun clear() = preferences.edit().clear().apply()
+
+    /** `clientDeviceId` survives: re-pairing this same phone after a
+     * disconnect must still be recognized server-side as the same device
+     * (an upsert, not a fresh row) — see the pairing V2 spec's "Re-pairing"
+     * section. Everything else (pairing, passphrase, deviceSecret, payload)
+     * is wiped as before. */
+    fun clear() {
+        val preservedClientId = read("clientDeviceId")
+        preferences.edit().clear().apply()
+        preservedClientId?.let { write("clientDeviceId", it) }
+    }
 
     private fun write(name: String, cleartext: String) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
