@@ -4,6 +4,32 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-13
+
+### Added
+
+- Vinculación de teléfono sin passphrase (Sync V2): "Vincular teléfono"
+  genera un código QR de un solo uso con un secreto de 256 bits que el
+  usuario nunca ve ni escribe. El teléfono lo escanea, confirma el código
+  de verificación y queda vinculado — sin inventar ni copiar una frase
+  secreta. Cada teléfono tiene su propio secreto y su propia fila en una
+  nueva lista de "Dispositivos vinculados", con botón para desvincular.
+  La vinculación V1 (passphrase manual) sigue funcionando sin cambios
+  para quien ya la usaba.
+- Android: comprobador de actualizaciones dentro de la app — revisa los
+  releases de GitHub, muestra un aviso descartable y puede descargar,
+  verificar e instalar el APK más nuevo a través del instalador del
+  sistema.
+
+### Fixed
+
+- Las notificaciones de "cuota reiniciada" se repetían cada pocos
+  minutos para proveedores con ventana deslizante (p. ej. OpenCode Go):
+  cualquier salto hacia adelante en `resetAt` se interpretaba como un
+  reset real, pero una ventana deslizante avanza `resetAt` en cada
+  consulta sin que la cuota se vacíe. Ahora también exige que el uso
+  haya bajado, no solo que el timestamp haya avanzado.
+
 ## [0.3.2] - 2026-09-13
 
 ### Fixed
