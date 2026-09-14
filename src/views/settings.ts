@@ -444,38 +444,38 @@ function syncServerLabel(st: SyncStatusDto): string {
 function syncBody(): string {
   const st = syncStatus;
   const server = st ? syncServerLabel(st) : "—";
-  const lastExport = st?.lastExport ? `${st.lastExport.path} (${st.lastExport.bytes} B)` : t("syncNeverExported");
+  const pending = st?.pendingPairing;
+  const devices = st?.pairedDevices ?? [];
   return `
     <p class="lede">${t("syncLede")}</p>
-    ${toggleRow("cfg-sync", t("syncEnable"), st?.enabled ?? false, !st?.hasPassphrase)}
-    ${!st?.hasPassphrase ? `<p class="lede">${t("syncEnableNeedsPassphrase")}</p>` : ""}
     ${syncStatusRow(t("syncDevice"), st ? `${st.deviceId} (${st.fingerprint})` : "—", "sync-device")}
     ${syncStatusRow(t("syncFolder"), st?.exportDir ?? "—", "sync-dir")}
     ${syncStatusRow(t("syncServer"), server, "sync-server")}
-    ${syncStatusRow(t("syncLastExport"), lastExport, "sync-export")}
-    <label class="key-label" for="sync-pass">${escapeHtml(t("syncPassphrase"))}</label>
-    <p class="lede">${escapeHtml(t("syncPassphraseHint"))}</p>
-    ${st?.hasPassphrase ? `<p class="lede">✓ ${escapeHtml(t("syncPassphraseStored"))}</p>` : ""}
-    <div class="key-row">
-      <input id="sync-pass" data-sync-pass type="password"
-        placeholder="${escapeHtml(t(st?.hasPassphrase ? "syncPassHintReplace" : "syncPassHint"))}" value="${escapeHtml(syncPassphraseDraft)}"
-        autocomplete="new-password" spellcheck="false" />
-      <button type="button" data-savesyncpass>${escapeHtml(t(st?.hasPassphrase ? "syncChangePassphrase" : "syncSavePassphrase"))}</button>
-      ${st?.hasPassphrase ? `<button type="button" class="ghost" data-forgetsyncpass>${escapeHtml(t("syncForgetPassphrase"))}</button>` : ""}
-    </div>
+    ${syncStatusRow(t("syncLastExport"), st?.lastExport ? `${st.lastExport.path} (${st.lastExport.bytes} B)` : t("syncNeverExported"), "sync-export")}
     ${toggleRow("cfg-sync-lan", t("syncLanExpose"), st?.lan ?? false)}
     <p class="lede">${t("syncLanHint")}</p>
+    <p class="lede">${escapeHtml(t("syncEncryptedNotice"))}</p>
     <div class="prov-buttons">
-      <button type="button" data-syncqr>${actionIconSvg("external-link", 12)}<span>${escapeHtml(t("syncShowQr"))}</span></button>
-      <button type="button" data-syncexport ${st?.enabled ? "" : "disabled"} title="${st?.enabled ? "" : escapeHtml(t("syncEnableFirst"))}">${actionIconSvg("refresh", 12)}<span>${escapeHtml(t("syncExportNow"))}</span></button>
+      <button type="button" data-startpairing>${actionIconSvg("external-link", 12)}<span>${escapeHtml(t("syncStartPairing"))}</span></button>
+      <button type="button" data-syncexport ${st?.lan ? "" : "disabled"} title="${st?.lan ? "" : escapeHtml(t("syncPairNeedsLan"))}">${actionIconSvg("refresh", 12)}<span>${escapeHtml(t("syncExportNow"))}</span></button>
     </div>
     <div id="sync-qr" class="sync-qr">${syncPairing ? `
       <h3>${escapeHtml(t("syncReadyToPair"))}</h3>
       <img src="data:image/png;base64,${syncPairing.qrPngBase64}" alt="QR" />
       <p class="sync-address">${escapeHtml(syncPairing.host)}:${syncPairing.port}</p>
       <p class="lede">${escapeHtml(t("syncVerificationCode"))}: <strong>${escapeHtml(syncPairing.fingerprint)}</strong></p>
-      <details class="sync-technical"><summary>${escapeHtml(t("syncTechnicalDetails"))}</summary><p class="sync-uri">${escapeHtml(syncPairing.uri)}</p><button type="button" data-copy-pairing-uri>${escapeHtml(t("syncCopyUri"))}</button></details>
+      ${pending ? `<p class="lede" id="sync-pairing-countdown" data-expires-at="${escapeHtml(pending.expiresAt)}">${escapeHtml(t("syncPairingExpiresIn"))}</p>` : ""}
     ` : ""}</div>
+    <h3>${escapeHtml(t("syncPairedDevices"))}</h3>
+    ${devices.length === 0 ? `<p class="lede">${escapeHtml(t("syncNoPairedDevices"))}</p>` : `
+      <div class="sync-devices">${devices.map((d) => `
+        <div class="row" data-device-row="${escapeHtml(d.clientDeviceId)}">
+          <span>${escapeHtml(d.name)}</span>
+          <span class="lede">${d.lastSeenAt ? escapeHtml(t("syncDeviceConnected")) : ""}</span>
+          <button type="button" data-revokedevice="${escapeHtml(d.clientDeviceId)}">${escapeHtml(t("syncRevokeDevice"))}</button>
+        </div>
+      `).join("")}</div>
+    `}
   `;
 }
 
@@ -492,8 +492,6 @@ export async function reloadSyncStatus(): Promise<void> {
   set("sync-dir", st.value.exportDir);
   set("sync-server", syncServerLabel(st.value));
   set("sync-export", st.value.lastExport ? `${st.value.lastExport.path} (${st.value.lastExport.bytes} B)` : t("syncNeverExported"));
-  const toggle = document.getElementById("cfg-sync") as HTMLInputElement | null;
-  if (toggle && document.activeElement !== toggle) toggle.checked = st.value.enabled;
   const lan = document.getElementById("cfg-sync-lan") as HTMLInputElement | null;
   if (lan && document.activeElement !== lan) lan.checked = st.value.lan;
 }
@@ -504,11 +502,6 @@ export async function reloadSyncStatus(): Promise<void> {
  */
 export async function refreshSyncView(): Promise<void> {
   if (syncCategory !== "sync") return;
-  const typing = (document.activeElement as HTMLElement | null)?.id === "sync-pass";
-  if (typing && syncPassphraseDraft) {
-    await reloadSyncStatus();
-    return;
-  }
   // hasPassphrase/enabled gate markup baked into syncBody() (e.g. the
   // "Olvidar" button), so the fresh status must land before the rebuild —
   // reloadSyncStatus() alone only patches a few text nodes by id.
@@ -687,4 +680,36 @@ export function focusProviderInSettings(providerId: string): void {
       if (input) input.focus();
     }
   });
+}
+
+let countdownInterval: ReturnType<typeof setInterval> | null = null;
+
+export function startPairingCountdown(): void {
+  stopPairingCountdown();
+  countdownInterval = setInterval(() => {
+    const el = document.getElementById("sync-pairing-countdown");
+    if (!el) {
+      stopPairingCountdown();
+      return;
+    }
+    const expiresAt = new Date(el.dataset.expiresAt ?? "").getTime();
+    const remainingMs = expiresAt - Date.now();
+    if (remainingMs <= 0) {
+      el.textContent = "";
+      stopPairingCountdown();
+      void reloadSyncStatus();
+      return;
+    }
+    const totalSeconds = Math.ceil(remainingMs / 1000);
+    const mm = Math.floor(totalSeconds / 60);
+    const ss = String(totalSeconds % 60).padStart(2, "0");
+    el.textContent = `${t("syncPairingExpiresIn")} ${mm}:${ss}`;
+  }, 1000);
+}
+
+export function stopPairingCountdown(): void {
+  if (countdownInterval !== null) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
+  }
 }
