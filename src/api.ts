@@ -221,6 +221,18 @@ export interface SyncExportInfo {
   bytes: number;
 }
 
+export interface PairedDeviceDto {
+  clientDeviceId: string;
+  name: string;
+  createdAt: string;
+  lastSeenAt: string | null;
+}
+
+export interface PendingPairingDto {
+  fingerprint: string;
+  expiresAt: string;
+}
+
 export interface SyncStatusDto {
   enabled: boolean;
   deviceId: string;
@@ -232,6 +244,8 @@ export interface SyncStatusDto {
   serverAddr: string;
   serverError: string | null;
   lastExport: SyncExportInfo | null;
+  pairedDevices: PairedDeviceDto[];
+  pendingPairing: PendingPairingDto | null;
 }
 
 export interface SyncPairingDto {
