@@ -116,9 +116,11 @@ test("pairing flow guards QR display and export with LAN check, no separate show
   assert.ok(lanCheckIdx > 0 && lanCheckIdx < startPairingIdx, "must check LAN before starting pairing");
   // Verify pairPhoneFlow scrolls to the QR display
   assert.ok(flow.includes('getElementById("sync-qr")'), "pairPhoneFlow must scroll to the QR display");
-  // Verify the data-startpairing button triggers pairPhoneFlow
-  assert.ok(main.includes('hasAttribute("data-startpairing")'), "start-pairing button must exist");
-  assert.ok(main.includes('btn.hasAttribute("data-startpairing")') || main.includes('el.hasAttribute("data-startpairing")'), "start-pairing button must have a handler");
+  // Verify the data-startpairing button handler exists within the click dispatcher
+  const clickHandlerStart = main.indexOf('document.addEventListener("click"');
+  assert.ok(clickHandlerStart > 0, "click handler must exist");
+  const clickHandler = main.slice(clickHandlerStart, main.indexOf("\n  });", clickHandlerStart));
+  assert.ok(clickHandler.includes('hasAttribute("data-startpairing")'), "click handler must contain data-startpairing button handler");
   // Verify export button is available
   assert.ok(main.includes('hasAttribute("data-syncexport")'), "sync export button must exist");
 });
