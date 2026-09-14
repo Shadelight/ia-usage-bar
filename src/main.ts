@@ -436,7 +436,7 @@ async function main() {
 
   document.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
-    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-toggle-key],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-install-update],[data-redeem-reset],[data-startpairing],[data-revokedevice],[data-syncexport],[data-copy-pairing-uri],[data-repair-cli],[data-copy-cli-path],[data-test-cli]");
+    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-toggle-key],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-install-update],[data-redeem-reset],[data-startpairing],[data-revokedevice],[data-syncexport],[data-repair-cli],[data-copy-cli-path],[data-test-cli]");
     if (!btn) {
       if (!target.closest("#head-menu, #btn-menu")) closeHeadMenu();
       return;
@@ -559,11 +559,6 @@ async function main() {
     if (btn.dataset.copyCli) {
       const copied = await copyToClipboard(btn.dataset.copyCli);
       if (copied) showToast(t("copiedCliCmd"));
-    }
-    if (btn.hasAttribute("data-copy-pairing-uri")) {
-      const technicalUri = document.querySelector<HTMLElement>("#sync-qr .sync-uri")?.textContent || "";
-      if (technicalUri && await copyToClipboard(technicalUri)) showToast(t("syncUriCopied"));
-      return;
     }
     if (btn.hasAttribute("data-copy-cli-path")) {
       const binaryPath = document.getElementById("cli-binary-path")?.textContent || "";

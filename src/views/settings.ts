@@ -457,7 +457,7 @@ function syncBody(): string {
     <p class="lede">${escapeHtml(t("syncEncryptedNotice"))}</p>
     <div class="prov-buttons">
       <button type="button" data-startpairing>${actionIconSvg("external-link", 12)}<span>${escapeHtml(t("syncStartPairing"))}</span></button>
-      <button type="button" data-syncexport ${st?.lan ? "" : "disabled"} title="${st?.lan ? "" : escapeHtml(t("syncPairNeedsLan"))}">${actionIconSvg("refresh", 12)}<span>${escapeHtml(t("syncExportNow"))}</span></button>
+      <button type="button" data-syncexport ${st?.enabled ? "" : "disabled"} title="${st?.enabled ? "" : escapeHtml(t("syncEnableFirst"))}">${actionIconSvg("refresh", 12)}<span>${escapeHtml(t("syncExportNow"))}</span></button>
     </div>
     <div id="sync-qr" class="sync-qr">${syncPairing ? `
       <h3>${escapeHtml(t("syncReadyToPair"))}</h3>

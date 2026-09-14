@@ -174,8 +174,16 @@ fn handle_v2_pair(
             serde_json::json!({ "error": "no encontrado" }).to_string(),
         );
     };
+    // Pre-auth read: this is HOW the request gets authenticated, so it's
+    // reachable by anything on the LAN before any check runs, and the
+    // server now stays up continuously for any V2-paired user. Cap it well
+    // above any real pairing body (a few dozen bytes of JSON) so nothing
+    // unbounded can be read here. A truncated/incomplete body still fails
+    // JSON parsing below and hits the existing "cuerpo inválido" 400 path.
+    use std::io::Read as _;
     let mut raw_body = String::new();
-    if std::io::Read::read_to_string(request.as_reader(), &mut raw_body).is_err() {
+    let mut limited_reader = request.as_reader().take(8 * 1024);
+    if limited_reader.read_to_string(&mut raw_body).is_err() {
         return (
             400,
             serde_json::json!({ "error": "cuerpo inválido" }).to_string(),

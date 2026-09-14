@@ -1216,7 +1216,14 @@ pub(crate) fn sync_start_pairing(
     let png = crate::sync_server::pairing_qr_png(&uri, 512)?;
     use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
     Ok(SyncPairing {
-        uri,
+        // The v2 URI carries the device secret. The QR image is already
+        // rendered server-side from it and sent as PNG bytes below; nothing
+        // on the frontend reads `.uri` for the v2 pairing flow (only
+        // `.qrPngBase64`/`.host`/`.port`/`.fingerprint`), so the raw
+        // secret-bearing string must not sit in the webview at all. `uri`
+        // stays on the shared `SyncPairing` struct only because V1's
+        // `sync_get_pairing` (no secret in its URI) still needs it.
+        uri: String::new(),
         fingerprint,
         host,
         port: info.port,
@@ -1230,12 +1237,16 @@ pub(crate) fn sync_revoke_device(
     state: tauri::State<AppState>,
     client_device_id: String,
 ) -> Result<(), String> {
-    let mut cfg = lock_or_recover(&state.config).clone();
-    if !cfg.revoke_device(&client_device_id) {
-        return Err("sync: dispositivo no encontrado".into());
+    {
+        // One critical section for the whole read-modify-write-save (Fix
+        // 6): the guard must be dropped before `ensure_sync_server` below
+        // takes the same lock again, so this mutation is scoped to a block.
+        let mut cfg = lock_or_recover(&state.config);
+        if !cfg.revoke_device(&client_device_id) {
+            return Err("sync: dispositivo no encontrado".into());
+        }
+        cfg.save()?;
     }
-    cfg.save()?;
-    *lock_or_recover(&state.config) = cfg;
     crate::config::delete_device_secret(&client_device_id)?;
     // Revocar el último dispositivo (sin V1 activo ni pairing pendiente)
     // debe apagar el servidor de inmediato, no esperar el próximo tick.

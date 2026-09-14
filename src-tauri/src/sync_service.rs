@@ -10,6 +10,7 @@ use std::thread::JoinHandle;
 
 use tauri::{AppHandle, Manager};
 
+use crate::config::AppConfig;
 use crate::model::now_iso;
 use crate::state::{lock_or_recover, AppState};
 
@@ -100,17 +101,29 @@ pub(crate) fn ensure_sync_server(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    // V1 passphrase se sigue cargando solo si V1 realmente lo necesita — un
-    // pareo V2 puro nunca debería fallar por falta de passphrase. Una
-    // passphrase vacía aquí es segura: la ruta `/v1/snapshot` fallará al
-    // descifrar para quien la use sin una passphrase real, pero esa ruta
-    // solo es alcanzable por un teléfono ya emparejado en V1, que por
-    // definición ya tiene una passphrase real guardada; una instalación
-    // solo-V2 (sin `sync_enabled`) nunca dispara este camino porque
-    // `server_needed` no habría arrancado el servidor por razones V1 si no
-    // hubiera una passphrase V1 real que hubiera puesto `sync_enabled =
-    // true`.
-    let passphrase = crate::sync::load_passphrase().unwrap_or_default();
+    // Si V1 está encendido (`sync_enabled`), una passphrase real DEBE existir
+    // — su ausencia es un fallo de keyring real que hay que frenar y mostrar
+    // (igual que antes de la Tarea 6): el servidor no arranca y el estado
+    // queda "Detenido" con el motivo. Si el servidor solo está vivo por
+    // razones V2 (`sync_enabled` en false, pero hay un pareo pendiente o un
+    // dispositivo V2 activo), las rutas V1 son inalcanzables/no usadas por
+    // esa instalación, así que una passphrase ausente es esperable: cae a
+    // cadena vacía sin abortar el arranque (`/v1/snapshot` seguiría
+    // rechazando esa cadena vacía al descifrar si alguien la alcanzara).
+    let passphrase = if cfg.sync_enabled {
+        match crate::sync::load_passphrase() {
+            Ok(value) => value,
+            Err(error) => {
+                if server.running {
+                    stop_locked(&mut server);
+                }
+                server.last_error = Some(error.clone());
+                return Err(error);
+            }
+        }
+    } else {
+        crate::sync::load_passphrase().unwrap_or_default()
+    };
     let device_id = match crate::sync::load_or_create_device_id() {
         Ok(id) => id,
         Err(error) => {
@@ -208,47 +221,87 @@ pub(crate) fn ensure_sync_server(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// V2 pairing hooks backed by real `AppState` — this is the only place that
-/// turns the closures `sync_server` expects into something touching config
-/// and Credential Manager.
-fn build_pairing_hooks(app: &AppHandle) -> iausage_core::sync_server::PairingHooks {
+/// Pure decision logic behind `/v2/pair`'s token consumption. Operates only
+/// on in-memory `pending`/`cfg` — the keyring write and the config save are
+/// injected as closures so this is testable with plain in-memory fakes, no
+/// real `AppHandle`/keyring/config-file I/O.
+///
+/// Callers (see `build_pairing_hooks` below) must hold `state.config`'s
+/// (and `state.pending_pairing`'s) `MutexGuard` for the WHOLE call — the
+/// clone/mutate/save/commit sequence below happens inside one critical
+/// section, never clone-then-reassign-later (Fix 6).
+pub(crate) fn try_consume_pairing_token(
+    pending: &mut Option<PendingPairingRuntime>,
+    cfg: &mut AppConfig,
+    token: &str,
+    client_device_id: &str,
+    name: &str,
+    store_secret: impl FnOnce(&str, &[u8; 32]) -> Result<(), String>,
+    save_cfg: impl FnOnce(&AppConfig) -> Result<(), String>,
+) -> iausage_core::sync_server::PairOutcome {
     use iausage_core::sync_server::PairOutcome;
 
+    let Some(runtime) = pending.as_ref() else {
+        return PairOutcome::NoPendingPairing;
+    };
+    // Expired/wrong token: reject WITHOUT clearing `pending` as a side
+    // effect, so a second, correct attempt can still land before the true
+    // 120s TTL expires it for real.
+    if runtime.core.is_expired() || !runtime.core.matches_token(token) {
+        return PairOutcome::Rejected;
+    }
+    let secret = runtime.core.secret;
+    if store_secret(client_device_id, &secret).is_err() {
+        return PairOutcome::Rejected;
+    }
+
+    let mut updated = cfg.clone();
+    updated.upsert_paired_device(client_device_id, name);
+    if save_cfg(&updated).is_err() {
+        return PairOutcome::Rejected;
+    }
+    *cfg = updated;
+    *pending = None;
+    PairOutcome::Paired
+}
+
+/// Pure decision behind `/v2/snapshot`'s key lookup: a revoked (or unknown)
+/// device is never active, regardless of whether a secret still happens to
+/// sit in the keyring.
+pub(crate) fn is_active_paired_device(cfg: &AppConfig, client_device_id: &str) -> bool {
+    cfg.paired_devices
+        .iter()
+        .any(|d| d.client_device_id == client_device_id && !d.revoked)
+}
+
+/// V2 pairing hooks backed by real `AppState` — this is the only place that
+/// turns the closures `sync_server` expects into something touching config
+/// and Credential Manager. Thin wrappers around the pure functions above.
+fn build_pairing_hooks(app: &AppHandle) -> iausage_core::sync_server::PairingHooks {
     let try_consume = app.clone();
     let snapshot_key_for = app.clone();
     iausage_core::sync_server::PairingHooks {
         try_consume_token: Arc::new(move |token, client_device_id, name| {
             let state = try_consume.state::<AppState>();
             let mut pending = lock_or_recover(&state.pending_pairing);
-            let Some(runtime) = pending.as_ref() else {
-                return PairOutcome::NoPendingPairing;
-            };
-            if runtime.core.is_expired() || !runtime.core.matches_token(token) {
-                return PairOutcome::Rejected;
-            }
-            let secret = runtime.core.secret;
-            if crate::config::store_device_secret(client_device_id, &secret).is_err() {
-                return PairOutcome::Rejected;
-            }
-            let mut cfg = lock_or_recover(&state.config).clone();
-            cfg.upsert_paired_device(client_device_id, name);
-            if cfg.save().is_err() {
-                return PairOutcome::Rejected;
-            }
-            *lock_or_recover(&state.config) = cfg;
-            *pending = None;
-            PairOutcome::Paired
+            let mut cfg = lock_or_recover(&state.config);
+            try_consume_pairing_token(
+                &mut pending,
+                &mut cfg,
+                token,
+                client_device_id,
+                name,
+                |id, secret| crate::config::store_device_secret(id, secret),
+                |updated| updated.save(),
+            )
         }),
         snapshot_key_for: Arc::new(move |client_device_id| {
             let state = snapshot_key_for.state::<AppState>();
             let cfg = lock_or_recover(&state.config);
-            let active = cfg
-                .paired_devices
-                .iter()
-                .any(|d| d.client_device_id == client_device_id && !d.revoked);
-            if !active {
+            if !is_active_paired_device(&cfg, client_device_id) {
                 return None;
             }
+            drop(cfg);
             lock_or_recover(&state.last_seen).insert(client_device_id.to_string(), now_iso());
             crate::config::read_device_secret(client_device_id)
         }),
@@ -266,7 +319,11 @@ pub(crate) fn flush_last_seen(app: &AppHandle) {
     if pending.is_empty() {
         return;
     }
-    let mut cfg = lock_or_recover(&state.config).clone();
+    // Hold `state.config`'s lock for the whole read-modify-write-save: two
+    // threads (this refresh-loop tick and, e.g., a pairing HTTP request)
+    // racing a clone-then-reassign-later pattern could otherwise silently
+    // clobber one side's update (Fix 6).
+    let mut cfg = lock_or_recover(&state.config);
     let mut changed = false;
     for device in cfg.paired_devices.iter_mut() {
         if let Some(seen_at) = pending.get(&device.client_device_id) {
@@ -274,8 +331,8 @@ pub(crate) fn flush_last_seen(app: &AppHandle) {
             changed = true;
         }
     }
-    if changed && cfg.save().is_ok() {
-        *lock_or_recover(&state.config) = cfg;
+    if changed {
+        let _ = cfg.save();
     }
 }
 
@@ -299,5 +356,147 @@ mod tests {
             "an active V2 device alone must keep the server up"
         );
         assert!(server_needed(true, true, true));
+    }
+
+    fn pending_runtime() -> (PendingPairingRuntime, String) {
+        let new_pairing = iausage_core::pairing::start_pairing();
+        let runtime = PendingPairingRuntime {
+            core: new_pairing.pending,
+            expires_at_iso: now_iso(),
+        };
+        (runtime, new_pairing.token_hex)
+    }
+
+    // Spec "Testing" section, behavior 1: an expired token is rejected
+    // (410-equivalent `Rejected`) while `PendingPairing` is left INTACT —
+    // expiry rejection must not clear it as a side effect, so a second,
+    // correct attempt before the true TTL could still succeed.
+    #[test]
+    fn expired_token_is_rejected_without_clearing_pending() {
+        let (mut runtime, token) = pending_runtime();
+        runtime.core.expires_at = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        let mut pending = Some(runtime);
+        let mut cfg = AppConfig::default();
+
+        let outcome = try_consume_pairing_token(
+            &mut pending,
+            &mut cfg,
+            &token,
+            "phone-1",
+            "Galaxy",
+            |_, _| Ok(()),
+            |_| Ok(()),
+        );
+
+        assert!(matches!(
+            outcome,
+            iausage_core::sync_server::PairOutcome::Rejected
+        ));
+        assert!(pending.is_some(), "expiry must not clear PendingPairing");
+        assert!(cfg.paired_devices.is_empty());
+    }
+
+    // Spec behavior 2: a replayed token, after the pending pairing was
+    // already cleared by a prior success, is rejected as `NoPendingPairing`
+    // (not `Rejected`) — there is nothing left to compare against.
+    #[test]
+    fn replayed_token_after_pending_cleared_is_no_pending_pairing() {
+        let (_, token) = pending_runtime();
+        let mut pending: Option<PendingPairingRuntime> = None;
+        let mut cfg = AppConfig::default();
+
+        let outcome = try_consume_pairing_token(
+            &mut pending,
+            &mut cfg,
+            &token,
+            "phone-1",
+            "Galaxy",
+            |_, _| Ok(()),
+            |_| Ok(()),
+        );
+
+        assert!(matches!(
+            outcome,
+            iausage_core::sync_server::PairOutcome::NoPendingPairing
+        ));
+    }
+
+    // Spec behavior 3: a successful pair registers a `PairedDevice`, the
+    // secret becomes readable back (stood in here by a fake keyring), and
+    // `PendingPairing` is cleared.
+    #[test]
+    fn successful_pair_registers_device_stores_secret_and_clears_pending() {
+        let (runtime, token) = pending_runtime();
+        let expected_secret = runtime.core.secret;
+        let mut pending = Some(runtime);
+        let mut cfg = AppConfig::default();
+        let mut stored: Option<(String, [u8; 32])> = None;
+
+        let outcome = try_consume_pairing_token(
+            &mut pending,
+            &mut cfg,
+            &token,
+            "phone-1",
+            "Galaxy S26",
+            |id, secret| {
+                stored = Some((id.to_string(), *secret));
+                Ok(())
+            },
+            |_| Ok(()),
+        );
+
+        assert!(matches!(
+            outcome,
+            iausage_core::sync_server::PairOutcome::Paired
+        ));
+        assert!(pending.is_none(), "success must clear PendingPairing");
+        assert_eq!(cfg.paired_devices.len(), 1);
+        assert_eq!(cfg.paired_devices[0].client_device_id, "phone-1");
+        assert!(!cfg.paired_devices[0].revoked);
+        let (stored_id, stored_secret) = stored.expect("store_secret must be called on success");
+        assert_eq!(stored_id, "phone-1");
+        assert_eq!(stored_secret, expected_secret, "secret must round-trip");
+    }
+
+    // If `save_cfg` fails, the whole attempt must roll back rather than
+    // leave `pending` cleared with an unsaved config change floating.
+    #[test]
+    fn pair_is_rejected_when_config_save_fails() {
+        let (runtime, token) = pending_runtime();
+        let mut pending = Some(runtime);
+        let mut cfg = AppConfig::default();
+
+        let outcome = try_consume_pairing_token(
+            &mut pending,
+            &mut cfg,
+            &token,
+            "phone-1",
+            "Galaxy",
+            |_, _| Ok(()),
+            |_| Err("disk full".to_string()),
+        );
+
+        assert!(matches!(
+            outcome,
+            iausage_core::sync_server::PairOutcome::Rejected
+        ));
+        assert!(pending.is_some(), "a failed save must not clear pending");
+        assert!(
+            cfg.paired_devices.is_empty(),
+            "a failed save must not commit the device row"
+        );
+    }
+
+    // Spec behavior 4: `/v2/snapshot`'s key lookup returns `None` (not the
+    // secret) for a revoked device.
+    #[test]
+    fn revoked_device_is_never_active() {
+        let mut cfg = AppConfig::default();
+        cfg.upsert_paired_device("phone-1", "Galaxy");
+        assert!(is_active_paired_device(&cfg, "phone-1"));
+
+        cfg.revoke_device("phone-1");
+        assert!(!is_active_paired_device(&cfg, "phone-1"));
+        assert!(!is_active_paired_device(&cfg, "unknown-device"));
     }
 }

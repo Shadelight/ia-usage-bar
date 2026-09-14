@@ -39,8 +39,16 @@ class UsageSyncRepository(private val context: Context) {
         val clientDeviceId = store.ensureClientDeviceId()
         val name = sanitizedDeviceName()
         postPair(pairing, token, clientDeviceId, name)
-        val (payload, raw) = fetchV2(pairing, clientDeviceId, secret)
+        // Persist the credential the instant the desktop confirms pairing —
+        // BEFORE fetching the first snapshot. If postPair succeeds but
+        // fetchV2 then throws (transient network blip), the desktop has
+        // already committed the device row and secret; if we saved nothing
+        // here the phone would have no way back in (the consumed token
+        // can't be reused) while the desktop's device row lingers forever.
+        // With the credential saved, refresh()'s existing V2 path retries
+        // the snapshot fetch later using the now-stored secret.
         store.savePairingV2(pairing, clientDeviceId, secret)
+        val (payload, raw) = fetchV2(pairing, clientDeviceId, secret)
         store.savePayload(raw)
         return payload
     }
