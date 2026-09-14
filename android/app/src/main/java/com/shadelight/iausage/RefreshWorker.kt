@@ -8,16 +8,24 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.shadelight.iausage.alerts.AlertPipeline
 import com.shadelight.iausage.data.UsageSyncRepository
 import com.shadelight.iausage.widget.UsageWidget
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
+/** Fallback refresh (15 min floor) for when the foreground monitor is off.
+ * It feeds the same alert pipeline, so alerts still arrive, just later. */
 class RefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = try {
-        UsageSyncRepository(applicationContext).refresh()
+        val payload = UsageSyncRepository(applicationContext).refresh()
+        AlertPipeline.onRefreshed(applicationContext, payload)
         UsageWidget().updateAll(applicationContext)
         Result.success()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
     } catch (_: Exception) {
+        AlertPipeline.onRefreshFailed(applicationContext)
         Result.retry()
     }
 

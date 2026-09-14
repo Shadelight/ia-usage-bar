@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.shadelight.iausage.RefreshWorker
+import com.shadelight.iausage.alerts.MonitorService
+import com.shadelight.iausage.alerts.MonitorSettings
 import com.shadelight.iausage.data.AppPreferences
 import com.shadelight.iausage.data.PairingInfo
 import com.shadelight.iausage.data.PairingUri
@@ -43,6 +45,14 @@ class UsageViewModel(
     val preferences: StateFlow<AppPreferences> = preferencesRepository.preferences
         .stateIn(viewModelScope, SharingStarted.Eagerly, AppPreferences())
 
+    private val _monitorEnabled = MutableStateFlow(MonitorSettings.isEnabled(appContext))
+    val monitorEnabled = _monitorEnabled.asStateFlow()
+
+    fun setMonitorEnabled(enabled: Boolean) {
+        MonitorSettings.setEnabled(appContext, enabled)
+        _monitorEnabled.value = enabled
+    }
+
     fun setPairingUri(raw: String) {
         _state.value = _state.value.copy(
             pairing = runCatching { PairingUri.parse(raw) }.getOrElse { setError(it.message ?: "QR inválido"); return },
@@ -62,6 +72,7 @@ class UsageViewModel(
             repository.pair(pairing, passphrase.toCharArray())
         }
         RefreshWorker.schedule(appContext)
+        if (MonitorSettings.isEnabled(appContext)) MonitorService.start(appContext)
         // Keep `pairing` in state (not just the encrypted store) — DeviceScreen
         // needs the host/port/verification code right after pairing succeeds,
         // not just on the next cold start.
@@ -76,7 +87,9 @@ class UsageViewModel(
     }
 
     fun disconnect() {
-        repository.disconnect(); RefreshWorker.cancel(appContext); _state.value = UsageUiState()
+        // The alerts preference survives a disconnect; only the polling stops
+        // until a PC is paired again.
+        repository.disconnect(); RefreshWorker.cancel(appContext); MonitorService.stop(appContext); _state.value = UsageUiState()
     }
 
     /** "Limpiar datos locales" (Settings → Datos): drops only the cached

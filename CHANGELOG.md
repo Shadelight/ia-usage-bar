@@ -4,6 +4,40 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-09-14
+
+### Added
+
+- Android: avisos en segundo plano (opcional, en Ajustes → Avisos): cuota
+  reiniciada, IA por agotarse (90 %) o agotada, cambio de mejor opción
+  disponible y PC sin conexión. Un servicio en primer plano consulta el PC
+  cada 3 minutos y muestra una notificación fija con el resumen; también se
+  reactiva al reiniciar el teléfono.
+
+### Changed
+
+- Widget Android rediseñado con un diseño propio por tamaño, de 1x1 a 4x2:
+  1x1 con una métrica, 2x1 con el reinicio, 2x2 con barra y hora de
+  actualización, y 4x2 con el detalle de sesión y semanal o la comparación de
+  hasta 3 IAs (una fila por IA, nombre y porcentaje separados, "+N más").
+  Nuevo botón de actualizar integrado en la tarjeta.
+- Configuración del widget: vista previa en vivo, opciones agrupadas en
+  tarjetas (qué muestra, métrica, elementos visibles), botón "Guardar widget"
+  fijo abajo con validación, y se puede volver a configurar un widget ya
+  colocado.
+
+### Fixed
+
+- Configuración del widget: sin scroll, con varios proveedores el botón
+  "Guardar" quedaba fuera de pantalla y no se podía terminar de añadir el
+  widget.
+- Configuración del widget: "Automático" decía "menor disponibilidad" pero
+  elegía la IA con más disponible.
+- Widget: los logos de 13 proveedores (Codex, Cursor, Copilot…) salían en
+  blanco en la pantalla de inicio. Sus trazados usaban arcos en formato
+  compacto que el parser nativo de Android rechaza (la app, con Compose, sí
+  los dibujaba); se reescribieron en formato estándar y un test lo vigila.
+
 ## [0.3.6] - 2026-09-14
 
 ### Fixed

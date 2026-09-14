@@ -14,6 +14,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.shadelight.iausage.alerts.MonitorService
+import com.shadelight.iausage.alerts.MonitorSettings
 import com.shadelight.iausage.ui.UpdateViewModel
 import com.shadelight.iausage.ui.UsageApp
 import com.shadelight.iausage.ui.UsageViewModel
@@ -41,6 +43,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The app being opened is the one moment Android always allows starting
+        // a foreground service: bring the monitor back if the system killed it.
+        if (MonitorSettings.isEnabled(this) && viewModel.state.value.pairing != null) MonitorService.start(this)
         handlePairingIntent(intent)
         enableEdgeToEdge()
         setContent {

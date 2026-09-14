@@ -54,6 +54,7 @@ fun UsageApp(viewModel: UsageViewModel, updateViewModel: UpdateViewModel, scanQr
     val state by viewModel.state.collectAsStateWithLifecycle()
     val preferences by viewModel.preferences.collectAsStateWithLifecycle()
     val updateState by updateViewModel.state.collectAsStateWithLifecycle()
+    val monitorEnabled by viewModel.monitorEnabled.collectAsStateWithLifecycle()
     var screen by remember { mutableStateOf(Screen.DASHBOARD) }
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -145,9 +146,11 @@ fun UsageApp(viewModel: UsageViewModel, updateViewModel: UpdateViewModel, scanQr
                         Screen.SETTINGS -> SettingsScreen(
                             preferences = preferences,
                             availableProviders = state.payload!!.snapshot.providers.filter { it.enabled },
+                            monitorEnabled = monitorEnabled,
                             onThemeChange = viewModel::setTheme,
                             onUsedModeChange = viewModel::setUsedMode,
                             onVisibleProviderIdsChange = viewModel::setVisibleProviderIds,
+                            onMonitorEnabledChange = viewModel::setMonitorEnabled,
                             onClearLocalData = viewModel::clearLocalData,
                         )
                         Screen.ABOUT -> Unit // rendered above, paired or not

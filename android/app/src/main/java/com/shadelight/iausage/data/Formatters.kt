@@ -39,6 +39,23 @@ object Formatters {
         }
     }
 
+    /** "39m", "3h 50m", "4d 19h" — for the 2x1 widget, where only ~9
+     * characters fit next to the percentage. */
+    fun formatDurationShort(seconds: Long): String {
+        val s = seconds.coerceAtLeast(0)
+        return when {
+            s < 3_600 -> "${(s / 60).coerceAtLeast(1)}m"
+            s < 86_400 -> {
+                val minutes = (s % 3_600) / 60
+                if (minutes > 0) "${s / 3_600}h ${minutes}m" else "${s / 3_600}h"
+            }
+            else -> {
+                val hours = (s % 86_400) / 3_600
+                if (hours > 0) "${s / 86_400}d ${hours}h" else "${s / 86_400}d"
+            }
+        }
+    }
+
     fun formatResetIn(seconds: Long?): String? = seconds?.let { "Reinicia en ${formatDuration(it)}" }
 
     /** "hace 12 s" / "hace 8 min" from an ISO-8601 instant. Never throws on a
@@ -54,7 +71,7 @@ object Formatters {
 
     fun isSnapshotStale(providers: List<ProviderUsage>): Boolean = providers.any(::isStale)
 
-    /** The provider with the least room left, i.e. "best option right now"
+    /** The provider with the most room left, i.e. "best option right now"
      * for the user to switch to. Ties broken by catalog order. */
     fun bestAvailableProvider(providers: List<ProviderUsage>, preferredQuotaId: (String) -> String?): Pair<ProviderUsage, UsageQuota>? =
         providers

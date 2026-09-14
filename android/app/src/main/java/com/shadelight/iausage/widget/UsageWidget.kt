@@ -4,23 +4,34 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.datastore.preferences.core.Preferences
+import androidx.glance.ColorFilter
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
+import androidx.glance.LocalContext
 import androidx.glance.LocalSize
+import androidx.glance.action.ActionParameters
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.LinearProgressIndicator
 import androidx.glance.appwidget.SizeMode
+import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
+import androidx.glance.appwidget.updateAll
 import androidx.glance.background
+import androidx.glance.currentState
+import androidx.glance.layout.Alignment
+import androidx.glance.layout.Box
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
@@ -37,33 +48,35 @@ import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.shadelight.iausage.MainActivity
 import com.shadelight.iausage.R
+import com.shadelight.iausage.alerts.AlertPipeline
 import com.shadelight.iausage.data.Formatters
 import com.shadelight.iausage.data.ProviderUsage
 import com.shadelight.iausage.data.SecureStateStore
 import com.shadelight.iausage.data.SyncPayload
 import com.shadelight.iausage.data.UsageQuota
 import com.shadelight.iausage.data.UsageSyncRepository
+import com.shadelight.iausage.data.providerShortName
 import com.shadelight.iausage.data.providerVisual
 import org.json.JSONObject
 
-private val WidgetBackground = Color(0xFF15233B)
-private val WidgetAccent = Color(0xFFFF7043)
-private val WidgetText = Color.White
-private val WidgetMuted = Color(0xFFC5D3E6)
-private val WidgetWarn = Color(0xFFFBBF24)
+// One size per launcher footprint (see widgetLayout for the breakpoints).
+private val TinySize = DpSize(57.dp, 57.dp)
+private val WideSize = DpSize(130.dp, 57.dp)
+private val SquareSize = DpSize(130.dp, 130.dp)
+private val LargeSize = DpSize(250.dp, 130.dp)
+private val LargeTallSize = DpSize(250.dp, 200.dp)
 
-private val SmallSize = DpSize(110.dp, 110.dp)
-private val MediumSize = DpSize(250.dp, 110.dp)
-private val LargeSize = DpSize(250.dp, 250.dp)
+private fun textStyle(color: Color, size: Int, weight: FontWeight = FontWeight.Normal) =
+    TextStyle(color = ColorProvider(color), fontSize = size.sp, fontWeight = weight)
 
 class UsageWidget : GlanceAppWidget() {
     override val stateDefinition = PreferencesGlanceStateDefinition
-    override val sizeMode = SizeMode.Responsive(setOf(SmallSize, MediumSize, LargeSize))
+    override val sizeMode = SizeMode.Responsive(setOf(TinySize, WideSize, SquareSize, LargeSize, LargeTallSize))
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // A widget host (notably Samsung One UI) shows a permanent "can't
         // load widget" placeholder if provideGlance ever throws, so any
-        // failure here must degrade to an error row instead of crashing.
+        // failure here must degrade to an empty state instead of crashing.
         val payload = runCatching {
             SecureStateStore(context).payload()?.let { runCatching { SyncPayload.fromJson(JSONObject(it)) }.getOrNull() }
         }.getOrNull()
@@ -73,125 +86,339 @@ class UsageWidget : GlanceAppWidget() {
     @Composable
     private fun WidgetContent(payload: SyncPayload?) {
         val size = LocalSize.current
-        val prefs = androidx.glance.currentState<androidx.datastore.preferences.core.Preferences>()
-        val config = readWidgetConfig(prefs)
-        val context = androidx.glance.LocalContext.current
+        val config = readWidgetConfig(currentState<Preferences>())
+        val context = LocalContext.current
+        val layout = widgetLayout(size.width.value, size.height.value, config.mode)
+        val providers = payload?.snapshot?.providers?.let(::activeProviders).orEmpty()
 
-        Column(
+        Box(
             modifier = GlanceModifier
                 .fillMaxSize()
-                .background(WidgetBackground)
-                .cornerRadius(16.dp)
-                .padding(12.dp)
-                .clickable(actionStartActivity(Intent(context, MainActivity::class.java))),
+                .background(WidgetPalette.Background)
+                .cornerRadius(20.dp)
+                .clickable(actionStartActivity(Intent(context, MainActivity::class.java)))
+                .padding(if (layout == WidgetLayout.TINY) 6.dp else 14.dp),
         ) {
-            Row {
-                Image(ImageProvider(R.drawable.ic_ia_usage_mark), contentDescription = null, modifier = GlanceModifier.size(16.dp))
-                Spacer(GlanceModifier.width(6.dp))
-                Text("IA Usage", style = TextStyle(color = ColorProvider(WidgetAccent), fontWeight = FontWeight.Bold))
-                Spacer(GlanceModifier.defaultWeight())
-                Image(
-                    ImageProvider(android.R.drawable.stat_notify_sync),
-                    contentDescription = "Actualizar",
-                    modifier = GlanceModifier.size(14.dp).clickable(actionRunCallback<RefreshWidgetAction>()),
-                )
-            }
-            Spacer(GlanceModifier.height(6.dp))
-
-            val providers = payload?.snapshot?.providers?.filter { it.enabled } ?: emptyList()
             when {
-                payload == null -> Text("Sin datos todavía\nAbre la app para vincular tu PC", style = TextStyle(color = ColorProvider(WidgetMuted)))
-                providers.isEmpty() -> Text("Sin proveedores activos", style = TextStyle(color = ColorProvider(WidgetMuted)))
-                size.width < MediumSize.width -> SmallContent(providers, config)
-                size.height < LargeSize.height -> MediumContent(providers, config)
-                else -> LargeContent(providers, config)
-            }
-
-            val stale = payload != null && Formatters.isSnapshotStale(providers)
-            if (config.showStatus && payload != null) {
-                Spacer(GlanceModifier.height(4.dp))
-                Text(
-                    if (stale) "⚠ Datos de hace ${ageOnly(payload.generatedAt)}" else "Actualizado ${Formatters.formatAge(payload.generatedAt)}",
-                    style = TextStyle(color = ColorProvider(if (stale) WidgetWarn else WidgetMuted)),
-                )
+                payload == null -> EmptyContent(layout, "Vincula tu PC", "Abre IA Usage")
+                providers.isEmpty() -> EmptyContent(layout, "Sin IAs activas", "Actívalas en el PC")
+                layout == WidgetLayout.LARGE_COMPARE -> CompareContent(payload, providers, config, size.height)
+                else -> {
+                    val picked = pickProvider(providers, config.mode)
+                    if (picked == null) {
+                        EmptyContent(layout, "Sin datos todavía", "Actualiza desde el PC")
+                    } else {
+                        val (provider, quota) = picked
+                        val stale = Formatters.isStale(provider)
+                        when (layout) {
+                            WidgetLayout.TINY -> TinyContent(provider, quota, config)
+                            WidgetLayout.WIDE -> WideContent(provider, quota, config)
+                            WidgetLayout.SQUARE -> SquareContent(payload, provider, quota, config, stale)
+                            else -> LargeSingleContent(payload, provider, config, stale)
+                        }
+                    }
+                }
             }
         }
     }
 
-    private fun ageOnly(generatedAt: String) = Formatters.formatAge(generatedAt).removePrefix("hace ")
-
+    /** 1x1: status dot + short code + one big number. Nothing else fits. */
     @Composable
-    private fun SmallContent(providers: List<ProviderUsage>, config: WidgetConfig) {
-        val (provider, quota) = selectProvider(providers, config) ?: return
-        val visual = providerVisual(provider.id, provider.name)
-        Column {
-            Row {
-                visual.icon?.let { Image(ImageProvider(it), contentDescription = null, modifier = GlanceModifier.size(14.dp)) }
+    private fun TinyContent(provider: ProviderUsage, quota: UsageQuota, config: WidgetConfig) {
+        Column(
+            modifier = GlanceModifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StatusDot(quota.usedPercent)
                 Spacer(GlanceModifier.width(4.dp))
-                Text(provider.name, style = TextStyle(color = ColorProvider(WidgetText), fontWeight = FontWeight.Medium))
+                Text(
+                    text = providerVisual(provider.id, provider.name).shortCode,
+                    style = textStyle(WidgetPalette.TextMuted, 10, FontWeight.Medium),
+                    maxLines = 1,
+                )
             }
             Text(
-                Formatters.percentText(quota.usedPercent, config.usedMode) + (if (config.usedMode) " usado" else " libre"),
-                style = TextStyle(color = ColorProvider(WidgetText)),
+                text = Formatters.percentText(quota.usedPercent, config.usedMode),
+                style = textStyle(WidgetPalette.TextPrimary, 19, FontWeight.Bold),
+                maxLines = 1,
             )
-            if (config.showBar) ProgressRow(quota.usedPercent)
-            if (config.showReset) Formatters.formatResetIn(quota.resetInSeconds)?.let {
-                Text(it, style = TextStyle(color = ColorProvider(WidgetMuted)))
-            }
         }
     }
 
+    /** 2x1: provider + main metric + time to reset. */
     @Composable
-    private fun MediumContent(providers: List<ProviderUsage>, config: WidgetConfig) {
-        val visible = (if (config.visibleProviderIds.isEmpty()) providers else providers.filter { it.id in config.visibleProviderIds }).take(3)
-        Column {
-            visible.forEach { provider ->
-                val quota = Formatters.primaryQuota(provider, null)
-                Row {
-                    Text(provider.name, style = TextStyle(color = ColorProvider(WidgetText)), modifier = GlanceModifier.defaultWeight())
-                    Text(Formatters.percentText(quota?.usedPercent, config.usedMode), style = TextStyle(color = ColorProvider(WidgetText)))
+    private fun WideContent(provider: ProviderUsage, quota: UsageQuota, config: WidgetConfig) {
+        Row(modifier = GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            ProviderIcon(provider, 22)
+            Spacer(GlanceModifier.width(10.dp))
+            Column(modifier = GlanceModifier.defaultWeight()) {
+                Text(
+                    text = providerShortName(provider.id, provider.name),
+                    style = textStyle(WidgetPalette.TextPrimary, 13, FontWeight.Medium),
+                    maxLines = 1,
+                )
+                quota.resetInSeconds?.takeIf { config.showReset }?.let {
+                    // ~9 characters fit next to the number in two cells.
+                    Text(
+                        text = "↻ ${Formatters.formatDurationShort(it)}",
+                        style = textStyle(WidgetPalette.TextMuted, 11),
+                        maxLines = 1,
+                    )
                 }
-                if (config.showBar) ProgressRow(quota?.usedPercent)
+            }
+            Spacer(GlanceModifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = Formatters.percentText(quota.usedPercent, config.usedMode),
+                    style = textStyle(WidgetPalette.TextPrimary, 20, FontWeight.Bold),
+                    maxLines = 1,
+                )
+                Text(text = metricWord(config), style = textStyle(WidgetPalette.TextMuted, 10), maxLines = 1)
             }
         }
     }
 
+    /** 2x2: provider, big number, bar, reset + age, refresh. */
     @Composable
-    private fun LargeContent(providers: List<ProviderUsage>, config: WidgetConfig) {
-        val visible = if (config.visibleProviderIds.isEmpty()) providers else providers.filter { it.id in config.visibleProviderIds }
-        Column {
-            visible.forEach { provider ->
-                Text(provider.name, style = TextStyle(color = ColorProvider(WidgetAccent), fontWeight = FontWeight.Medium))
-                provider.quotas.take(2).forEach { quota ->
-                    Row {
-                        Text(quota.label, style = TextStyle(color = ColorProvider(WidgetText)), modifier = GlanceModifier.defaultWeight())
-                        Text(Formatters.percentText(quota.usedPercent, config.usedMode), style = TextStyle(color = ColorProvider(WidgetText)))
+    private fun SquareContent(payload: SyncPayload, provider: ProviderUsage, quota: UsageQuota, config: WidgetConfig, stale: Boolean) {
+        Column(modifier = GlanceModifier.fillMaxSize()) {
+            Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                ProviderIcon(provider, 18)
+                Spacer(GlanceModifier.width(8.dp))
+                Text(
+                    text = providerShortName(provider.id, provider.name),
+                    modifier = GlanceModifier.defaultWeight(),
+                    style = textStyle(WidgetPalette.TextPrimary, 13, FontWeight.Medium),
+                    maxLines = 1,
+                )
+                StatusDot(quota.usedPercent)
+            }
+            Spacer(GlanceModifier.defaultWeight())
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = Formatters.percentText(quota.usedPercent, config.usedMode),
+                    style = textStyle(WidgetPalette.TextPrimary, 30, FontWeight.Bold),
+                    maxLines = 1,
+                )
+                Spacer(GlanceModifier.width(4.dp))
+                Text(
+                    text = metricWord(config),
+                    modifier = GlanceModifier.padding(bottom = 5.dp),
+                    style = textStyle(WidgetPalette.TextMuted, 11),
+                    maxLines = 1,
+                )
+            }
+            if (config.showBar) {
+                Spacer(GlanceModifier.height(8.dp))
+                UsageBar(quota.usedPercent)
+            }
+            Spacer(GlanceModifier.height(8.dp))
+            FooterRow(widgetFooter(quota, config, payload.generatedAt, stale, compact = true), stale)
+        }
+    }
+
+    /** 4x2, one provider: session and weekly with their own bars. */
+    @Composable
+    private fun LargeSingleContent(payload: SyncPayload, provider: ProviderUsage, config: WidgetConfig, stale: Boolean) {
+        Column(modifier = GlanceModifier.fillMaxSize()) {
+            Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                ProviderIcon(provider, 20)
+                Spacer(GlanceModifier.width(8.dp))
+                Text(
+                    text = provider.name,
+                    modifier = GlanceModifier.defaultWeight(),
+                    style = textStyle(WidgetPalette.TextPrimary, 14, FontWeight.Medium),
+                    maxLines = 1,
+                )
+                StatusDot(Formatters.primaryQuota(provider, null)?.usedPercent)
+            }
+            // Glance caps a Column at 10 children (extra ones are silently
+            // dropped), so each quota is its own Column.
+            provider.quotas.take(2).forEach { quota ->
+                Column(modifier = GlanceModifier.fillMaxWidth().padding(top = 9.dp)) {
+                    Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = quotaCaption(quota, config),
+                            modifier = GlanceModifier.defaultWeight(),
+                            style = textStyle(WidgetPalette.TextMuted, 12),
+                            maxLines = 1,
+                        )
+                        Spacer(GlanceModifier.width(8.dp))
+                        Text(
+                            text = Formatters.percentText(quota.usedPercent, config.usedMode),
+                            style = textStyle(WidgetPalette.TextPrimary, 15, FontWeight.Bold),
+                            maxLines = 1,
+                        )
                     }
-                    if (config.showBar) ProgressRow(quota.usedPercent)
+                    if (config.showBar) {
+                        Spacer(GlanceModifier.height(5.dp))
+                        UsageBar(quota.usedPercent)
+                    }
                 }
-                Spacer(GlanceModifier.height(4.dp))
+            }
+            Spacer(GlanceModifier.defaultWeight())
+            FooterRow(widgetFooter(null, config, payload.generatedAt, stale), stale)
+        }
+    }
+
+    /** 4x2, comparison: one row per provider, name left, value right, bar
+     * below, three rows max and "+N más" for the rest. */
+    @Composable
+    private fun CompareContent(payload: SyncPayload, providers: List<ProviderUsage>, config: WidgetConfig, height: Dp) {
+        val (rows, hidden) = compareRows(providers, config.visibleProviderIds)
+        val roomy = height >= LargeTallSize.height
+        Column(modifier = GlanceModifier.fillMaxSize()) {
+            Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    provider = ImageProvider(R.drawable.ic_ia_usage_mark),
+                    contentDescription = null,
+                    modifier = GlanceModifier.size(16.dp),
+                )
+                Spacer(GlanceModifier.width(6.dp))
+                Text(
+                    text = "Tus IAs",
+                    modifier = GlanceModifier.defaultWeight(),
+                    style = textStyle(WidgetPalette.TextPrimary, 13, FontWeight.Medium),
+                    maxLines = 1,
+                )
+                if (hidden > 0) {
+                    Text(text = "+$hidden más", style = textStyle(WidgetPalette.TextMuted, 11), maxLines = 1)
+                    Spacer(GlanceModifier.width(8.dp))
+                }
+                RefreshButton()
+            }
+            // One Column per row: Glance caps a Column at 10 children.
+            rows.forEach { provider ->
+                val quota = Formatters.primaryQuota(provider, null)
+                Column(modifier = GlanceModifier.fillMaxWidth().padding(top = if (roomy) 12.dp else 6.dp)) {
+                    Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        ProviderIcon(provider, 16)
+                        Spacer(GlanceModifier.width(8.dp))
+                        Text(
+                            text = providerShortName(provider.id, provider.name),
+                            modifier = GlanceModifier.defaultWeight(),
+                            style = textStyle(WidgetPalette.TextPrimary, 12),
+                            maxLines = 1,
+                        )
+                        Spacer(GlanceModifier.width(8.dp))
+                        Text(
+                            text = Formatters.percentText(quota?.usedPercent, config.usedMode),
+                            style = textStyle(WidgetPalette.TextPrimary, 13, FontWeight.Bold),
+                            maxLines = 1,
+                        )
+                    }
+                    if (config.showBar) {
+                        Spacer(GlanceModifier.height(3.dp))
+                        UsageBar(quota?.usedPercent, thin = true)
+                    }
+                }
+            }
+            if (config.showStatus) {
+                val stale = Formatters.isSnapshotStale(rows)
+                Spacer(GlanceModifier.defaultWeight())
+                Text(
+                    text = widgetFooter(null, config.copy(showReset = false), payload.generatedAt, stale),
+                    style = textStyle(if (stale) WidgetPalette.Warn else WidgetPalette.TextMuted, 10),
+                    maxLines = 1,
+                )
             }
         }
     }
 
     @Composable
-    private fun ProgressRow(usedPercent: Double?) {
+    private fun EmptyContent(layout: WidgetLayout, title: String, subtitle: String) {
+        Column(
+            modifier = GlanceModifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Image(
+                provider = ImageProvider(R.drawable.ic_ia_usage_mark),
+                contentDescription = null,
+                modifier = GlanceModifier.size(if (layout == WidgetLayout.TINY) 22.dp else 26.dp),
+            )
+            if (layout != WidgetLayout.TINY) {
+                Spacer(GlanceModifier.height(6.dp))
+                Text(text = title, style = textStyle(WidgetPalette.TextPrimary, 13, FontWeight.Medium), maxLines = 1)
+                if (layout != WidgetLayout.WIDE) {
+                    Text(text = subtitle, style = textStyle(WidgetPalette.TextMuted, 11), maxLines = 2)
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun FooterRow(text: String, stale: Boolean) {
+        Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = text,
+                modifier = GlanceModifier.defaultWeight(),
+                style = textStyle(if (stale) WidgetPalette.Warn else WidgetPalette.TextMuted, 11),
+                maxLines = 1,
+            )
+            RefreshButton()
+        }
+    }
+
+    /** Quiet circular button with the IA Usage glyph, same weight as the
+     * rest of the card instead of the system sync icon. */
+    @Composable
+    private fun RefreshButton() {
+        Box(
+            modifier = GlanceModifier
+                .size(26.dp)
+                .cornerRadius(13.dp)
+                .background(WidgetPalette.Surface)
+                .clickable(actionRunCallback<RefreshWidgetAction>()),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                provider = ImageProvider(R.drawable.ic_widget_refresh),
+                contentDescription = "Actualizar",
+                modifier = GlanceModifier.size(13.dp),
+                colorFilter = ColorFilter.tint(ColorProvider(WidgetPalette.TextMuted)),
+            )
+        }
+    }
+
+    @Composable
+    private fun UsageBar(usedPercent: Double?, thin: Boolean = false) {
         LinearProgressIndicator(
-            modifier = GlanceModifier.fillMaxWidth().padding(vertical = 2.dp),
             progress = ((usedPercent ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f),
-            color = ColorProvider(WidgetAccent),
-            backgroundColor = ColorProvider(Color(0xFF243858)),
+            modifier = GlanceModifier.fillMaxWidth().height(if (thin) 3.dp else 6.dp),
+            color = ColorProvider(WidgetPalette.bar(usageLevel(usedPercent))),
+            backgroundColor = ColorProvider(WidgetPalette.Track),
         )
     }
 
-    private fun selectProvider(providers: List<ProviderUsage>, config: WidgetConfig): Pair<ProviderUsage, UsageQuota>? {
-        if (config.mode != WIDGET_MODE_AUTO) {
-            providers.firstOrNull { it.id == config.mode }?.let { provider ->
-                Formatters.primaryQuota(provider, null)?.let { return provider to it }
-            }
+    @Composable
+    private fun StatusDot(usedPercent: Double?) {
+        Box(
+            modifier = GlanceModifier
+                .size(8.dp)
+                .cornerRadius(4.dp)
+                .background(WidgetPalette.status(usageLevel(usedPercent))),
+        ) {}
+    }
+
+    @Composable
+    private fun ProviderIcon(provider: ProviderUsage, sizeDp: Int) {
+        val visual = providerVisual(provider.id, provider.name)
+        val icon = visual.icon
+        if (icon != null) {
+            // Brand marks ship dark for the light app theme; on the dark card
+            // they are tinted light, like the desktop inverts them in dark mode.
+            Image(
+                provider = ImageProvider(icon),
+                contentDescription = null,
+                modifier = GlanceModifier.size(sizeDp.dp),
+                colorFilter = ColorFilter.tint(ColorProvider(WidgetPalette.TextPrimary)),
+            )
+        } else {
+            Text(text = visual.shortCode, style = textStyle(WidgetPalette.TextMuted, 10, FontWeight.Bold), maxLines = 1)
         }
-        return Formatters.bestAvailableProvider(providers) { null }
-            ?: providers.firstNotNullOfOrNull { provider -> Formatters.primaryQuota(provider, null)?.let { provider to it } }
     }
 }
 
@@ -199,11 +426,12 @@ class UsageWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = UsageWidget()
 }
 
-/** Widget's own refresh icon: fetch, persist, and repaint — no separate
- * networking path from the app's. */
-class RefreshWidgetAction : androidx.glance.appwidget.action.ActionCallback {
-    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: androidx.glance.action.ActionParameters) {
+/** Widget's own refresh button: fetch, persist, feed the alert pipeline and
+ * repaint every instance — no separate networking path from the app's. */
+class RefreshWidgetAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         runCatching { UsageSyncRepository(context).refresh() }
-        UsageWidget().update(context, glanceId)
+            .onSuccess { AlertPipeline.onRefreshed(context, it) }
+        UsageWidget().updateAll(context)
     }
 }

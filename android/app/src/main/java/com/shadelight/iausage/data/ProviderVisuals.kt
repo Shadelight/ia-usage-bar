@@ -30,10 +30,32 @@ private val KNOWN_ICONS: Map<String, Int> = mapOf(
     "nous" to R.drawable.ic_provider_nous,
 )
 
+/** Same three-letter codes as the desktop tabs, so "CLD 74%" reads the same
+ * on every surface. Unknown providers derive one from their name. */
+private val KNOWN_CODES: Map<String, String> = mapOf(
+    "anthropic" to "CLD",
+    "openai" to "CDX",
+    "cursor" to "CUR",
+    "antigravity" to "AGY",
+    "copilot" to "COP",
+    "supergrok" to "SGK",
+)
+
+private val KNOWN_SHORT_NAMES: Map<String, String> = mapOf(
+    "anthropic" to "Claude",
+    "openai" to "Codex",
+    "copilot" to "Copilot",
+)
+
 private fun fallbackShortCode(name: String): String {
     val letters = name.filter { it.isLetterOrDigit() }
     return (if (letters.length >= 3) letters.substring(0, 3) else letters.ifEmpty { "AI" }).uppercase()
 }
 
 fun providerVisual(id: String, name: String): ProviderVisual =
-    ProviderVisual(icon = KNOWN_ICONS[id], shortCode = fallbackShortCode(name))
+    ProviderVisual(icon = KNOWN_ICONS[id], shortCode = KNOWN_CODES[id] ?: fallbackShortCode(name))
+
+/** Compact name for tight widget layouts: "Claude", "Codex", "Cursor".
+ * Unknown providers keep their name up to a " / " or " (" qualifier. */
+fun providerShortName(id: String, name: String): String =
+    KNOWN_SHORT_NAMES[id] ?: name.substringBefore(" / ").substringBefore(" (").trim().ifEmpty { name }

@@ -9,15 +9,19 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
  * (androidx.glance.appwidget.state) — the standard Glance mechanism, not a
  * parallel preferences system. Keyed by AppWidgetId under the hood. */
 object WidgetPrefsKeys {
-    val MODE = stringPreferencesKey("mode") // "auto" or a provider id
+    val MODE = stringPreferencesKey("mode") // "auto", "compare" or a provider id
     val USED_MODE = booleanPreferencesKey("used_mode")
     val SHOW_RESET = booleanPreferencesKey("show_reset")
     val SHOW_BAR = booleanPreferencesKey("show_bar")
-    val SHOW_STATUS = booleanPreferencesKey("show_status")
-    val VISIBLE_PROVIDERS = stringSetPreferencesKey("visible_provider_ids") // medium/large only; empty = all
+    val SHOW_STATUS = booleanPreferencesKey("show_status") // "Hora de actualización"
+    val VISIBLE_PROVIDERS = stringSetPreferencesKey("visible_provider_ids") // compare mode only; empty = all
 }
 
+/** The provider with the most room left. */
 const val WIDGET_MODE_AUTO = "auto"
+
+/** Large widgets list several providers side by side. */
+const val WIDGET_MODE_COMPARE = "compare"
 
 data class WidgetConfig(
     val mode: String = WIDGET_MODE_AUTO,

@@ -24,6 +24,14 @@ class FormattersTest {
         assertEquals("1 min", Formatters.formatDuration(10)) // never rounds down to 0
     }
 
+    @Test fun `short duration fits the 2x1 widget`() {
+        assertEquals("39m", Formatters.formatDurationShort(39 * 60))
+        assertEquals("3h 50m", Formatters.formatDurationShort(3 * 3600 + 50 * 60))
+        assertEquals("2h", Formatters.formatDurationShort(2 * 3600))
+        assertEquals("4d 19h", Formatters.formatDurationShort(4 * 86_400 + 19 * 3600))
+        assertEquals("1m", Formatters.formatDurationShort(10))
+    }
+
     @Test fun `available is the complement of used, clamped`() {
         assertEquals(79.0, Formatters.availablePercent(21.0)!!, 0.001)
         assertEquals(0.0, Formatters.availablePercent(140.0)!!, 0.001) // clamp above 100% used
