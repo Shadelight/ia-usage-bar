@@ -32,6 +32,17 @@ const emitted: Array<[Exclude<ProviderStatus, "connected">, ProviderStatusReason
   ["error", "unknown"],
 ];
 
+test("sign-in action is only offered for vendors whose client the app can launch", () => {
+  const expired = { status: "needs_auth" as const, statusReason: "oauth_expired" as const, error: null };
+  assert.equal(normalizeProviderError(expired, vendor)?.action, "login");
+  const antigravity: VendorInfo = { ...vendor, id: "antigravity", name: "Antigravity", short: "AGY" };
+  assert.equal(normalizeProviderError(expired, antigravity)?.action, "retry");
+  assert.equal(
+    normalizeProviderError({ ...expired, statusReason: "invalid_credential" }, antigravity)?.action,
+    "retry",
+  );
+});
+
 test("every backend status/reason pair resolves to useful copy", () => {
   for (const [status, statusReason] of emitted) {
     const normalized = normalizeProviderError({ status, statusReason, error: "detail" }, vendor);

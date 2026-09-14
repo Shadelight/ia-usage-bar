@@ -69,6 +69,12 @@ export function sanitizeTechnicalDetails(raw: string): string {
   return safe.slice(0, 4_000);
 }
 
+// Vendors whose official client the app can launch to sign in again (mirrors
+// `provider_login_command` in src-tauri/src/commands.rs). For any other vendor
+// a "sign in" button can only fail with "no automatic login": offer a retry
+// once the session is renewed in the vendor's own app instead.
+const CLIENT_LOGIN_VENDORS = new Set(["anthropic", "openai"]);
+
 export function normalizeProviderError(
   snap: Pick<ProviderSnapshot, "status" | "statusReason" | "error">,
   vendor: VendorInfo,
@@ -95,12 +101,15 @@ export function normalizeProviderError(
   }
   const entry = STATUS_COPY[snap.status][reason] ?? FALLBACK_BY_STATUS[snap.status];
   const technicalDetails = snap.error ? sanitizeTechnicalDetails(snap.error) : undefined;
+  const canLaunchLogin = entry.action !== "login" || CLIENT_LOGIN_VENDORS.has(vendor.id);
   return {
     title: t(entry.title),
     message: t(entry.message),
     severity: entry.severity,
-    action: entry.action,
-    actionLabel: entry.actionLabel ? t(entry.actionLabel) : undefined,
+    action: canLaunchLogin ? entry.action : "retry",
+    actionLabel: canLaunchLogin
+      ? (entry.actionLabel ? t(entry.actionLabel) : undefined)
+      : t("actionRetry"),
     technicalDetails,
     missingScopes: [],
   };

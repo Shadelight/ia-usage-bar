@@ -440,8 +440,22 @@ pub(crate) struct CliInstallStatus {
     version: Option<String>,
 }
 
+/// Tauri resuelve recursos con el prefijo verbatim de Windows
+/// (`\\?\C:\...`). PATH nunca lo lleva y no debe escribirse con él: sin
+/// quitarlo la app decía "No está en PATH" aunque el instalador lo hubiera
+/// configurado, y "Reparar PATH" añadía una entrada con `\\?\`.
+fn without_verbatim_prefix(value: &str) -> String {
+    if let Some(unc) = value.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else {
+        value.strip_prefix(r"\\?\").unwrap_or(value).to_string()
+    }
+}
+
 fn normalized_path_segment(value: &str) -> String {
-    let trimmed = value.trim().trim_matches('"');
+    let unquoted = value.trim().trim_matches('"');
+    let without_prefix = without_verbatim_prefix(unquoted);
+    let trimmed = without_prefix.as_str();
     let without_trailing = trimmed.trim_end_matches(['\\', '/']);
     if without_trailing.len() == 2 && without_trailing.ends_with(':') {
         format!("{without_trailing}\\")
@@ -572,7 +586,7 @@ pub(crate) fn cli_install_status(app: AppHandle) -> Result<CliInstallStatus, Str
     let directory = binary.parent().unwrap_or(&binary);
     Ok(CliInstallStatus {
         binary_exists,
-        binary_path: binary.display().to_string(),
+        binary_path: without_verbatim_prefix(&binary.display().to_string()),
         path_configured: path_has_segment(&user_path, &directory.display().to_string()),
         version: binary_exists.then(|| cli_version(&binary)).flatten(),
     })
@@ -1318,6 +1332,28 @@ mod update_tests {
             r"C:\Program Files\IA Usage Bar\resources\binary",
             cli
         ));
+    }
+
+    #[test]
+    fn verbatim_resource_path_matches_the_plain_path_segment() {
+        // Tauri devuelve el recurso con `\\?\`; el instalador escribe la ruta
+        // sin prefijo.
+        let resolved = r"\\?\C:\Users\me\AppData\Local\IA Usage Bar\resources\bin";
+        let installed = r"C:\Tools;C:\Users\me\AppData\Local\IA Usage Bar\resources\bin";
+        assert!(path_has_segment(installed, resolved));
+        // Reparar nunca escribe el prefijo y absorbe una entrada verbatim
+        // previa de la misma carpeta.
+        assert_eq!(
+            add_path_segment(
+                r"C:\Tools;\\?\C:\Apps\IA\resources\bin",
+                r"\\?\C:\Apps\IA\resources\bin"
+            ),
+            r"C:\Tools;C:\Apps\IA\resources\bin"
+        );
+        assert_eq!(
+            super::without_verbatim_prefix(r"\\?\UNC\server\share\bin"),
+            r"\\server\share\bin"
+        );
     }
 
     #[test]

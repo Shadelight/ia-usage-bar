@@ -4,6 +4,33 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-09-14
+
+### Fixed
+
+- Antigravity: el botón "Iniciar sesión" de una sesión vencida solo daba el
+  error "no tiene un inicio de sesión automático". Para proveedores sin login
+  lanzable desde la app ahora ofrece "Reintentar" (tras renovar la sesión en
+  su propia aplicación).
+- Antigravity: la vía local buscaba el token CSRF (un PowerShell de ~2 s) una
+  vez por cada puerto probado, lo que podía superar los 12 s del refresco y
+  dejar en pantalla el error anterior aunque la app estuviera abierta. Ahora
+  se busca una sola vez por refresco.
+- Modo claro: varios colores estaban fijos para el tema oscuro. La "A" del
+  logo desaparecía, el banner de recomendación y los avisos de ritmo
+  (verde/amarillo claro) eran ilegibles, los porcentajes con acentos claros
+  (ámbar, naranja) tenían poco contraste, y la pastilla de idioma, los
+  botones, los hovers y el borde de "+" usaban grises oscuros. Ahora pasan
+  por tokens con valor propio en cada tema; el modo oscuro no cambia.
+- CLI en Ajustes: decía "No está en PATH" aunque el instalador lo había
+  configurado, porque la ruta del recurso llega con el prefijo `\\?\` y no
+  coincidía con la entrada de PATH. "Reparar PATH" además escribía esa ruta
+  con `\\?\`. Ahora se compara y se escribe sin prefijo.
+- SuperGrok: tras conectar no mostraba ningún dato porque la respuesta de
+  facturación de xAI cambió a `{"config": {"used", "monthlyLimit", ...}}`.
+  Ahora muestra el uso mensual cuando el plan tiene límite de pago por uso,
+  o "Sin cargos este período" cuando no lo tiene.
+
 ## [0.3.5] - 2026-09-14
 
 Desde 0.3.4 el botón "Instalar ahora" de Windows no funciona: esta versión

@@ -33,8 +33,18 @@ impl Provider for Antigravity {
 
     fn refresh(&self, _cfg: &AppConfig) -> ProviderSnapshot {
         let local_bases = discover_local_bases();
+        // One CSRF lookup per refresh: it spawns PowerShell (~2 s) and used to
+        // run once per probed port, which could push the refresh past the
+        // dashboard's 12 s deadline and keep a stale error on screen.
+        let csrf = if local_bases.is_empty() {
+            None
+        } else {
+            std::env::var("ANTIGRAVITY_CSRF_TOKEN")
+                .ok()
+                .or_else(process_csrf_token)
+        };
         for base in &local_bases {
-            if let Ok(mut snap) = fetch_local(base) {
+            if let Ok(mut snap) = fetch_local(base, csrf.as_deref()) {
                 snap.set_active_source(UsageSource::LocalSession);
                 return snap;
             }
@@ -220,17 +230,14 @@ fn project_from(body: &Value) -> Option<String> {
 const LOCAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
 const LS_SERVICE: &str = "exa.language_server_pb.LanguageServerService";
 
-fn fetch_local(addr: &str) -> Result<ProviderSnapshot, FetchError> {
+fn fetch_local(addr: &str, csrf: Option<&str>) -> Result<ProviderSnapshot, FetchError> {
     let base = addr.trim_end_matches('/');
-    let csrf = std::env::var("ANTIGRAVITY_CSRF_TOKEN")
-        .ok()
-        .or_else(process_csrf_token);
     let mut headers = vec![
         ("Content-Type", "application/json".to_string()),
         ("Connect-Protocol-Version", "1".to_string()),
     ];
     if let Some(token) = csrf.filter(|token| !token.trim().is_empty()) {
-        headers.push(("X-Codeium-Csrf-Token", token));
+        headers.push(("X-Codeium-Csrf-Token", token.to_string()));
     }
     let refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
     // A listening port is not automatically the language server. Connect's

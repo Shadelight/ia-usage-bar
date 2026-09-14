@@ -218,7 +218,48 @@ fn fetch_supergrok(key: &str) -> Result<ProviderSnapshot, FetchError> {
         "https://cli-chat-proxy.grok.com/v1/billing",
         &[("Authorization", &format!("Bearer {key}"))],
     )?;
+    Ok(snapshot_ok(
+        VendorId::Supergrok,
+        "SuperGrok",
+        supergrok_lines(&body),
+    ))
+}
+
+fn supergrok_lines(body: &Value) -> Vec<crate::model::MetricLine> {
     let mut lines = Vec::new();
+    // Respuesta actual: {"config": {"used": {"val"}, "monthlyLimit": {"val"},
+    // "billingPeriodEnd", "history": [...]}}. `val` no tiene unidad
+    // documentada, así que solo se usa como proporción used/limit. Un límite
+    // 0 significa que el plan no tiene pago por uso: no hay cuota que medir.
+    if let Some(config) = body.get("config") {
+        let val = |k: &str| {
+            config
+                .get(k)
+                .and_then(|v| v.get("val"))
+                .and_then(Value::as_f64)
+        };
+        match (val("used"), val("monthlyLimit")) {
+            (Some(used), Some(limit)) if limit > 0.0 => lines.push(progress_pct(
+                "monthly",
+                "Uso mensual",
+                used / limit * 100.0,
+                json_str(config, &["billingPeriodEnd"]),
+                2_592_000,
+                "always",
+            )),
+            (Some(used), _) => lines.push(values_line(
+                "billing",
+                "Pago por uso",
+                if used > 0.0 {
+                    "Con cargos este período"
+                } else {
+                    "Sin cargos este período"
+                },
+                "always",
+            )),
+            _ => {}
+        }
+    }
     if let Some((w, pct)) = body
         .get("weekly")
         .or_else(|| body.get("included"))
@@ -240,11 +281,11 @@ fn fetch_supergrok(key: &str) -> Result<ProviderSnapshot, FetchError> {
         ));
     }
     if lines.is_empty() {
-        if let Some(pct) = json_f64(&body, &["percent", "utilization"]) {
+        if let Some(pct) = json_f64(body, &["percent", "utilization"]) {
             lines.push(progress_pct("usage", "Uso", pct, None, 604_800, "always"));
         }
     }
-    Ok(snapshot_ok(VendorId::Supergrok, "SuperGrok", lines))
+    lines
 }
 
 fn commandcode_auth() -> std::path::PathBuf {
@@ -412,6 +453,40 @@ mod tests {
         chrono::DateTime::parse_from_rfc3339("2026-09-14T12:00:00Z")
             .unwrap()
             .timestamp()
+    }
+
+    #[test]
+    fn supergrok_billing_config_without_metered_limit_reports_no_charges() {
+        // Forma real observada (plan sin pago por uso: todo en cero).
+        let body = serde_json::json!({"config": {
+            "billingPeriodEnd": "2026-10-01T00:00:00+00:00",
+            "billingPeriodStart": "2026-09-01T00:00:00+00:00",
+            "history": [{"billingCycle": {"month": 8, "year": 2026}, "totalUsed": {"val": 0}}],
+            "monthlyLimit": {"val": 0},
+            "onDemandCap": {"val": 0},
+            "used": {"val": 0}
+        }});
+        let lines = supergrok_lines(&body);
+        assert_eq!(lines.len(), 1);
+        assert!(matches!(
+            &lines[0],
+            crate::model::MetricLine::Values { text, .. } if text == "Sin cargos este período"
+        ));
+    }
+
+    #[test]
+    fn supergrok_billing_config_with_limit_reports_monthly_percent() {
+        let body = serde_json::json!({"config": {
+            "billingPeriodEnd": "2026-10-01T00:00:00+00:00",
+            "monthlyLimit": {"val": 2000},
+            "used": {"val": 500}
+        }});
+        let lines = supergrok_lines(&body);
+        assert!(matches!(
+            &lines[0],
+            crate::model::MetricLine::Progress { used, resets_at: Some(reset), .. }
+                if (*used - 25.0).abs() < 0.01 && reset == "2026-10-01T00:00:00+00:00"
+        ));
     }
 
     #[test]

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">IA Usage small mark (light theme)</title>
+  <!-- Same three masses as ia-usage-small-mark.svg; the "A" is dark so it
+       stays visible on the light panel. -->
+  <rect x="30" y="50" width="38" height="158" rx="6" fill="#FF7043"/>
+  <path d="M82 204 143 55c3-8 9-12 17-12s14 4 18 12l68 149h-44L159 98l-35 106Z" fill="#1F2023"/>
+  <rect x="130" y="151" width="47" height="18" rx="3" fill="#FF7043"/>
+</svg>
