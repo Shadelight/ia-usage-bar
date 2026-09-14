@@ -33,6 +33,22 @@ class ProtocolCrypto {
         }
     }
 
+    /** V2: the key is already 256 bits of CSPRNG output — no Argon2id. */
+    fun decrypt(blob: EncryptedBlob, key: ByteArray): String {
+        require(blob.version == SUPPORTED_BLOB_VERSION) { "La versión del blob no es compatible." }
+        require(blob.algorithm == SUPPORTED_ALGORITHM_V2) { "El algoritmo del blob no es compatible." }
+        require(key.size == AEAD.XCHACHA20POLY1305_IETF_KEYBYTES) { "La clave del dispositivo tiene un tamaño inválido." }
+        val nonce = decode(blob.nonce, "nonce", 24)
+        val ciphertext = decode(blob.ciphertext, "ciphertext", null)
+        return sodium.decrypt(
+            sodium.toHexStr(ciphertext),
+            null,
+            nonce,
+            Key.fromBytes(key),
+            AEAD.Method.XCHACHA20_POLY1305_IETF,
+        ) ?: throw SecurityException("No se pudo descifrar: clave de dispositivo inválida.")
+    }
+
     private fun deriveKey(passphrase: CharArray, salt: ByteArray): ByteArray {
         // Unlike libsodium's high-level crypto_pwhash API, Bouncy Castle lets
         // us pin the M5 parallelism value (p = 4) as well as memory and time.
