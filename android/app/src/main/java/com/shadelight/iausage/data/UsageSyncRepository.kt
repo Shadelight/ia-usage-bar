@@ -21,15 +21,80 @@ class UsageSyncRepository(private val context: Context) {
 
     fun refresh(): SyncPayload {
         val pairing = store.pairing() ?: error("No hay un PC vinculado.")
-        val passphrase = store.passphrase() ?: error("La frase secreta segura ya no está disponible.")
-        val verified = fetch(pairing, passphrase)
-        store.savePayload(verified.second)
-        return verified.first
+        val secret = store.deviceSecret()
+        val (payload, raw) = if (secret != null) {
+            val clientDeviceId = store.clientDeviceId() ?: error("Falta el identificador de este dispositivo.")
+            fetchV2(pairing, clientDeviceId, secret)
+        } else {
+            val passphrase = store.passphrase() ?: error("La frase secreta segura ya no está disponible.")
+            fetch(pairing, passphrase)
+        }
+        store.savePayload(raw)
+        return payload
+    }
+
+    fun pairV2(pairing: PairingInfo): SyncPayload {
+        val secret = requireNotNull(pairing.secret) { "El QR no contiene un secreto de pareo." }
+        val token = requireNotNull(pairing.token) { "El QR no contiene un token de pareo." }
+        val clientDeviceId = store.ensureClientDeviceId()
+        val name = sanitizedDeviceName()
+        postPair(pairing, token, clientDeviceId, name)
+        val (payload, raw) = fetchV2(pairing, clientDeviceId, secret)
+        store.savePairingV2(pairing, clientDeviceId, secret)
+        store.savePayload(raw)
+        return payload
     }
 
     fun disconnect() = store.clear()
     fun clearCachedPayload() = store.clearPayload()
     fun pairing() = store.pairing()
+
+    private fun postPair(pairing: PairingInfo, token: String, clientDeviceId: String, name: String) {
+        val baseUrl = "http://${bracketedHost(pairing.host)}:${pairing.port}"
+        val body = JSONObject().apply {
+            put("token", token)
+            put("clientDeviceId", clientDeviceId)
+            put("name", name)
+        }
+        val connection = (URL("$baseUrl/v2/pair").openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10_000
+            readTimeout = 20_000
+            requestMethod = "POST"
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+        }
+        try {
+            connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            when (val code = connection.responseCode) {
+                200 -> return
+                410 -> error("El código QR ya expiró o se usó. Genera uno nuevo.")
+                404 -> error("El PC no tiene un pareo pendiente. Genera un QR nuevo.")
+                else -> error("El PC respondió HTTP $code al vincular.")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun fetchV2(pairing: PairingInfo, clientDeviceId: String, secret: ByteArray): Pair<SyncPayload, String> {
+        val baseUrl = "http://${bracketedHost(pairing.host)}:${pairing.port}"
+        val meta = ServerMeta.fromJson(getJson("$baseUrl/v1/meta"))
+        require(meta.schemaVersion == SUPPORTED_SCHEMA_VERSION && meta.blobVersion == SUPPORTED_BLOB_VERSION) { "El PC usa una versión de sync no compatible." }
+        require(meta.lan) { "El servidor del PC no está expuesto a la red local." }
+        require(meta.deviceId.equals(pairing.deviceId, true) && meta.fingerprint == pairing.fingerprint) { "El PC no coincide con el QR. No continúes la vinculación." }
+        val blob = EncryptedBlob.fromJson(getJson("$baseUrl/v2/snapshot?device=$clientDeviceId"))
+        val raw = crypto.decrypt(blob, secret)
+        val payload = SyncPayload.fromJson(JSONObject(raw))
+        require(payload.deviceId.equals(pairing.deviceId, true)) { "El snapshot no pertenece al PC vinculado." }
+        return payload to raw
+    }
+
+    /** `Build.MODEL` crosses HTTP and gets stored/rendered on Desktop —
+     * mirror the same sanitization rules as the Rust side. */
+    private fun sanitizedDeviceName(): String {
+        val cleaned = android.os.Build.MODEL.filterNot { it.isISOControl() }.trim()
+        return if (cleaned.isEmpty()) "Android" else cleaned.take(64)
+    }
 
     private fun fetch(pairing: PairingInfo, passphrase: CharArray): Pair<SyncPayload, String> {
         val baseUrl = "http://${bracketedHost(pairing.host)}:${pairing.port}"
