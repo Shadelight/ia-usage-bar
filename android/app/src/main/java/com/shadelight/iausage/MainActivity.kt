@@ -14,6 +14,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.shadelight.iausage.ui.UpdateViewModel
 import com.shadelight.iausage.ui.UsageApp
 import com.shadelight.iausage.ui.UsageViewModel
 import com.shadelight.iausage.ui.resolveDarkTheme
@@ -34,6 +35,9 @@ class MainActivity : ComponentActivity() {
     private val viewModel by lazy {
         ViewModelProvider(this, UsageViewModel.Factory(applicationContext))[UsageViewModel::class.java]
     }
+    private val updateViewModel by lazy {
+        ViewModelProvider(this, UpdateViewModel.Factory(applicationContext))[UpdateViewModel::class.java]
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,7 +46,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val preferences by viewModel.preferences.collectAsStateWithLifecycle()
             IaUsageTheme(darkTheme = resolveDarkTheme(preferences.theme)) {
-                Surface(Modifier.fillMaxSize()) { UsageApp(viewModel, ::scanQr) }
+                Surface(Modifier.fillMaxSize()) { UsageApp(viewModel, updateViewModel, ::scanQr) }
             }
         }
     }

@@ -3,6 +3,7 @@ package com.shadelight.iausage.data
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -23,6 +24,11 @@ data class AppPreferences(
      * (null), never silently hidden. */
     val visibleProviderIds: Set<String>? = null,
     val usedMode: Boolean = true,
+    /** Tag de release descartado con "Ahora no" (null = ninguno). Un tag
+     * distinto vuelve a avisar solo. No es estado de descarga: es preferencia. */
+    val dismissedUpdateTag: String? = null,
+    /** Epoch-ms del último chequeo automático de actualizaciones. */
+    val lastUpdateCheckAt: Long = 0L,
 )
 
 /** UI-only preferences: never mixed with the encrypted pairing/passphrase/
@@ -37,6 +43,8 @@ class UserPreferencesRepository(context: Context) {
         val VISIBLE_PROVIDERS = stringSetPreferencesKey("visible_provider_ids")
         val HAS_VISIBLE_OVERRIDE = booleanPreferencesKey("has_visible_override")
         val USED_MODE = booleanPreferencesKey("used_mode")
+        val DISMISSED_UPDATE_TAG = stringPreferencesKey("dismissed_update_tag")
+        val LAST_UPDATE_CHECK_AT = longPreferencesKey("last_update_check_at")
     }
 
     val preferences: Flow<AppPreferences> = store.data.map { prefs ->
@@ -44,11 +52,17 @@ class UserPreferencesRepository(context: Context) {
             theme = prefs[Keys.THEME]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.SYSTEM,
             visibleProviderIds = if (prefs[Keys.HAS_VISIBLE_OVERRIDE] == true) prefs[Keys.VISIBLE_PROVIDERS] ?: emptySet() else null,
             usedMode = prefs[Keys.USED_MODE] ?: true,
+            dismissedUpdateTag = prefs[Keys.DISMISSED_UPDATE_TAG],
+            lastUpdateCheckAt = prefs[Keys.LAST_UPDATE_CHECK_AT] ?: 0L,
         )
     }
 
     suspend fun setTheme(theme: ThemeMode) = store.edit { it[Keys.THEME] = theme.name }
     suspend fun setUsedMode(usedMode: Boolean) = store.edit { it[Keys.USED_MODE] = usedMode }
+    suspend fun setDismissedUpdateTag(tag: String?) = store.edit { prefs ->
+        if (tag == null) prefs.remove(Keys.DISMISSED_UPDATE_TAG) else prefs[Keys.DISMISSED_UPDATE_TAG] = tag
+    }
+    suspend fun setLastUpdateCheckAt(epochMs: Long) = store.edit { it[Keys.LAST_UPDATE_CHECK_AT] = epochMs }
 
     /** null clears the override so newly-added providers show automatically. */
     suspend fun setVisibleProviderIds(ids: Set<String>?) = store.edit { prefs ->

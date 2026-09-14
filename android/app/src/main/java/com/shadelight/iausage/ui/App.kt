@@ -15,6 +15,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,8 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shadelight.iausage.data.ThemeMode
+import com.shadelight.iausage.data.UpdateState
 import com.shadelight.iausage.data.visibleProviders
 import com.shadelight.iausage.ui.components.ErrorBanner
+import com.shadelight.iausage.ui.components.UpdateBanner
 import com.shadelight.iausage.ui.screens.AboutScreen
 import com.shadelight.iausage.ui.screens.DashboardScreen
 import com.shadelight.iausage.ui.screens.DeviceScreen
@@ -45,11 +48,15 @@ private fun titleFor(screen: Screen) = when (screen) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UsageApp(viewModel: UsageViewModel, scanQr: () -> Unit) {
+fun UsageApp(viewModel: UsageViewModel, updateViewModel: UpdateViewModel, scanQr: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val preferences by viewModel.preferences.collectAsStateWithLifecycle()
+    val updateState by updateViewModel.state.collectAsStateWithLifecycle()
     var screen by remember { mutableStateOf(Screen.DASHBOARD) }
     var menuExpanded by remember { mutableStateOf(false) }
+
+    // Chequeo silencioso al arrancar (cooldown 6h, falla sin mostrar nada).
+    LaunchedEffect(Unit) { updateViewModel.checkSilently() }
 
     val paired = state.payload != null
 
@@ -89,6 +96,16 @@ fun UsageApp(viewModel: UsageViewModel, scanQr: () -> Unit) {
             state.error?.let { message ->
                 ErrorBanner(message, onDismiss = viewModel::dismissError, modifier = Modifier.padding(horizontal = 16.dp))
             }
+            // Aviso global: fuera del `when` de pairing para que un usuario
+            // sin PC vinculado también se entere de la actualización.
+            if (updateState !is UpdateState.Idle) {
+                UpdateBanner(
+                    state = updateState,
+                    dismissedTag = preferences.dismissedUpdateTag,
+                    viewModel = updateViewModel,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
             when {
                 state.payload != null -> {
                     val visible = visibleProviders(state.payload!!.snapshot.providers, preferences.visibleProviderIds)
@@ -117,7 +134,10 @@ fun UsageApp(viewModel: UsageViewModel, scanQr: () -> Unit) {
                             onVisibleProviderIdsChange = viewModel::setVisibleProviderIds,
                             onClearLocalData = viewModel::clearLocalData,
                         )
-                        Screen.ABOUT -> AboutScreen()
+                        Screen.ABOUT -> AboutScreen(
+                            updateState = updateState,
+                            updateViewModel = updateViewModel,
+                        )
                     }
                 }
                 state.pairing == null -> NoPairingScreen(state.loading, scanQr, viewModel::setPairingUri)

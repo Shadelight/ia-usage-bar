@@ -59,6 +59,10 @@ dependencies {
     androidTestImplementation(composeBom)
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     implementation("androidx.activity:activity-compose:1.10.1")
+    // FileProvider para entregar el APK verificado al instalador del sistema.
+    // Declarada directa a propósito: hoy llegaría transitiva, pero depender
+    // de eso es pedirle problemas al Gradle del futuro.
+    implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.ui:ui")
@@ -76,5 +80,9 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.17.0@aar")
     implementation("org.bouncycastle:bcprov-jdk18on:1.79")
     testImplementation("junit:junit:4.13.2")
+    // org.json real solo para tests JVM: en el dispositivo lo pone el
+    // framework, pero en unit tests el android.jar solo trae stubs que lanzan
+    // "not mocked". Sin esto, UpdateModelsTest no puede parsear fixtures.
+    testImplementation("org.json:json:20240303")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }
