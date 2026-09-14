@@ -42,6 +42,7 @@ fun NoPairingScreen(loading: Boolean, scanQr: () -> Unit, onManualUri: (String) 
 
 @Composable
 fun PendingPairingScreen(pairing: PairingInfo, loading: Boolean, onPair: (String) -> Unit, onUseAnotherQr: () -> Unit) {
+    val isV2 = pairing.secret != null
     // Keyed on the pairing itself so scanning a different PC's QR starts
     // the passphrase field empty instead of carrying over the old value.
     var passphrase by rememberSaveable(pairing.deviceId) { mutableStateOf("") }
@@ -57,14 +58,20 @@ fun PendingPairingScreen(pairing: PairingInfo, loading: Boolean, onPair: (String
             }
         }
         Text("Comprueba que el código coincide con el que ves en el PC.")
-        SecretTextField(
-            value = passphrase,
-            onValueChange = { passphrase = it },
-            label = "Frase secreta",
-            modifier = Modifier.testTag("pairing-secret"),
-            onDone = { if (passphrase.isNotBlank() && !loading) onPair(passphrase) },
-        )
-        Button(onClick = { onPair(passphrase) }, enabled = passphrase.isNotBlank() && !loading, modifier = Modifier.fillMaxWidth()) {
+        if (!isV2) {
+            SecretTextField(
+                value = passphrase,
+                onValueChange = { passphrase = it },
+                label = "Frase secreta",
+                modifier = Modifier.testTag("pairing-secret"),
+                onDone = { if (passphrase.isNotBlank() && !loading) onPair(passphrase) },
+            )
+        }
+        Button(
+            onClick = { onPair(passphrase) },
+            enabled = (isV2 || passphrase.isNotBlank()) && !loading,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             Text(if (loading) "Vinculando…" else "Vincular")
         }
         TextButton(onClick = onUseAnotherQr) { Text("Usar otro QR") }

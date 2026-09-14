@@ -55,8 +55,12 @@ class UsageViewModel(
 
     fun pair(passphrase: String) = launch(blocking = true) {
         val pairing = _state.value.pairing ?: return@launch
-        require(passphrase.isNotBlank()) { "Introduce la frase secreta." }
-        val payload = repository.pair(pairing, passphrase.toCharArray())
+        val payload = if (pairing.secret != null) {
+            repository.pairV2(pairing)
+        } else {
+            require(passphrase.isNotBlank()) { "Introduce la frase secreta." }
+            repository.pair(pairing, passphrase.toCharArray())
+        }
         RefreshWorker.schedule(appContext)
         // Keep `pairing` in state (not just the encrypted store) — DeviceScreen
         // needs the host/port/verification code right after pairing succeeds,
