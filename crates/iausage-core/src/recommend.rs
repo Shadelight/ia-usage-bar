@@ -297,17 +297,19 @@ fn avg_confidence(snap: &ProviderSnapshot) -> Option<f64> {
 fn exclusion_reason(snap: &ProviderSnapshot, now_unix: i64) -> Option<String> {
     if !snap.is_connected() {
         return Some(match snap.status_reason {
-            Some(
-                ProviderStatusReason::InvalidCredential | ProviderStatusReason::OAuthExpired,
-            ) => "auth".to_string(),
+            Some(ProviderStatusReason::InvalidCredential | ProviderStatusReason::OAuthExpired) => {
+                "auth".to_string()
+            }
             _ => "offline".to_string(),
         });
     }
     // Stale grave: marcado stale, sin quota usable y último intento viejo.
     // El stale leve (merge_snapshot retiene métricas válidas) sigue puntuando.
-    let has_usable = snap.quotas.iter().any(|q| {
-        quota_used_percent(q).is_some() || quota_remaining(q).is_some()
-    }) || snap.primary_utilization.is_some();
+    let has_usable = snap
+        .quotas
+        .iter()
+        .any(|q| quota_used_percent(q).is_some() || quota_remaining(q).is_some())
+        || snap.primary_utilization.is_some();
     if snap.stale && !has_usable {
         return Some("stale".to_string());
     }
@@ -322,11 +324,7 @@ fn exclusion_reason(snap: &ProviderSnapshot, now_unix: i64) -> Option<String> {
     None
 }
 
-fn score_candidate(
-    snap: &ProviderSnapshot,
-    current_id: &str,
-    now_unix: i64,
-) -> CandidateScore {
+fn score_candidate(snap: &ProviderSnapshot, current_id: &str, now_unix: i64) -> CandidateScore {
     let excluded = exclusion_reason(snap, now_unix);
 
     let mut short_headroom = headroom_for(snap, true);
@@ -371,7 +369,10 @@ fn score_candidate(
         conf_num = (conf_num - 30.0).max(0.0);
     }
 
-    let mut score = 0.30 * short + 0.20 * long + 0.25 * sust_num + 0.10 * reset_num
+    let mut score = 0.30 * short
+        + 0.20 * long
+        + 0.25 * sust_num
+        + 0.10 * reset_num
         + 0.10 * pref_num
         + 0.05 * conf_num;
 
@@ -453,10 +454,8 @@ pub fn recommend(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let valid: Vec<&CandidateScore> =
-        candidates.iter().filter(|c| c.excluded.is_none()).collect();
-    let with_data: Vec<&CandidateScore> =
-        valid.iter().filter(|c| c.has_data).copied().collect();
+    let valid: Vec<&CandidateScore> = candidates.iter().filter(|c| c.excluded.is_none()).collect();
+    let with_data: Vec<&CandidateScore> = valid.iter().filter(|c| c.has_data).copied().collect();
     let any_stale = providers.iter().any(|p| p.stale);
 
     if with_data.is_empty() {
@@ -496,12 +495,7 @@ pub fn recommend(
             to_id,
             to_name,
             left,
-            confidence: confidence_for(
-                &RecAction::Stay,
-                Some(only),
-                Some(only),
-                any_stale,
-            ),
+            confidence: confidence_for(&RecAction::Stay, Some(only), Some(only), any_stale),
             reason: reason.to_string(),
             candidates: top_candidates(candidates),
         };
@@ -540,8 +534,7 @@ pub fn recommend(
             // actual tampoco llegue y el destino aguante más).
             let dest_ok = best.sustainable != Some(false)
                 || (cur.sustainable == Some(false)
-                    && best.exhaust_in_secs.unwrap_or(i64::MAX)
-                        > cur.exhaust_in_secs.unwrap_or(0));
+                    && best.exhaust_in_secs.unwrap_or(i64::MAX) > cur.exhaust_in_secs.unwrap_or(0));
             if dest_ok {
                 let reason = if cur.sustainable == Some(false) {
                     if cur.exhaust_in_secs.unwrap_or(i64::MAX) <= CRITICAL_EXHAUST_SECS {
@@ -623,12 +616,8 @@ pub fn recommend(
                 action: RecAction::Stay.as_str().to_string(),
                 from_id: current_id.to_string(),
                 to_id: Some(alt.map(|b| b.id.clone()).unwrap_or(cur.id.clone())),
-                to_name: Some(
-                    alt.map(|b| b.name.clone()).unwrap_or(cur.name.clone()),
-                ),
-                left: alt
-                    .map(|b| b.display_left)
-                    .unwrap_or(cur.display_left),
+                to_name: Some(alt.map(|b| b.name.clone()).unwrap_or(cur.name.clone())),
+                left: alt.map(|b| b.display_left).unwrap_or(cur.display_left),
                 confidence: confidence_for(&RecAction::Stay, Some(cur), Some(cur), any_stale),
                 reason: "at_risk".to_string(),
                 candidates: top_candidates(candidates),

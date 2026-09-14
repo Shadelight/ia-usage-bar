@@ -84,9 +84,12 @@ fn read_keyring_token() -> Option<String> {
     // UTF-8 JSON: `get_password()` still decodes Windows credentials as
     // UTF-16 and returns `Ok` with garbage instead of an error, so it can't
     // be used as a probe here. Go straight to the raw bytes.
-    let entry = keyring::Entry::new_with_target("gemini:antigravity", "gemini", "antigravity").ok()?;
+    let entry =
+        keyring::Entry::new_with_target("gemini:antigravity", "gemini", "antigravity").ok()?;
     let raw = entry.get_secret().ok()?;
-    let text = String::from_utf8_lossy(&raw).trim_end_matches('\0').to_string();
+    let text = String::from_utf8_lossy(&raw)
+        .trim_end_matches('\0')
+        .to_string();
     parse_blob(&text)
 }
 
