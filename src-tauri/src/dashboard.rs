@@ -11,8 +11,8 @@ use tauri_plugin_notification::NotificationExt;
 
 use crate::commands::parse_id;
 use crate::model::{
-    monthly_spend, now_iso, Dashboard, ProviderSnapshot, ProviderStatus,
-    ProviderStatusReason, SpendRow, VendorId,
+    monthly_spend, now_iso, Dashboard, ProviderSnapshot, ProviderStatus, ProviderStatusReason,
+    SpendRow, VendorId,
 };
 use crate::providers;
 use crate::state::{claim_refresh, lock_or_recover, AppState, NotifyState};
@@ -52,13 +52,13 @@ pub(crate) fn build_dashboard(app: &AppHandle, state: &AppState) -> Dashboard {
     }
     let now_unix = chrono::Utc::now().timestamp();
     let rec = iausage_core::recommend::recommend(&providers, &cfg.primary, now_unix);
-    let (recommend_id, recommend_name, recommend_left) =
-        match (&rec.to_id, &rec.to_name, rec.left) {
-            (Some(id), Some(name), Some(left)) if rec.action != "insufficient_data" => {
-                (Some(id.clone()), Some(name.clone()), Some(left))
-            }
-            _ => (None, None, None),
-        };
+    let (recommend_id, recommend_name, recommend_left) = match (&rec.to_id, &rec.to_name, rec.left)
+    {
+        (Some(id), Some(name), Some(left)) if rec.action != "insufficient_data" => {
+            (Some(id.clone()), Some(name.clone()), Some(left))
+        }
+        _ => (None, None, None),
+    };
     Dashboard {
         providers,
         catalog: lock_or_recover(&state.catalog).clone(),
@@ -106,11 +106,23 @@ fn parse_ts(s: &Option<String>) -> Option<i64> {
         .map(|d| d.timestamp())
 }
 
-fn reset_happened(prev: &Option<String>, cur: &Option<String>) -> bool {
-    match (parse_ts(prev), parse_ts(cur)) {
+/// A discrete reset (fixed 5h/weekly windows) jumps `reset_at` forward by a
+/// lot at the moment it fires. A rolling window's `reset_at` also creeps
+/// forward on every poll as new usage slides the boundary, without the quota
+/// ever actually clearing — so the timestamp jump alone is not proof of a
+/// reset. Require usage to have dropped too, or we'd notify a "reset" every
+/// few minutes for any provider with a sliding window.
+fn reset_happened(
+    prev: &Option<String>,
+    cur: &Option<String>,
+    prev_util: Option<f64>,
+    util: f64,
+) -> bool {
+    let jumped = match (parse_ts(prev), parse_ts(cur)) {
         (Some(p), Some(c)) => (c - p) > 120,
         _ => false,
-    }
+    };
+    jumped && prev_util.is_none_or(|p| util < p)
 }
 
 fn take_usage_alerts(
@@ -154,7 +166,7 @@ fn check_notifications(app: &AppHandle, snap: &ProviderSnapshot) {
     let ns = map.entry(snap.id.clone()).or_default();
     let cur = snap.quotas.iter().find_map(|quota| quota.reset_at.clone());
     if ns.initialized {
-        let reset = reset_happened(&ns.prev_resets, &cur);
+        let reset = reset_happened(&ns.prev_resets, &cur, ns.previous_utilization, util);
         if reset {
             send_notification(
                 app,
@@ -459,20 +471,29 @@ mod tests {
     fn reset_happened_ignores_microsecond_jitter() {
         let a = Some("2099-01-01T00:00:00Z".into());
         let b = Some("2099-01-01T00:00:01Z".into());
-        assert!(!reset_happened(&a, &b));
+        assert!(!reset_happened(&a, &b, Some(80.0), 5.0));
     }
 
     #[test]
     fn reset_happened_detects_new_window() {
         let a = Some("2099-01-01T00:00:00Z".into());
         let b = Some("2099-01-08T00:00:00Z".into());
-        assert!(reset_happened(&a, &b));
+        assert!(reset_happened(&a, &b, Some(87.0), 0.0));
     }
 
     #[test]
     fn reset_happened_ignores_vanished_timestamp() {
         let a = Some("2099-01-01T00:00:00Z".into());
-        assert!(!reset_happened(&a, &None));
+        assert!(!reset_happened(&a, &None, Some(87.0), 0.0));
+    }
+
+    #[test]
+    fn reset_happened_ignores_sliding_window_that_never_clears_usage() {
+        // A rolling window's reset_at creeps forward on every poll even
+        // though usage keeps climbing — that is not a reset.
+        let a = Some("2099-01-01T00:00:00Z".into());
+        let b = Some("2099-01-01T00:10:00Z".into());
+        assert!(!reset_happened(&a, &b, Some(4.0), 6.0));
     }
 
     #[test]
