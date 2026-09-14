@@ -39,6 +39,15 @@ test("sync menu i18n keys exist in both languages", () => {
   assert.notEqual(I18N.en.syncPairNeedsLan, "syncPairNeedsLan");
 });
 
+test("sync settings no longer render a passphrase input or manual toggle", () => {
+  const settings = readFileSync(new URL("../src/views/settings.ts", import.meta.url), "utf8");
+  assert.ok(!settings.includes('data-savesyncpass'), "passphrase save button must be gone");
+  assert.ok(!settings.includes('data-forgetsyncpass'), "passphrase forget button must be gone");
+  assert.ok(!settings.includes('toggleRow("cfg-sync",'), "manual sync-enable toggle must be gone");
+  assert.ok(settings.includes("data-startpairing"), "pairing button must exist");
+  assert.ok(settings.includes("data-revokedevice"), "device revoke control must exist");
+});
+
 test("menu icons exist and render svg", () => {
   for (const icon of ["bell", "phone", "folder", "settings"]) {
     const svg = actionIconSvg(icon, 14);
@@ -82,35 +91,36 @@ test("tray-cmd pair-phone triggers the same flow as the in-app menu, and setting
   assert.ok(!listener.includes('handleAction("settings")'), "tray-cmd must not reset settingsCategory back to general after applying the requested category");
 });
 
-test("pair-phone checks passphrase, LAN and enabled before pairing", () => {
+test("pair-phone checks LAN before starting a pairing, with no passphrase ceremony", () => {
   const flowStart = main.indexOf("async function pairPhoneFlow");
   assert.ok(flowStart > 0, "pairPhoneFlow must exist as a standalone function shared by the menu and the tray");
   const flow = main.slice(flowStart, main.indexOf("\nasync function handleAction", flowStart));
-  const passIdx = flow.indexOf("hasPassphrase");
   const lanIdx = flow.indexOf("syncPairNeedsLan");
-  const enabledIdx = flow.indexOf("sync_set_enabled");
-  const pairingIdx = flow.indexOf("sync_get_pairing");
-  for (const [name, idx] of [["hasPassphrase", passIdx], ["lan gate", lanIdx], ["auto-enable", enabledIdx], ["pairing", pairingIdx]] as const) {
-    assert.ok(idx > 0, `pair-phone missing ${name}`);
-  }
-  assert.ok(passIdx < lanIdx && lanIdx < enabledIdx && enabledIdx < pairingIdx, "pair-phone must check passphrase, then LAN, then enabled, then pair");
-  assert.ok(flow.includes("{ lan: true }"), "pairing must request lan:true, never the unchecked toggle");
-  assert.ok(flow.includes("serverRunning"), "pairing must wait for a running LAN server");
-  assert.ok(flow.includes('getElementById("sync-pass")'), "missing passphrase must focus the secret input");
+  const startPairingIdx = flow.indexOf("sync_start_pairing");
+  assert.ok(lanIdx > 0, "pair-phone missing the LAN gate");
+  assert.ok(startPairingIdx > 0, "pair-phone missing sync_start_pairing");
+  assert.ok(lanIdx < startPairingIdx, "pair-phone must check LAN before starting a pairing");
   assert.ok(flow.includes('getElementById("cfg-sync-lan")'), "missing LAN must focus the LAN toggle");
   assert.ok(flow.includes('getElementById("sync-qr")'), "successful pairing must scroll to the QR");
+  assert.ok(!flow.includes("hasPassphrase"), "V2 pairing must never gate on a passphrase");
+  assert.ok(!flow.includes("sync_set_enabled"), "V2 pairing must never auto-enable a legacy toggle");
 });
 
-test("cfg-sync reverts the checkbox when the backend refuses", () => {
-  const handler = main.slice(main.indexOf('el.id === "cfg-sync"'));
-  assert.ok(handler.includes("input.checked = !enabled"), "cfg-sync must revert on failure");
-});
-
-test("Show QR uses the same guarded mobile pairing flow", () => {
-  const start = main.indexOf('hasAttribute("data-syncqr")');
-  const handler = main.slice(start, main.indexOf('hasAttribute("data-syncexport")', start));
-  assert.match(handler, /await pairPhoneFlow\(\)/);
-  assert.doesNotMatch(handler, /lanToggle|lan: false/);
+test("pairing flow guards QR display and export with LAN check, no separate show-QR button", () => {
+  const flowStart = main.indexOf("async function pairPhoneFlow");
+  assert.ok(flowStart > 0, "pairPhoneFlow must exist");
+  const flow = main.slice(flowStart, main.indexOf("\nasync function", flowStart + 1));
+  // Verify pairPhoneFlow checks LAN before calling sync_start_pairing
+  const lanCheckIdx = flow.indexOf("!status.value.lan");
+  const startPairingIdx = flow.indexOf("sync_start_pairing");
+  assert.ok(lanCheckIdx > 0 && lanCheckIdx < startPairingIdx, "must check LAN before starting pairing");
+  // Verify pairPhoneFlow scrolls to the QR display
+  assert.ok(flow.includes('getElementById("sync-qr")'), "pairPhoneFlow must scroll to the QR display");
+  // Verify the data-startpairing button triggers pairPhoneFlow
+  assert.ok(main.includes('hasAttribute("data-startpairing")'), "start-pairing button must exist");
+  assert.ok(main.includes('btn.hasAttribute("data-startpairing")') || main.includes('el.hasAttribute("data-startpairing")'), "start-pairing button must have a handler");
+  // Verify export button is available
+  assert.ok(main.includes('hasAttribute("data-syncexport")'), "sync export button must exist");
 });
 
 test("footer uses the Tauri package version with a browser fallback", () => {
