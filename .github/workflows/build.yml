@@ -39,11 +39,11 @@ jobs:
       - name: Test frontend
         run: npm run test:frontend
 
-      - name: Check Tauri backend
-        run: cargo check --manifest-path src-tauri/Cargo.toml --locked
+      - name: Check Rust workspace
+        run: cargo check --workspace --locked
 
-      - name: Test Tauri backend
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Test Rust workspace
+        run: cargo test --workspace --locked
 
   android:
     name: Android APK

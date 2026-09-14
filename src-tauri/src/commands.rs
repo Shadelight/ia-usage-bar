@@ -1242,12 +1242,13 @@ pub(crate) fn sync_revoke_device(
         // 6): the guard must be dropped before `ensure_sync_server` below
         // takes the same lock again, so this mutation is scoped to a block.
         let mut cfg = lock_or_recover(&state.config);
-        if !cfg.revoke_device(&client_device_id) {
-            return Err("sync: dispositivo no encontrado".into());
-        }
-        cfg.save()?;
+        crate::config::revoke_paired_device(
+            &mut cfg,
+            &crate::config::OS_CREDENTIAL_STORE,
+            &client_device_id,
+            |updated| updated.save(),
+        )?;
     }
-    crate::config::delete_device_secret(&client_device_id)?;
     // Revocar el último dispositivo (sin V1 activo ni pairing pendiente)
     // debe apagar el servidor de inmediato, no esperar el próximo tick.
     crate::sync_service::ensure_sync_server(&app)?;

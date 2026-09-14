@@ -402,32 +402,113 @@ fn device_secret_account(client_device_id: &str) -> String {
     format!("device-secret-{client_device_id}")
 }
 
-/// Raw 256-bit secret storage — deliberately `set_secret`/`get_secret`
-/// (bytes), not the NUL-tolerant string path `read_keyring_entry` uses for
-/// API keys: a random secret is not a NUL-terminated string, so there's no
-/// padding quirk to work around here in the first place.
-pub fn store_device_secret(client_device_id: &str, secret: &[u8; 32]) -> Result<(), String> {
-    let entry = keyring::Entry::new(CREDENTIAL_SERVICE, &device_secret_account(client_device_id))
-        .map_err(|e| e.to_string())?;
-    entry.set_secret(secret).map_err(|e| e.to_string())
+/// Secure byte storage. The pairing/revoke logic takes it as a parameter so
+/// it can be tested against an in-memory store instead of the OS keyring.
+pub trait CredentialStore {
+    fn write(&self, account: &str, value: &[u8]) -> Result<(), String>;
+    /// `Ok(None)` when the account has no credential.
+    fn read(&self, account: &str) -> Result<Option<Vec<u8>>, String>;
+    /// Idempotent: deleting an absent credential is not an error.
+    fn delete(&self, account: &str) -> Result<(), String>;
 }
 
-pub fn read_device_secret(client_device_id: &str) -> Option<[u8; 32]> {
-    let entry =
-        keyring::Entry::new(CREDENTIAL_SERVICE, &device_secret_account(client_device_id)).ok()?;
-    entry.get_secret().ok()?.try_into().ok()
+/// OS credential store (Windows Credential Manager, macOS Keychain, Secret
+/// Service) through `keyring`.
+pub struct KeyringStore {
+    pub service: &'static str,
+}
+
+pub const OS_CREDENTIAL_STORE: KeyringStore = KeyringStore {
+    service: CREDENTIAL_SERVICE,
+};
+
+/// Errors are reduced to their kind: a keyring error can carry credential
+/// bytes (`BadEncoding`), which must never reach a log or a UI message.
+fn keyring_error_kind(e: &keyring::Error) -> String {
+    match e {
+        keyring::Error::PlatformFailure(err) => format!("PlatformFailure: {err}"),
+        keyring::Error::NoStorageAccess(err) => format!("NoStorageAccess: {err}"),
+        keyring::Error::NoEntry => "NoEntry".into(),
+        keyring::Error::BadEncoding(_) => "BadEncoding".into(),
+        keyring::Error::TooLong(attr, max) => format!("TooLong: {attr} > {max}"),
+        keyring::Error::Invalid(attr, reason) => format!("Invalid: {attr}: {reason}"),
+        keyring::Error::Ambiguous(_) => "Ambiguous".into(),
+        _ => "Unknown".into(),
+    }
+}
+
+impl KeyringStore {
+    fn entry(&self, account: &str) -> Result<keyring::Entry, String> {
+        keyring::Entry::new(self.service, account).map_err(|e| keyring_error_kind(&e))
+    }
+}
+
+/// Raw bytes — deliberately `set_secret`/`get_secret`, not the NUL-tolerant
+/// string path `read_keyring_entry` uses for API keys: a random secret is not
+/// a NUL-terminated string, so there's no padding quirk to work around.
+impl CredentialStore for KeyringStore {
+    fn write(&self, account: &str, value: &[u8]) -> Result<(), String> {
+        self.entry(account)?
+            .set_secret(value)
+            .map_err(|e| keyring_error_kind(&e))
+    }
+
+    fn read(&self, account: &str) -> Result<Option<Vec<u8>>, String> {
+        match self.entry(account)?.get_secret() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(keyring_error_kind(&e)),
+        }
+    }
+
+    fn delete(&self, account: &str) -> Result<(), String> {
+        match self.entry(account)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(keyring_error_kind(&e)),
+        }
+    }
+}
+
+pub fn store_device_secret(
+    store: &dyn CredentialStore,
+    client_device_id: &str,
+    secret: &[u8; 32],
+) -> Result<(), String> {
+    store.write(&device_secret_account(client_device_id), secret)
+}
+
+pub fn read_device_secret(store: &dyn CredentialStore, client_device_id: &str) -> Option<[u8; 32]> {
+    store
+        .read(&device_secret_account(client_device_id))
+        .ok()
+        .flatten()?
+        .try_into()
+        .ok()
 }
 
 /// Idempotent: revoking a device that was already deleted (or never had a
 /// secret) is not an error.
-pub fn delete_device_secret(client_device_id: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new(CREDENTIAL_SERVICE, &device_secret_account(client_device_id))
-        .map_err(|e| e.to_string())?;
-    match entry.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
+pub fn delete_device_secret(
+    store: &dyn CredentialStore,
+    client_device_id: &str,
+) -> Result<(), String> {
+    store.delete(&device_secret_account(client_device_id))
+}
+
+/// Revokes a paired device: marks its row revoked, persists it with `save`,
+/// then deletes its secret. The row is saved first so that even if the
+/// delete fails, the device can no longer fetch snapshots.
+pub fn revoke_paired_device(
+    cfg: &mut AppConfig,
+    store: &dyn CredentialStore,
+    client_device_id: &str,
+    save: impl FnOnce(&AppConfig) -> Result<(), String>,
+) -> Result<(), String> {
+    if !cfg.revoke_device(client_device_id) {
+        return Err("sync: dispositivo no encontrado".into());
     }
+    save(cfg)?;
+    delete_device_secret(store, client_device_id)
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -722,15 +803,130 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    /// Test-only in-memory `CredentialStore`: pairing/revoke logic is checked
+    /// deterministically, without the OS credential manager.
+    #[derive(Default)]
+    struct MemoryCredentialStore(std::cell::RefCell<HashMap<String, Vec<u8>>>);
+
+    impl CredentialStore for MemoryCredentialStore {
+        fn write(&self, account: &str, value: &[u8]) -> Result<(), String> {
+            self.0
+                .borrow_mut()
+                .insert(account.to_string(), value.to_vec());
+            Ok(())
+        }
+
+        fn read(&self, account: &str) -> Result<Option<Vec<u8>>, String> {
+            Ok(self.0.borrow().get(account).cloned())
+        }
+
+        fn delete(&self, account: &str) -> Result<(), String> {
+            self.0.borrow_mut().remove(account);
+            Ok(())
+        }
+    }
+
     #[test]
-    fn device_secret_round_trips_through_credential_manager() {
-        let id = format!("pairing-smoke-{}", std::process::id());
+    fn device_secret_write_read_delete_round_trip() {
+        let store = MemoryCredentialStore::default();
         let secret = [7u8; 32];
-        store_device_secret(&id, &secret).unwrap();
-        assert_eq!(read_device_secret(&id), Some(secret));
-        delete_device_secret(&id).unwrap();
-        assert_eq!(read_device_secret(&id), None);
+        store_device_secret(&store, "phone-1", &secret).unwrap();
+        assert_eq!(read_device_secret(&store, "phone-1"), Some(secret));
+        delete_device_secret(&store, "phone-1").unwrap();
+        assert_eq!(read_device_secret(&store, "phone-1"), None);
         // Deleting an already-absent secret is not an error (revoke is idempotent).
-        assert!(delete_device_secret(&id).is_ok());
+        assert!(delete_device_secret(&store, "phone-1").is_ok());
+    }
+
+    #[test]
+    fn revoking_a_paired_device_deletes_its_secret() {
+        let store = MemoryCredentialStore::default();
+        let mut cfg = AppConfig::default();
+        cfg.upsert_paired_device("phone-1", "Galaxy");
+        cfg.upsert_paired_device("phone-2", "Pixel");
+        store_device_secret(&store, "phone-1", &[1u8; 32]).unwrap();
+        store_device_secret(&store, "phone-2", &[2u8; 32]).unwrap();
+
+        let mut saved_as_revoked = None;
+        revoke_paired_device(&mut cfg, &store, "phone-1", |saved| {
+            saved_as_revoked = Some(saved.paired_devices[0].revoked);
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(saved_as_revoked, Some(true), "the revoked row is persisted");
+        assert!(cfg.paired_devices[0].revoked);
+        assert_eq!(
+            read_device_secret(&store, "phone-1"),
+            None,
+            "a revoked device's secret must not be recoverable"
+        );
+        assert!(!cfg.paired_devices[1].revoked);
+        assert_eq!(
+            read_device_secret(&store, "phone-2"),
+            Some([2u8; 32]),
+            "other devices keep their secret"
+        );
+    }
+
+    #[test]
+    fn revoking_an_unknown_device_is_an_error_and_touches_no_secret() {
+        let store = MemoryCredentialStore::default();
+        store_device_secret(&store, "phone-1", &[1u8; 32]).unwrap();
+        let mut cfg = AppConfig::default();
+        let result = revoke_paired_device(&mut cfg, &store, "phone-1", |_| {
+            panic!("nothing to save for an unknown device")
+        });
+        assert!(result.is_err());
+        assert_eq!(read_device_secret(&store, "phone-1"), Some([1u8; 32]));
+    }
+
+    /// Smoke test against the real Windows Credential Manager, in an isolated
+    /// test namespace. Ignored by default because on GitHub-hosted Windows
+    /// runners `CredReadW` still returns the credential right after
+    /// `CredDeleteW` succeeds. Run it on a real desktop session:
+    /// `cargo test -p iausage-core --lib -- --ignored windows_credential_manager_smoke`
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "real Windows Credential Manager; not deterministic on GitHub Actions runners"]
+    fn windows_credential_manager_smoke() {
+        const SERVICE: &str = "com.alberth.iausagebar-test";
+        let store = KeyringStore { service: SERVICE };
+        let account = format!("device-secret-test-{:016x}", rand::random::<u64>());
+        let secret: [u8; 32] = rand::random();
+        // Failures report only operation, error kind, backend and the test
+        // service/account — never the secret.
+        let fail = |op: &str, kind: &str| {
+            format!(
+                "credential smoke failed: op={op} kind={kind} \
+                 backend=windows-credential-manager service={SERVICE} account={account}"
+            )
+        };
+
+        let _ = store.delete(&account); // best-effort cleanup before
+        let result = (|| {
+            store
+                .write(&account, &secret)
+                .map_err(|kind| fail("write", &kind))?;
+            match store.read(&account).map_err(|kind| fail("read", &kind))? {
+                Some(value) if value == secret => {}
+                Some(_) => return Err(fail("read", "Mismatch")),
+                None => return Err(fail("read", "Missing")),
+            }
+            store
+                .delete(&account)
+                .map_err(|kind| fail("delete", &kind))?;
+            match store
+                .read(&account)
+                .map_err(|kind| fail("read-after-delete", &kind))?
+            {
+                None => Ok(()),
+                Some(_) => Err(fail("read-after-delete", "StillPresent")),
+            }
+        })();
+        let _ = store.delete(&account); // best-effort cleanup after
+        if let Err(message) = result {
+            panic!("{message}");
+        }
     }
 }

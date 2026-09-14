@@ -291,7 +291,13 @@ fn build_pairing_hooks(app: &AppHandle) -> iausage_core::sync_server::PairingHoo
                 token,
                 client_device_id,
                 name,
-                |id, secret| crate::config::store_device_secret(id, secret),
+                |id, secret| {
+                    crate::config::store_device_secret(
+                        &crate::config::OS_CREDENTIAL_STORE,
+                        id,
+                        secret,
+                    )
+                },
                 |updated| updated.save(),
             )
         }),
@@ -303,7 +309,7 @@ fn build_pairing_hooks(app: &AppHandle) -> iausage_core::sync_server::PairingHoo
             }
             drop(cfg);
             lock_or_recover(&state.last_seen).insert(client_device_id.to_string(), now_iso());
-            crate::config::read_device_secret(client_device_id)
+            crate::config::read_device_secret(&crate::config::OS_CREDENTIAL_STORE, client_device_id)
         }),
     }
 }

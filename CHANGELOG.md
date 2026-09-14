@@ -4,7 +4,16 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
-## [0.3.3] - 2026-09-13
+## [0.3.4] - 2026-09-14
+
+Incluye todo lo de 0.3.3, cuyo release falló en CI y nunca llegó a los
+usuarios.
+
+### Changed
+
+- Dashboard: las pestañas de proveedor son la única identidad del proveedor.
+  La pestaña activa muestra nombre y plan; las demás se compactan a icono o
+  código corto según el ancho, y ya no se repite el encabezado debajo.
 
 ### Added
 
@@ -29,6 +38,17 @@ All notable changes to this project are documented here. This project follows [K
   reset real, pero una ventana deslizante avanza `resetAt` en cada
   consulta sin que la cuota se vacíe. Ahora también exige que el uso
   haya bajado, no solo que el timestamp haya avanzado.
+- Tests: que desvincular un teléfono borra su secreto se verifica en CI con
+  un almacén de credenciales en memoria, sin depender del Credential Manager
+  del runner Windows de GitHub (ahí `CredDeleteW` no borra de inmediato, lo
+  que bloqueaba el release). El smoke test contra el Credential Manager real
+  queda aparte y se ejecuta con `--ignored` en una sesión de escritorio.
+- CI: el workflow Build ahora corre los tests de todo el workspace Rust, no
+  solo `src-tauri`, para detectar estos fallos antes de etiquetar.
+
+## [0.3.3] - 2026-09-13 (no publicada)
+
+Etiquetada pero su release falló en CI; su contenido salió en 0.3.4.
 
 ## [0.3.2] - 2026-09-13
 

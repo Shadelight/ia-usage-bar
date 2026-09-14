@@ -1,6 +1,6 @@
 [package]
 name = "iausage-core"
-version = "0.3.3"
+version = "0.3.4"
 description = "Shared provider pipeline for IA Usage (GUI + CLI)"
 authors = ["Alberth Salazar"]
 edition = "2021"
