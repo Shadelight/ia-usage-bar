@@ -6,6 +6,7 @@ import org.json.JSONObject
 const val SUPPORTED_SCHEMA_VERSION = 1
 const val SUPPORTED_BLOB_VERSION = 1
 const val SUPPORTED_ALGORITHM = "xchacha20poly1305+argon2id"
+const val SUPPORTED_ALGORITHM_V2 = "xchacha20poly1305"
 
 data class PairingInfo(
     val host: String,
@@ -13,6 +14,8 @@ data class PairingInfo(
     val deviceId: String,
     val fingerprint: String,
     val minAppVersion: String,
+    val token: String? = null,
+    val secret: ByteArray? = null,
 )
 
 data class ServerMeta(
