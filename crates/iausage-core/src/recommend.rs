@@ -528,6 +528,43 @@ pub fn recommend(
     }
 
     if let (Some(cur), Some(best)) = (current, best) {
+        // El actual se agota antes de su reset: SWITCH_MARGIN y el bonus del
+        // actual evitan el flapping entre proveedores sanos, pero no pueden
+        // retener al usuario en el que se acaba primero (tampoco la
+        // penalización por stale leve de la alternativa). Gana la alternativa
+        // con mejor puntuación entre las que aguantan claramente más.
+        if cur.sustainable == Some(false) {
+            let cur_exhaust = cur.exhaust_in_secs.unwrap_or(0);
+            let lasts_longer = |c: &&CandidateScore| {
+                c.id != cur.id
+                    && c.display_left.is_some_and(|left| left > 0.0)
+                    && (c.sustainable != Some(false)
+                        || c.exhaust_in_secs.unwrap_or(0)
+                            >= (2 * cur_exhaust).max(cur_exhaust + 3_600))
+            };
+            let alt = with_data
+                .iter()
+                .copied()
+                .filter(lasts_longer)
+                .max_by(|a, b| {
+                    a.score
+                        .partial_cmp(&b.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            if let Some(alt) = alt {
+                return Recommendation {
+                    action: RecAction::Switch.as_str().to_string(),
+                    from_id: current_id.to_string(),
+                    to_id: Some(alt.id.clone()),
+                    to_name: Some(alt.name.clone()),
+                    left: alt.display_left,
+                    confidence: confidence_for(&RecAction::Switch, Some(cur), Some(alt), any_stale),
+                    reason: reserves_or_critical(cur).to_string(),
+                    candidates: top_candidates(candidates),
+                };
+            }
+        }
+
         // El mejor nunca es una reserva: with_data ya las excluye.
         if best.id != cur.id && best.score >= cur.score + SWITCH_MARGIN {
             // Solo cambiar a un destino que no se agote (salvo que el
@@ -753,6 +790,26 @@ mod tests {
         assert_eq!(rec.action, "switch", "candidates: {:?}", rec.candidates);
         assert_eq!(rec.to_id.as_deref(), Some("openai"));
         assert!(rec.reason == "exhausts_before_reset" || rec.reason == "critical_short");
+    }
+
+    #[test]
+    fn exhausting_current_switches_to_an_alternative_that_lasts_longer() {
+        // Caso real: Claude 51% de sesión a mitad de ventana y 91% semanal
+        // (se agota en ~1h); Codex con la sesión libre y 59% semanal también
+        // proyecta agotarse antes del reset semanal, pero días más tarde. La
+        // histéresis (bonus del actual + SWITCH_MARGIN) no puede dejar al
+        // usuario en el proveedor que se acaba primero.
+        // Reset de sesión en ~3,6 h de 5 h: 51% gastado en 1,4 h proyecta
+        // agotarse ~1h antes del reset (mismo cuadro que el caché real).
+        let mut claude = snap_window(VendorId::Anthropic, 51.0, 91.0, 13_000);
+        claude.id = "anthropic".into();
+        claude.name = "Claude Code".into();
+        let mut codex = snap_window(VendorId::Openai, 0.0, 59.0, 5 * 3_600);
+        codex.id = "openai".into();
+        codex.name = "Codex".into();
+        let rec = recommend(&[claude, codex], "anthropic", now());
+        assert_eq!(rec.action, "switch", "candidates: {:?}", rec.candidates);
+        assert_eq!(rec.to_id.as_deref(), Some("openai"));
     }
 
     #[test]

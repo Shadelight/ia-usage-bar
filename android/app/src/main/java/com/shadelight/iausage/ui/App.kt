@@ -11,6 +11,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -23,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.shadelight.iausage.BuildConfig
 import com.shadelight.iausage.data.ThemeMode
 import com.shadelight.iausage.data.UpdateState
 import com.shadelight.iausage.data.visibleProviders
@@ -59,32 +61,42 @@ fun UsageApp(viewModel: UsageViewModel, updateViewModel: UpdateViewModel, scanQr
     LaunchedEffect(Unit) { updateViewModel.checkSilently() }
 
     val paired = state.payload != null
+    // "Acerca de" (versión y actualizaciones) no depende de tener un PC
+    // vinculado: justo sin vincular es cuando más falta saber la versión.
+    val onAbout = screen == Screen.ABOUT
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (paired) titleFor(screen) else "IA Usage") },
+                title = {
+                    Column {
+                        Text(if (paired || onAbout) titleFor(screen) else "IA Usage")
+                        Text("v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall)
+                    }
+                },
                 navigationIcon = {
-                    if (paired && screen != Screen.DASHBOARD) {
+                    if ((paired || onAbout) && screen != Screen.DASHBOARD) {
                         IconButton(onClick = { screen = Screen.DASHBOARD }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
                         }
                     }
                 },
                 actions = {
-                    if (paired && screen == Screen.DASHBOARD) {
+                    if (screen == Screen.DASHBOARD) {
                         IconButton(onClick = { menuExpanded = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = "Ajustes rápidos")
                         }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                            DropdownMenuItem(text = { Text("Proveedores visibles") }, onClick = { menuExpanded = false; screen = Screen.SETTINGS })
-                            DropdownMenuItem(
-                                text = { Text(if (preferences.usedMode) "Mostrar disponible" else "Mostrar usado") },
-                                onClick = { menuExpanded = false; viewModel.setUsedMode(!preferences.usedMode) },
-                            )
-                            DropdownMenuItem(text = { Text("Actualizar ahora") }, onClick = { menuExpanded = false; viewModel.refresh() })
-                            DropdownMenuItem(text = { Text("Dispositivo") }, onClick = { menuExpanded = false; screen = Screen.DEVICE })
-                            DropdownMenuItem(text = { Text("Ajustes completos") }, onClick = { menuExpanded = false; screen = Screen.SETTINGS })
+                            if (paired) {
+                                DropdownMenuItem(text = { Text("Proveedores visibles") }, onClick = { menuExpanded = false; screen = Screen.SETTINGS })
+                                DropdownMenuItem(
+                                    text = { Text(if (preferences.usedMode) "Mostrar disponible" else "Mostrar usado") },
+                                    onClick = { menuExpanded = false; viewModel.setUsedMode(!preferences.usedMode) },
+                                )
+                                DropdownMenuItem(text = { Text("Actualizar ahora") }, onClick = { menuExpanded = false; viewModel.refresh() })
+                                DropdownMenuItem(text = { Text("Dispositivo") }, onClick = { menuExpanded = false; screen = Screen.DEVICE })
+                                DropdownMenuItem(text = { Text("Ajustes completos") }, onClick = { menuExpanded = false; screen = Screen.SETTINGS })
+                            }
                             DropdownMenuItem(text = { Text("Acerca de") }, onClick = { menuExpanded = false; screen = Screen.ABOUT })
                         }
                     }
@@ -107,6 +119,10 @@ fun UsageApp(viewModel: UsageViewModel, updateViewModel: UpdateViewModel, scanQr
                 )
             }
             when {
+                onAbout -> AboutScreen(
+                    updateState = updateState,
+                    updateViewModel = updateViewModel,
+                )
                 state.payload != null -> {
                     val visible = visibleProviders(state.payload!!.snapshot.providers, preferences.visibleProviderIds)
                     when (screen) {
@@ -134,10 +150,7 @@ fun UsageApp(viewModel: UsageViewModel, updateViewModel: UpdateViewModel, scanQr
                             onVisibleProviderIdsChange = viewModel::setVisibleProviderIds,
                             onClearLocalData = viewModel::clearLocalData,
                         )
-                        Screen.ABOUT -> AboutScreen(
-                            updateState = updateState,
-                            updateViewModel = updateViewModel,
-                        )
+                        Screen.ABOUT -> Unit // rendered above, paired or not
                     }
                 }
                 state.pairing == null -> NoPairingScreen(state.loading, scanQr, viewModel::setPairingUri)

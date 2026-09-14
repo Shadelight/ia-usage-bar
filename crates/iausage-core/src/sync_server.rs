@@ -267,8 +267,35 @@ fn query_param(url: &str, key: &str) -> Option<String> {
 /// recién entonces mover el bucle bloqueante a un hilo de fondo. Sin esto,
 /// un puerto ocupado deja el estado en pantalla diciendo "activo" con
 /// ningún socket real detrás.
+///
+/// Un servidor recién soltado (apagar/encender "Exponer en la red local")
+/// libera el puerto de forma asíncrona: al hacer drop, tiny_http despierta su
+/// hilo de accept conectándose a sí mismo, y hasta que ese hilo suelta el
+/// listener Windows responde os error 10048, sobre todo al bindear 0.0.0.0
+/// (choca con cualquier dirección del puerto). Por eso se reintenta un
+/// momento, empujando ese accept por loopback.
 pub fn bind(cfg: &ServeConfig) -> Result<tiny_http::Server, String> {
-    tiny_http::Server::http(&cfg.addr()).map_err(|e| e.to_string())
+    // ponytail: ~2 s de reintentos fijos; un puerto de verdad ocupado por otro
+    // proceso tarda eso en fallar. Subir a espera por evento si molesta.
+    const ATTEMPTS: u32 = 20;
+    let wake = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, cfg.port));
+    let mut attempt = 0;
+    loop {
+        match tiny_http::Server::http(cfg.addr()) {
+            Ok(server) => return Ok(server),
+            Err(e) => {
+                let in_use = e
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AddrInUse);
+                attempt += 1;
+                if !in_use || attempt >= ATTEMPTS {
+                    return Err(e.to_string());
+                }
+                let _ = std::net::TcpStream::connect_timeout(&wake, Duration::from_millis(50));
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
 }
 
 /// Sirve hasta que `stop` se active. Bloquea el hilo actual.
@@ -601,6 +628,25 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         (handle, stop)
+    }
+
+    // Regresión (os error 10048): apagar y volver a encender "Exponer en la
+    // red local" suelta el servidor y re-bindea el mismo puerto al instante,
+    // antes de que tiny_http libere el listener viejo. Sin reintento en
+    // `bind` fallaba 2 de cada 3 veces con la suite completa en paralelo.
+    #[test]
+    fn lan_off_then_on_again_rebinds_the_lan_address() {
+        let port = free_port();
+        let lan = ServeConfig {
+            bind: "0.0.0.0".into(),
+            port,
+            lan: true,
+        };
+        drop(bind(&lan).expect("LAN inicial"));
+        let loopback = bind(&ServeConfig::loopback(port)).expect("apagar LAN -> loopback");
+        drop(loopback);
+        let again = bind(&lan);
+        assert!(again.is_ok(), "encender LAN otra vez: {:?}", again.err());
     }
 
     // Regresión: la GUI (sync_service::ensure_sync_server) solo puede marcar

@@ -829,8 +829,16 @@ fn download_verified_installer(
     Ok(path)
 }
 
-/// Escribe el helper `.ps1` y lo lanza desacoplado (detached) para que
-/// sobreviva a `app.exit(0)`. Devuelve `Err` sin cerrar la app si algo falla.
+/// CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP. Nunca DETACHED_PROCESS:
+/// powershell.exe sin consola termina antes de ejecutar el script, así que el
+/// instalador nunca corría (ningún `updater-*.log` llegó a escribirse).
+#[cfg(windows)]
+const HELPER_SPAWN_FLAGS: u32 = 0x0800_0000 | 0x0000_0200;
+#[cfg(windows)]
+const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+
+/// Escribe el helper `.ps1` y lo lanza en segundo plano, sin ventana, para
+/// que sobreviva a `app.exit(0)`. Devuelve `Err` sin cerrar la app si algo falla.
 fn spawn_relaunch_helper(
     app: &AppHandle,
     installer: &std::path::Path,
@@ -852,23 +860,27 @@ fn spawn_relaunch_helper(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: el helper no muere
-        // con la app y no muestra consola (el .ps1 además corre oculto).
-        const DETACHED: u32 = 0x0000_0008;
-        const NEW_GROUP: u32 = 0x0000_0200;
-        Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-WindowStyle",
-                "Hidden",
-                "-File",
-                &ps1_path.to_string_lossy(),
-            ])
-            .creation_flags(DETACHED | NEW_GROUP)
-            .spawn()
+        let ps1 = ps1_path.to_string_lossy().into_owned();
+        let spawn = |flags: u32| {
+            Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-File",
+                    ps1.as_str(),
+                ])
+                .creation_flags(flags)
+                .spawn()
+        };
+        // La app corre dentro de un Job de Windows: breakaway para que un job
+        // kill-on-close no mate al helper con `app.exit(0)`. Un job que no
+        // permite breakaway hace fallar el spawn, así que se reintenta dentro.
+        spawn(HELPER_SPAWN_FLAGS | CREATE_BREAKAWAY_FROM_JOB)
+            .or_else(|_| spawn(HELPER_SPAWN_FLAGS))
             .map_err(|_| "No se pudo preparar la instalación".to_string())?;
     }
     #[cfg(not(windows))]
@@ -1343,6 +1355,15 @@ mod update_tests {
             Ok(("codex", &["login"][..]))
         );
         assert!(provider_login_command(VendorId::Cursor).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn updater_helper_is_never_spawned_detached() {
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        assert_eq!(super::HELPER_SPAWN_FLAGS & DETACHED_PROCESS, 0);
+        assert_ne!(super::HELPER_SPAWN_FLAGS & CREATE_NO_WINDOW, 0);
     }
 
     #[test]

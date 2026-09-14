@@ -17,7 +17,8 @@ use iausage_core::config::AppConfig;
 use iausage_core::descriptor::{descriptor, FetchStrategyKind};
 use iausage_core::doctor;
 use iausage_core::guard;
-use iausage_core::model::{most_headroom, now_iso, ProviderSnapshot, VendorId};
+use iausage_core::model::{now_iso, ProviderSnapshot, VendorId};
+use iausage_core::recommend::recommend;
 use iausage_core::{providers, snapshot_v1, sync, watch};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -205,25 +206,31 @@ fn cmd_best(args: &[String]) -> ExitCode {
     }
     let (cfg, snaps) = load_state(false, None);
     let list: Vec<ProviderSnapshot> = snaps.values().cloned().collect();
-    match most_headroom(&list) {
-        None => {
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    // Same engine and current provider (`cfg.primary`) as the dashboard banner.
+    let rec = recommend(&list, &cfg.primary, now_unix);
+    match (rec.to_id, rec.to_name) {
+        (Some(id), Some(name)) => {
+            if json {
+                let v = serde_json::json!({"best": {"id": id, "name": name, "remainingPercent": rec.left}});
+                println!("{}", serde_json::to_string_pretty(&v).unwrap());
+            } else {
+                match rec.left {
+                    Some(left) => println!("{name} ({id}): {left:.0}% disponible"),
+                    None => println!("{name} ({id})"),
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
             if json {
                 println!("{{\"best\": null}}");
             } else {
                 println!("Sin providers conectados.");
             }
             ExitCode::from(guard::EXIT_UNAVAILABLE as u8)
-        }
-        Some((id, name, left)) => {
-            if json {
-                let v =
-                    serde_json::json!({"best": {"id": id, "name": name, "remainingPercent": left}});
-                println!("{}", serde_json::to_string_pretty(&v).unwrap());
-            } else {
-                println!("{name} ({id}): {:.0}% disponible", left);
-            }
-            let _ = cfg;
-            ExitCode::SUCCESS
         }
     }
 }

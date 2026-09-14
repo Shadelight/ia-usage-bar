@@ -1,6 +1,6 @@
 [package]
 name = "iausage"
-version = "0.3.4"
+version = "0.3.5"
 description = "CLI for IA Usage: usage, best provider, doctor, guard"
 authors = ["Alberth Salazar"]
 edition = "2021"

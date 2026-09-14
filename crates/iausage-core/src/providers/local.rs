@@ -46,11 +46,17 @@ impl Provider for SuperGrok {
         grok_auth_path().exists()
     }
     fn refresh(&self, _cfg: &AppConfig) -> ProviderSnapshot {
-        let Some(key) = read_grok_key() else {
+        let Some(session) = read_grok_session() else {
             return snapshot_needs_auth(VendorId::Supergrok, VendorId::Supergrok.login_hint());
         };
-        match fetch_supergrok(&key) {
+        // La CLI renueva `key` con su refresh token solo cuando se usa; uno
+        // vencido solo consigue un 401.
+        if session.expired {
+            return grok_session_expired();
+        }
+        match fetch_supergrok(&session.key) {
             Ok(s) => s,
+            Err(FetchError::Http(401, _)) => grok_session_expired(),
             Err(e) => super::map_fetch_err(VendorId::Supergrok, e),
         }
     }
@@ -158,10 +164,52 @@ fn grok_auth_path() -> std::path::PathBuf {
     home_dir().join(".grok").join("auth.json")
 }
 
-fn read_grok_key() -> Option<String> {
-    read_json_token(
-        &grok_auth_path(),
-        &["key", "api_key", "access_token", "token"],
+struct GrokSession {
+    key: String,
+    expired: bool,
+}
+
+fn read_grok_session() -> Option<GrokSession> {
+    let bytes = std::fs::read(grok_auth_path()).ok()?;
+    let v: Value = serde_json::from_slice(&bytes).ok()?;
+    grok_session_from(&v, chrono::Utc::now().timestamp())
+}
+
+/// La CLI actual anida la sesión bajo el emisor y la cuenta:
+/// `{"https://auth.x.ai::<id>": {"key", "refresh_token", "expires_at", ...}}`.
+/// Las versiones viejas escribían `{"key": ...}` en la raíz; se aceptan ambas.
+fn grok_session_from(v: &Value, now_unix: i64) -> Option<GrokSession> {
+    let nested = v
+        .as_object()
+        .into_iter()
+        .flat_map(|entries| entries.values());
+    std::iter::once(v).chain(nested).find_map(|entry| {
+        let key = ["key", "api_key", "access_token", "token"]
+            .iter()
+            .find_map(|k| {
+                entry
+                    .get(*k)
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+            })?;
+        let expired = entry
+            .get("expires_at")
+            .and_then(Value::as_str)
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .is_some_and(|at| at.timestamp() <= now_unix);
+        Some(GrokSession {
+            key: key.to_string(),
+            expired,
+        })
+    })
+}
+
+fn grok_session_expired() -> ProviderSnapshot {
+    snapshot_with_status(
+        VendorId::Supergrok,
+        ProviderStatus::NeedsAuth,
+        ProviderStatusReason::OAuthExpired,
+        "La sesión de la CLI de Grok caducó: ejecuta `grok` (en Windows, %USERPROFILE%\\.grok\\bin\\grok.exe) para renovarla.",
     )
 }
 
@@ -354,4 +402,47 @@ fn read_json_token(path: &std::path::Path, keys: &[&str]) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn now() -> i64 {
+        chrono::DateTime::parse_from_rfc3339("2026-09-14T12:00:00Z")
+            .unwrap()
+            .timestamp()
+    }
+
+    #[test]
+    fn grok_session_is_read_from_the_nested_account_entry() {
+        let auth = serde_json::json!({
+            "https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828": {
+                "key": "xai-session",
+                "auth_mode": "oidc",
+                "refresh_token": "r",
+                "expires_at": "2026-09-14T13:00:00.4792648Z"
+            }
+        });
+        let session = grok_session_from(&auth, now()).unwrap();
+        assert_eq!(session.key, "xai-session");
+        assert!(!session.expired);
+    }
+
+    #[test]
+    fn expired_grok_session_is_flagged_and_flat_legacy_file_still_reads() {
+        let nested = serde_json::json!({
+            "https://auth.x.ai::id": {"key": "k", "expires_at": "2026-08-31T19:05:46.479264800Z"}
+        });
+        assert!(grok_session_from(&nested, now()).unwrap().expired);
+        let flat = serde_json::json!({"key": "legacy"});
+        let session = grok_session_from(&flat, now()).unwrap();
+        assert_eq!(session.key, "legacy");
+        assert!(!session.expired);
+        assert!(grok_session_from(&serde_json::json!({}), now()).is_none());
+        assert_eq!(
+            grok_session_expired().status_reason,
+            Some(ProviderStatusReason::OAuthExpired)
+        );
+    }
 }

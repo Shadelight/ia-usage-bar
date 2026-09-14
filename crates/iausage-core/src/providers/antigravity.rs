@@ -28,7 +28,7 @@ impl Provider for Antigravity {
     }
 
     fn has_local_credentials(&self, _cfg: &AppConfig) -> bool {
-        read_keyring_token().is_some() || std::env::var("ANTIGRAVITY_LS_ADDRESS").is_ok()
+        read_keyring_session().is_some() || std::env::var("ANTIGRAVITY_LS_ADDRESS").is_ok()
     }
 
     fn refresh(&self, _cfg: &AppConfig) -> ProviderSnapshot {
@@ -41,7 +41,7 @@ impl Provider for Antigravity {
         }
         // A running but unhealthy local server must not mask a valid Google
         // session. Local is preferred, Cloud is the fallback.
-        let Some(token) = read_keyring_token() else {
+        let Some(session) = read_keyring_session() else {
             if !local_bases.is_empty() {
                 return local_service_unavailable();
             }
@@ -50,7 +50,13 @@ impl Provider for Antigravity {
                 "No hay una sesión Google guardada para Antigravity",
             );
         };
-        match fetch_cloud(&token) {
+        // Antigravity renueva el access token solo mientras está abierta; con
+        // la app cerrada uno vencido solo consigue un 401 de Google. Renovarlo
+        // aquí exigiría el cliente OAuth de Antigravity, que no es nuestro.
+        if session.expired {
+            return session_expired();
+        }
+        match fetch_cloud(&session.token) {
             Ok(mut snap) => {
                 snap.set_active_source(UsageSource::Oauth);
                 snap.lines.insert(
@@ -59,6 +65,7 @@ impl Provider for Antigravity {
                 );
                 snap
             }
+            Err(FetchError::Http(401, _)) => session_expired(),
             Err(e) => super::map_fetch_err(VendorId::Antigravity, e),
         }
     }
@@ -73,7 +80,21 @@ fn local_service_unavailable() -> ProviderSnapshot {
     )
 }
 
-fn read_keyring_token() -> Option<String> {
+fn session_expired() -> ProviderSnapshot {
+    snapshot_with_status(
+        VendorId::Antigravity,
+        ProviderStatus::NeedsAuth,
+        ProviderStatusReason::OAuthExpired,
+        "La sesión Google de Antigravity caducó: abre Antigravity para renovarla.",
+    )
+}
+
+struct GoogleSession {
+    token: String,
+    expired: bool,
+}
+
+fn read_keyring_session() -> Option<GoogleSession> {
     // Antigravity's Go client writes this credential directly as
     // "<service>:<user>" (visible via `cmdkey /list` as
     // `gemini:antigravity`), not the "<user>.<service>" target that
@@ -90,10 +111,10 @@ fn read_keyring_token() -> Option<String> {
     let text = String::from_utf8_lossy(&raw)
         .trim_end_matches('\0')
         .to_string();
-    parse_blob(&text)
+    parse_blob(&text, chrono::Utc::now().timestamp())
 }
 
-fn parse_blob(raw: &str) -> Option<String> {
+fn parse_blob(raw: &str, now_unix: i64) -> Option<GoogleSession> {
     let raw = raw.trim();
     let json = if let Some(enc) = raw.strip_prefix("go-keyring-base64:") {
         let bytes =
@@ -104,7 +125,7 @@ fn parse_blob(raw: &str) -> Option<String> {
     };
     let root: Value = serde_json::from_str(&json).ok()?;
     let token = root.get("token").filter(|v| v.is_object()).unwrap_or(&root);
-    for k in [
+    let access = [
         "access_token",
         "accessToken",
         "token",
@@ -113,14 +134,25 @@ fn parse_blob(raw: &str) -> Option<String> {
         "bearerToken",
         "auth_token",
         "authToken",
-    ] {
-        if let Some(s) = token.get(k).and_then(|v| v.as_str()) {
-            if !s.is_empty() {
-                return Some(s.to_string());
-            }
-        }
-    }
-    None
+    ]
+    .iter()
+    .find_map(|k| {
+        token
+            .get(*k)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+    })?;
+    // `expiry` es el `oauth2.Token.Expiry` de Go (RFC 3339). Su valor cero
+    // (año 1) significa "sin vencimiento", no "vencido".
+    let expired = token
+        .get("expiry")
+        .and_then(|v| v.as_str())
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .is_some_and(|at| at.timestamp() > 0 && at.timestamp() <= now_unix);
+    Some(GoogleSession {
+        token: access.to_string(),
+        expired,
+    })
 }
 
 fn fetch_cloud(token: &str) -> Result<ProviderSnapshot, FetchError> {
@@ -546,6 +578,42 @@ mod tests {
         assert_eq!(
             command_flag("language_server --csrf_token=csrf-456", "--csrf_token"),
             Some("csrf-456".into())
+        );
+    }
+
+    #[test]
+    fn expired_google_session_is_detected_from_the_go_token_expiry() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-09-14T12:00:00-04:00")
+            .unwrap()
+            .timestamp();
+        let blob = |expiry: &str| {
+            format!(
+                r#"{{"token":{{"access_token":"ya29.x","refresh_token":"1//r","expiry":"{expiry}"}},"auth_method":"consumer"}}"#
+            )
+        };
+        let past = parse_blob(&blob("2026-09-13T15:57:58.5818433-04:00"), now).unwrap();
+        assert_eq!(past.token, "ya29.x");
+        assert!(past.expired);
+        assert!(
+            !parse_blob(&blob("2026-09-14T13:00:00-04:00"), now)
+                .unwrap()
+                .expired
+        );
+        // Go zero time: sin vencimiento conocido.
+        assert!(
+            !parse_blob(&blob("0001-01-01T00:00:00Z"), now)
+                .unwrap()
+                .expired
+        );
+    }
+
+    #[test]
+    fn expired_google_session_asks_to_open_antigravity() {
+        let snapshot = session_expired();
+        assert_eq!(snapshot.status, ProviderStatus::NeedsAuth);
+        assert_eq!(
+            snapshot.status_reason,
+            Some(ProviderStatusReason::OAuthExpired)
         );
     }
 }

@@ -47,7 +47,9 @@ class UsageSyncRepository(private val context: Context) {
         // can't be reused) while the desktop's device row lingers forever.
         // With the credential saved, refresh()'s existing V2 path retries
         // the snapshot fetch later using the now-stored secret.
-        store.savePairingV2(pairing, clientDeviceId, secret)
+        // A copy: savePairingV2 zeroes the array it gets, and `secret` is
+        // still needed to decrypt the first snapshot right below.
+        store.savePairingV2(pairing, clientDeviceId, secret.copyOf())
         val (payload, raw) = fetchV2(pairing, clientDeviceId, secret)
         store.savePayload(raw)
         return payload

@@ -4,6 +4,55 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-09-14
+
+Desde 0.3.4 el botón "Instalar ahora" de Windows no funciona: esta versión
+hay que instalarla a mano una vez (en Windows y en Android). Después de
+instalarla, vuelve a vincular el teléfono con un QR nuevo.
+
+### Changed
+
+- CLI: `iausage best` usa el mismo motor de recomendación que el banner del
+  dashboard (margen, sostenibilidad y proveedor actual) en vez del cálculo
+  legado `most_headroom`, que se elimina.
+
+### Fixed
+
+- Build: se quita el `[profile.release]` duplicado de `src-tauri/Cargo.toml`
+  (Cargo lo ignoraba; el perfil efectivo ya vive en la raíz del workspace).
+- Windows: "Instalar ahora" cerraba la app sin instalar nada. El helper de
+  PowerShell se lanzaba con `DETACHED_PROCESS` y terminaba antes de ejecutar
+  el script; ahora se lanza sin ventana y fuera del Job de la app. Las
+  versiones hasta 0.3.4 traen el helper roto: esta actualización hay que
+  instalarla a mano una vez.
+- Teléfono y sync: apagar y volver a encender "Exponer en la red local" daba
+  os error 10048 y dejaba el servidor detenido y la opción apagada (el
+  teléfono vinculado ya no alcanzaba el PC). El puerto se re-bindeaba antes
+  de que el servidor anterior lo liberara; ahora `bind` reintenta un momento.
+- Antigravity: con la app cerrada, un access token de Google vencido
+  aparecía como "La sesión ya no es válida" (HTTP 401) e invitaba a iniciar
+  sesión. Ahora se detecta el vencimiento antes de llamar a Google y se pide
+  abrir Antigravity, que es quien renueva la sesión.
+- Sesión OAuth vencida: el backend enviaba el motivo como `o_auth_expired` y
+  la interfaz esperaba `oauth_expired`, así que nunca mostraba "La sesión de
+  OAuth venció". Se corrige el nombre (los snapshots en caché con el nombre
+  viejo se siguen leyendo).
+- SuperGrok: la CLI de Grok guarda ahora la sesión anidada bajo su cuenta
+  (`https://auth.x.ai::<id>`), así que se mostraba "Falta iniciar sesión"
+  aunque había sesión. Se leen ambos formatos, se avisa si la sesión caducó
+  y la pista indica la ruta de `grok.exe`, que no queda en el PATH.
+- Recomendación: si el proveedor actual se agota antes de su reset, el banner
+  recomienda la alternativa que aguanta claramente más (p. ej. Claude a punto
+  de agotarse con Codex libre). Antes el margen de 15 puntos y el bonus del
+  proveedor actual lo impedían y mostraba "sin alternativa mejor".
+- Android: "Acerca de" (versión y buscar actualizaciones) solo aparecía con
+  un PC vinculado; ahora está siempre en el menú y la versión se ve en la
+  barra superior.
+- Android: la primera vinculación V2 fallaba al descifrar el snapshot: el
+  secreto se ponía a cero al guardarlo, antes de usarlo. El PC ya había
+  registrado el teléfono, así que reintentar mostraba "El PC no tiene un
+  pareo pendiente".
+
 ## [0.3.4] - 2026-09-14
 
 Incluye todo lo de 0.3.3, cuyo release falló en CI y nunca llegó a los

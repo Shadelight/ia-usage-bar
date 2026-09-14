@@ -190,7 +190,7 @@ impl VendorId {
                 "Pega una Admin API key de platform.openai.com (mide gasto de la organización)."
             }
             VendorId::Kiro => "Ejecuta `kiro-cli login`.",
-            VendorId::Supergrok => "Ejecuta `grok login`.",
+            VendorId::Supergrok => "Ejecuta `grok login` (en Windows la CLI está en %USERPROFILE%\\.grok\\bin\\grok.exe).",
             VendorId::CommandCode => "Inicia sesión con `commandcode` o pi.",
             VendorId::Nous => "Guarda las credenciales OAuth de Nous.",
             VendorId::Kimi => "Define KIMI_API_KEY o inicia sesión con `kimi`.",
@@ -463,6 +463,9 @@ pub enum ProviderStatusReason {
     /// An OAuth session was valid but can no longer be refreshed by this app.
     /// This is distinct from a mistyped API key because the right recovery is
     /// to reauthenticate with the provider's client.
+    // snake_case convertiría "OAuth" en "o_auth_expired"; el frontend espera
+    // "oauth_expired". El alias lee snapshots cacheados con el nombre viejo.
+    #[serde(rename = "oauth_expired", alias = "o_auth_expired")]
     OAuthExpired,
     MissingPermission,
     LocalServiceUnavailable,
@@ -795,20 +798,6 @@ pub fn monthly_spend(p: &ProviderSnapshot) -> Option<(String, f64)> {
         }
     }
     best.map(|(_, label, usd)| (label, usd))
-}
-
-/// Legado: solo miraba `100 - primary_utilization`. Conservado por
-/// compatibilidad; el dashboard usa `recommend::recommend`.
-#[deprecated(note = "usar iausage_core::recommend::recommend")]
-pub fn most_headroom(providers: &[ProviderSnapshot]) -> Option<(String, String, f64)> {
-    providers
-        .iter()
-        .filter(|p| p.is_connected())
-        .filter_map(|p| {
-            p.primary_utilization
-                .map(|u| (p.id.clone(), p.name.clone(), (100.0 - u).max(0.0)))
-        })
-        .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
 }
 
 pub fn now_iso() -> String {
@@ -1223,20 +1212,13 @@ mod tests {
     }
 
     #[test]
-    fn most_headroom_picks_lowest_utilization() {
-        let a = snapshot_ok(
-            VendorId::Anthropic,
-            "Max",
-            vec![progress_pct("s", "Sesión", 88.0, None, 18_000, "always")],
+    fn oauth_expired_reason_uses_the_frontend_name() {
+        assert_eq!(
+            serde_json::to_string(&ProviderStatusReason::OAuthExpired).unwrap(),
+            "\"oauth_expired\""
         );
-        let b = snapshot_ok(
-            VendorId::Cursor,
-            "Ultra",
-            vec![progress_pct("s", "Uso", 26.0, None, 18_000, "always")],
-        );
-        let pick = most_headroom(&[a, b]).unwrap();
-        assert_eq!(pick.0, "cursor");
-        assert!((pick.2 - 74.0).abs() < 0.01);
+        let cached: ProviderStatusReason = serde_json::from_str("\"o_auth_expired\"").unwrap();
+        assert_eq!(cached, ProviderStatusReason::OAuthExpired);
     }
 
     #[test]
