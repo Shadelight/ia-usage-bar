@@ -6,7 +6,7 @@ import { sanitizeTechnicalDetails, shouldShowRecoveryToast } from "./errors";
 import { setLang, t } from "./i18n";
 import { buildSanitizedDiagnosis, renderDash, updateLoadingClocks, updateResetClocks } from "./views/dash";
 import { actionIconSvg } from "./provider-actions";
-import { checkForUpdates, clearCredentialDraft, clearSyncPassphraseDraft, focusProviderInSettings, isCredentialValidating, patchCredentialEye, patchProviderInteractiveState, patchSettings, persistConfig, refreshSyncView, reloadCliStatus, renderSettings, setCredentialDraft, setCredentialValidating, setExpandedProvider, setSavingProvider, setSyncPairing, setSyncPassphraseDraft, toggleCredentialRevealed } from "./views/settings";
+import { checkForUpdates, clearCredentialDraft, focusProviderInSettings, isCredentialValidating, patchCredentialEye, patchProviderInteractiveState, patchSettings, persistConfig, refreshSyncView, reloadCliStatus, renderSettings, setCredentialDraft, setCredentialValidating, setExpandedProvider, setSavingProvider, setSyncPairing, setSyncPassphraseDraft, startPairingCountdown, toggleCredentialRevealed } from "./views/settings";
 import type { SettingsCategory } from "./views/settings";
 import { previewDashboard, renderSpend } from "./views/spend";
 
@@ -261,50 +261,24 @@ async function applyWindowMode(compact: boolean) {
 async function pairPhoneFlow(): Promise<void> {
   openSettingsCategory("sync");
   await refreshSyncView();
-  let status = await invokeCmd<SyncStatusDto>("sync_get_status");
+  const status = await invokeCmd<SyncStatusDto>("sync_get_status");
   if (!status.ok) {
     showCommandError(status.error ?? t("commandFailed"));
     return;
   }
-  // 1. Sin frase secreta no hay nada que vincular: enfocar el input.
-  if (!status.value.hasPassphrase) {
-    showToast(t("syncEnableNeedsPassphrase"), 4000);
-    requestAnimationFrame(() => document.getElementById("sync-pass")?.focus());
-    return;
-  }
-  // 2. Sin LAN el QR sería un localhost inútil: no generarlo, pedir
-  // explícitamente la exposición (nunca se auto-activa por seguridad).
   if (!status.value.lan) {
     showToast(t("syncPairNeedsLan"), 4000);
     requestAnimationFrame(() => document.getElementById("cfg-sync-lan")?.focus());
     return;
   }
-  // 3. Vincular implica servidor activo: auto-activar sync (intención
-  // explícita del usuario) y re-leer el estado antes del pareo.
-  if (!status.value.enabled) {
-    const enabled = await invokeCmd("sync_set_enabled", { enabled: true });
-    if (!enabled.ok) {
-      showCommandError(enabled.error ?? t("commandFailed"));
-      return;
-    }
-    await refreshSyncView();
-    status = await invokeCmd<SyncStatusDto>("sync_get_status");
-    if (!status.ok) {
-      showCommandError(status.error ?? t("commandFailed"));
-      return;
-    }
-  }
-  if (!status.value.enabled || !status.value.lan || !status.value.serverRunning) {
-    showCommandError(t("syncServerNotReady"));
-    return;
-  }
-  const pairing = await invokeCmd<SyncPairingDto>("sync_get_pairing", { lan: true });
+  const pairing = await invokeCmd<SyncPairingDto>("sync_start_pairing");
   if (!pairing.ok) {
     showCommandError(pairing.error ?? t("commandFailed"));
     return;
   }
   setSyncPairing(pairing.value);
   await refreshSyncView();
+  startPairingCountdown();
   requestAnimationFrame(() => {
     document.getElementById("sync-qr")?.scrollIntoView({ behavior: "smooth", block: "center" });
   });
@@ -462,7 +436,7 @@ async function main() {
 
   document.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
-    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-toggle-key],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-install-update],[data-redeem-reset],[data-savesyncpass],[data-forgetsyncpass],[data-syncqr],[data-syncexport],[data-copy-pairing-uri],[data-repair-cli],[data-copy-cli-path],[data-test-cli]");
+    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-toggle-key],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-install-update],[data-redeem-reset],[data-startpairing],[data-revokedevice],[data-syncexport],[data-copy-pairing-uri],[data-repair-cli],[data-copy-cli-path],[data-test-cli]");
     if (!btn) {
       if (!target.closest("#head-menu, #btn-menu")) closeHeadMenu();
       return;
@@ -646,32 +620,15 @@ async function main() {
       }
       return;
     }
-    if (btn.hasAttribute("data-savesyncpass")) {
-      const input = document.getElementById("sync-pass") as HTMLInputElement | null;
-      const passphrase = input?.value || "";
-      const result = await invokeCmd("sync_set_passphrase", { passphrase });
-      if (result.ok || !isTauri()) {
-        clearSyncPassphraseDraft();
-        setSyncPairing(null);
-        showToast(t("syncPassphraseSaved"));
-      } else {
-        showCommandError(result.error ?? t("commandFailed"));
-      }
-      if (view === "settings") await refreshSyncView();
-    }
-    if (btn.hasAttribute("data-forgetsyncpass")) {
-      const result = await invokeCmd("sync_set_passphrase", { passphrase: "" });
-      if (result.ok || !isTauri()) {
-        clearSyncPassphraseDraft();
-        setSyncPairing(null);
-        showToast(t("syncUpdated"));
-      } else {
-        showCommandError(result.error ?? t("commandFailed"));
-      }
-      if (view === "settings") await refreshSyncView();
-    }
-    if (btn.hasAttribute("data-syncqr")) {
+    if (btn.hasAttribute("data-startpairing")) {
       await pairPhoneFlow();
+      return;
+    }
+    if (btn.hasAttribute("data-revokedevice")) {
+      const clientDeviceId = btn.getAttribute("data-revokedevice") ?? "";
+      const result = await invokeCmd("sync_revoke_device", { clientDeviceId });
+      if (!result.ok) showCommandError(result.error ?? t("commandFailed"));
+      await refreshSyncView();
       return;
     }
     if (btn.hasAttribute("data-syncexport")) {
@@ -759,17 +716,7 @@ async function main() {
         showCommandError(t("commandFailed"));
       }
     }
-    if (el.id === "cfg-sync") {
-      const input = el as HTMLInputElement;
-      const enabled = input.checked;
-      const result = await invokeCmd("sync_set_enabled", { enabled });
-      if (!result.ok && isTauri()) {
-        // Revertir de inmediato: la UI nunca debe afirmar ON si Rust dijo NO.
-        input.checked = !enabled;
-        showCommandError(result.error ?? t("syncNeedPassphrase"));
-      }
-      if (view === "settings") await refreshSyncView();
-    } else if (el.id === "cfg-sync-lan") {
+    if (el.id === "cfg-sync-lan") {
       const lan = (el as HTMLInputElement).checked;
       const result = await invokeCmd("sync_set_lan", { lan });
       if (!result.ok && isTauri()) showCommandError(result.error ?? t("commandFailed"));
