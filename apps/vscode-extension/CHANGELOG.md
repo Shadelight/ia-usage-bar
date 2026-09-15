@@ -2,6 +2,19 @@
 
 All notable changes to IA Usage will be documented in this file.
 
+## 0.4.1 — 2026-09-15
+
+### Added
+
+- Antigravity tooltip groups Gemini Models and Claude + GPT, each with weekly
+  and 5-hour windows, and shows the real plan name from the API.
+
+### Changed
+
+- `iaUsage.percentageMode` is now `used` / `remaining`. The old `available`
+  value is still read and rewritten to `remaining` on save.
+- Status bar stays compact (one figure); grouped quotas live in the tooltip.
+
 ## 0.4.0 — 2026-09-13
 
 ### Added

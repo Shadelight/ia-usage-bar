@@ -4,6 +4,34 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-09-15
+
+### Added
+
+- Antigravity muestra dos familias de modelos con límites independientes
+  (Gemini Models y Claude + GPT), cada una con ventana semanal y de 5 horas.
+- El badge del plan usa el nombre real del API (p. ej. Google AI Pro).
+- Ajustes → Apariencia: mostrar la cuota como Usado o Restante.
+
+### Changed
+
+- Los porcentajes de resumen se redondean con la misma fórmula en escritorio,
+  Android y VS Code: el usado se redondea y el restante es el complemento a 100.
+- El punto de estado indica salud (conectado, límite parcial, error), no la
+  fuente de datos. La fuente (API o local) va en un badge aparte.
+- Android colapsado resume una fila por grupo; expandido enseña las ventanas.
+- VS Code agrupa las cuotas en el tooltip; la barra de estado sigue compacta.
+- La cuenta atrás de reinicio incluye minutos cuando quedan días.
+
+### Fixed
+
+- Antigravity recortaba las cuatro ventanas a dos en el resumen y las
+  etiquetaba con el texto crudo del API.
+- Usado y restante se redondeaban por separado y no sumaban 100.
+- El badge decía "Antigravity" en vez del plan contratado.
+- El punto se ponía gris al refrescar aunque hubiera un snapshot válido.
+- La recomendación pedía cambiar de IA cuando ya estabas en la mejor opción.
+
 ## [0.3.7] - 2026-09-14
 
 ### Added

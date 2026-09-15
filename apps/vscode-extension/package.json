@@ -2,7 +2,7 @@
   "name": "ia-usage",
   "displayName": "IA Usage — AI Usage & Quota Monitor",
   "description": "Monitor AI usage, quotas and rate limits for Claude Code, Codex, Cursor, Antigravity and more directly from the VS Code status bar.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "shadelightdev",
   "icon": "images/icon.png",
   "license": "MIT",
