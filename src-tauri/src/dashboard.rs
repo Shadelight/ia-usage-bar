@@ -70,6 +70,7 @@ pub(crate) fn build_dashboard(app: &AppHandle, state: &AppState) -> Dashboard {
         autostart: app.autolaunch().is_enabled().unwrap_or(false),
         always_on_top: cfg.always_on_top,
         compact_mode: cfg.compact_mode,
+        percentage_mode: cfg.percentage_mode,
         app_bootstrapping: state.app_bootstrapping.load(Ordering::Acquire),
         refreshing: state.refreshing.load(Ordering::Acquire),
         loading_providers: lock_or_recover(&state.loading_providers)
@@ -84,6 +85,8 @@ pub(crate) fn build_dashboard(app: &AppHandle, state: &AppState) -> Dashboard {
         recommend_left,
         recommend_action: rec.action,
         recommend_reason: rec.reason,
+        recommend_severity: rec.severity,
+        recommend_limiting_quota: rec.limiting_quota,
         recommend_confidence: rec.confidence,
         recommend_from: Some(rec.from_id),
         recommend_scores: rec.candidates,

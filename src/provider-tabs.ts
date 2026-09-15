@@ -32,13 +32,45 @@ export interface TabInput {
   logoHtml: string;
 }
 
+function sourceBadgeText(snapshot: ProviderSnapshot | undefined): string {
+  switch ((snapshot?.activeSource || "").toLowerCase()) {
+    case "oauth":
+    case "api":
+      return "API";
+    case "local-session":
+    case "local":
+      return "Local";
+    default:
+      return "";
+  }
+}
+
+/** Health of the last valid snapshot. Refresh never greys out a live tab. */
+export function tabHealthStatus(
+  snapshot: ProviderSnapshot | undefined,
+  loading: boolean,
+): string {
+  if (snapshot) {
+    if (snapshot.status === "connected") {
+      if (snapshot.availability === "partial_limited") return "partial_limited";
+      if (snapshot.availability === "blocked") return "error";
+      return "connected";
+    }
+    return snapshot.status;
+  }
+  return loading ? "loading" : "loading";
+}
+
 /** Full tab button HTML: real tab semantics, dual labels, inline plan badge. */
 export function tabHtml({ vendor, snapshot, active, loading, visual, logoHtml }: TabInput): string {
-  const status = loading ? "loading" : snapshot?.status || "loading";
+  const status = tabHealthStatus(snapshot, loading);
   const plan = snapshot?.plan?.trim() ? snapshot.plan.trim() : "";
+  const sourceBadge = sourceBadgeText(snapshot);
   const label = `${vendor.name}${plan ? `, plan ${plan}` : ""}`;
-  const title = plan ? `${vendor.name} · ${plan}` : vendor.name;
-  const badge = active && plan ? `<span class="tab-plan">${escapeHtml(plan)}</span>` : "";
+  const title = [vendor.name, plan, sourceBadge].filter(Boolean).join(" · ");
+  const badge = active && plan
+    ? `<span class="tab-plan">${escapeHtml(plan)}${sourceBadge ? ` · ${escapeHtml(sourceBadge)}` : ""}</span>`
+    : "";
   return `<button class="tab${active ? " active" : ""}" role="tab" aria-selected="${active ? "true" : "false"}" tabindex="${active ? "0" : "-1"}" aria-label="${escapeHtml(label)}" title="${escapeHtml(title)}" data-select="${escapeHtml(vendor.id)}" style="--provider-accent:${visual.accent}">
       ${logoHtml}
       <span class="label-col"><span class="label"><span class="label-full">${escapeHtml(vendor.name)}</span><span class="label-short">${escapeHtml(providerShort(vendor))}</span>${badge}</span></span>

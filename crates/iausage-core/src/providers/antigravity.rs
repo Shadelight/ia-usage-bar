@@ -71,8 +71,18 @@ impl Provider for Antigravity {
                 snap.set_active_source(UsageSource::Oauth);
                 snap.lines.insert(
                     0,
-                    values_line("source", "Fuente", "Google API (app cerrada)", "always"),
+                    values_line("source", "Fuente", "Google API", "details"),
                 );
+                snap.lines.insert(
+                    1,
+                    values_line("antigravity_app", "Antigravity", "App cerrada", "details"),
+                );
+                if let Some(email) = session.email.as_deref() {
+                    snap.lines.insert(
+                        2,
+                        values_line("account", "Cuenta", &mask_email(email), "details"),
+                    );
+                }
                 snap
             }
             Err(FetchError::Http(401, _)) => session_expired(),
@@ -102,6 +112,7 @@ fn session_expired() -> ProviderSnapshot {
 struct GoogleSession {
     token: String,
     expired: bool,
+    email: Option<String>,
 }
 
 fn read_keyring_session() -> Option<GoogleSession> {
@@ -162,6 +173,13 @@ fn parse_blob(raw: &str, now_unix: i64) -> Option<GoogleSession> {
     Some(GoogleSession {
         token: access.to_string(),
         expired,
+        email: json_str(&root, &["email", "user_email", "account"]).or_else(|| {
+            token
+                .get("email")
+                .and_then(|v| v.as_str())
+                .filter(|s| s.contains('@'))
+                .map(str::to_string)
+        }),
     })
 }
 
@@ -200,14 +218,8 @@ fn fetch_cloud_context(token: &str) -> (String, Option<String>) {
             ],
             &json!({}),
         ) {
-            if let Some(s) = json_str(&body, &["currentTier", "tierId", "plan", "planName"]) {
+            if let Some(s) = plan_from_assist(&body) {
                 return (s, project_from(&body));
-            }
-            if let Some(s) = body
-                .pointer("/cloudaicompanionTier")
-                .and_then(|v| v.as_str())
-            {
-                return (s.to_string(), project_from(&body));
             }
             return ("Antigravity".into(), project_from(&body));
         }
@@ -310,11 +322,41 @@ fn command_flag(command: &str, flag: &str) -> Option<String> {
 fn fetch_local_plan(base: &str, headers: &[(&str, &str)]) -> Option<String> {
     let url = format!("{base}/exa.language_server_pb.LanguageServerService/GetUserStatus");
     let body = http::post_json(&url, headers, &json!({})).ok()?;
-    json_str(&body, &["currentTier", "tierId", "plan", "planName"]).or_else(|| {
+    plan_from_assist(&body).or_else(|| {
         body.pointer("/userStatus/plan")
             .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
     })
+}
+
+pub(crate) fn plan_from_assist(body: &Value) -> Option<String> {
+    for pointer in [
+        "/currentTier/name",
+        "/paidTier/name",
+        "/response/currentTier/name",
+        "/response/paidTier/name",
+        "/userStatus/currentTier/name",
+        "/userStatus/plan",
+    ] {
+        if let Some(name) = body
+            .pointer(pointer)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != "Antigravity")
+        {
+            return Some(name.to_string());
+        }
+    }
+    json_str(body, &["plan", "planName"]).filter(|s| s != "Antigravity")
+}
+
+fn mask_email(email: &str) -> String {
+    let Some((user, domain)) = email.split_once('@') else {
+        return email.to_string();
+    };
+    let prefix: String = user.chars().take(2).collect();
+    format!("{prefix}***@{domain}")
 }
 
 fn discover_local_bases() -> Vec<String> {
@@ -448,7 +490,7 @@ fn probe_order(per_pid: std::collections::BTreeMap<u32, Vec<u16>>) -> Vec<u16> {
 
 pub(crate) fn snapshot_from_quota(body: &Value, plan: &str) -> ProviderSnapshot {
     let inner = body.get("response").unwrap_or(body);
-    let mut lines = Vec::new();
+    let mut pending: Vec<(crate::model::MetricLine, String, String, Vec<String>)> = Vec::new();
     let groups = inner
         .get("quotaSummaries")
         .or_else(|| inner.get("groups"))
@@ -457,45 +499,183 @@ pub(crate) fn snapshot_from_quota(body: &Value, plan: &str) -> ProviderSnapshot 
         .unwrap_or(Value::Array(vec![inner.clone()]));
     if let Some(arr) = groups.as_array() {
         for group in arr {
-            let name = json_str(group, &["displayName", "name", "modelFamily"])
+            let display = json_str(group, &["displayName", "name", "modelFamily"])
                 .unwrap_or_else(|| "Pool".into());
-            push_bucket(&mut lines, group, &name, "fiveHour", "5h", 18_000, "always");
-            push_bucket(&mut lines, group, &name, "weekly", "7d", 604_800, "always");
-            if let Some(buckets) = group.get("buckets").and_then(|v| v.as_array()) {
-                for b in buckets {
-                    let label =
-                        json_str(b, &["displayName", "name", "bucketId"]).unwrap_or(name.clone());
-                    let window = json_str(b, &["window"]).unwrap_or_default();
-                    let secs = if window.contains("week") || window.contains("7") {
-                        604_800
-                    } else {
-                        18_000
-                    };
-                    let Some(pct) = bucket_pct(b) else {
-                        continue;
-                    };
-                    lines.push(progress_pct(
-                        &format!(
-                            "{}_{}",
-                            name.to_ascii_lowercase().replace(' ', "_"),
-                            label.to_ascii_lowercase().replace(' ', "_")
-                        ),
-                        &format!("{name} {label}"),
-                        pct,
-                        json_str(b, &["resetTime", "resetsAt", "reset_at"]),
-                        secs,
-                        "always",
-                    ));
+            let group_id = canonical_group_id(group, &display);
+            let group_label = pretty_group_label(&group_id, &display);
+            let models = group_models(group);
+            let mut buckets: Vec<(&Value, Option<(&'static str, i64, &'static str)>)> = Vec::new();
+            if let Some(list) = group.get("buckets").and_then(|v| v.as_array()) {
+                buckets.extend(list.iter().map(|bucket| (bucket, None)));
+            } else {
+                if let Some(b) = group.get("fiveHour") {
+                    buckets.push((b, Some(("5h", 18_000, "5h"))));
                 }
+                if let Some(b) = group.get("weekly") {
+                    buckets.push((b, Some(("weekly", 604_800, "weekly"))));
+                }
+            }
+            for (bucket, forced_window) in buckets {
+                let Some(pct) = bucket_pct(bucket) else {
+                    continue;
+                };
+                let (suffix, window_secs, window_label) =
+                    forced_window.unwrap_or_else(|| window_from_bucket(bucket, group));
+                let id = format!("{group_id}_{suffix}");
+                if pending.iter().any(|(line, ..)| line.id() == id) {
+                    continue;
+                }
+                pending.push((
+                    progress_pct(
+                        &id,
+                        window_label,
+                        pct,
+                        json_str(bucket, &["resetTime", "resetsAt", "reset_at"]),
+                        window_secs,
+                        "always",
+                    ),
+                    group_id.clone(),
+                    group_label.clone(),
+                    models.clone(),
+                ));
             }
         }
     }
+    let mut lines: Vec<_> = pending.iter().map(|(line, ..)| line.clone()).collect();
     if lines.is_empty() {
         if let Some(pct) = json_f64(inner, &["utilization", "usedPercent"]) {
             lines.push(progress_pct("quota", "Cuota", pct, None, 18_000, "always"));
         }
     }
-    snapshot_ok(VendorId::Antigravity, plan, lines)
+    if let Some(overages) = overage_line(inner) {
+        lines.push(overages);
+    }
+    let mut snapshot = snapshot_ok(VendorId::Antigravity, plan, lines);
+    for quota in &mut snapshot.quotas {
+        if let Some((_, group_id, group_label, models)) =
+            pending.iter().find(|(line, ..)| line.id() == quota.id)
+        {
+            quota.group_id = Some(group_id.clone());
+            quota.group_label = Some(group_label.clone());
+            quota.models = models.clone();
+            quota.visible = "always".into();
+        }
+    }
+    snapshot
+}
+
+fn overage_line(inner: &Value) -> Option<crate::model::MetricLine> {
+    let enabled = inner
+        .get("creditOveragesEnabled")
+        .or_else(|| inner.get("overageEnabled"))
+        .or_else(|| inner.get("enableCreditOverages"))
+        .and_then(|v| v.as_bool())?;
+    Some(values_line(
+        "overages",
+        "Credit Overages",
+        if enabled { "Activado" } else { "Desactivado" },
+        "details",
+    ))
+}
+
+fn canonical_group_id(group: &Value, display_name: &str) -> String {
+    let buckets = group
+        .get("buckets")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    for bucket in &buckets {
+        if let Some(id) = bucket.get("bucketId").and_then(|v| v.as_str()) {
+            let prefix = id
+                .rsplit_once('-')
+                .map(|(head, _)| head)
+                .unwrap_or(id)
+                .to_ascii_lowercase();
+            if prefix.contains("gemini") {
+                return "gemini_models".into();
+            }
+            if prefix.contains("3p") || prefix.contains("claude") || prefix.contains("gpt") {
+                return "claude_gpt_models".into();
+            }
+        }
+    }
+    let lower = display_name.to_ascii_lowercase();
+    if lower.contains("gemini") {
+        return "gemini_models".into();
+    }
+    if lower.contains("claude") || lower.contains("gpt") {
+        return "claude_gpt_models".into();
+    }
+    display_name
+        .to_ascii_lowercase()
+        .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+        .trim_matches('_')
+        .to_string()
+}
+
+fn pretty_group_label(group_id: &str, display_name: &str) -> String {
+    match group_id {
+        "gemini_models" => "Gemini Models".into(),
+        "claude_gpt_models" => "Claude + GPT".into(),
+        _ => display_name.to_string(),
+    }
+}
+
+fn group_models(group: &Value) -> Vec<String> {
+    for key in ["models", "includedModels", "modelIds"] {
+        if let Some(arr) = group.get(key).and_then(|v| v.as_array()) {
+            let names: Vec<String> = arr
+                .iter()
+                .filter_map(|item| {
+                    item.as_str()
+                        .map(str::to_string)
+                        .or_else(|| json_str(item, &["displayName", "name", "id"]))
+                })
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !names.is_empty() {
+                return names;
+            }
+        }
+    }
+    let desc = json_str(group, &["description"]).unwrap_or_default();
+    parse_models_from_description(&desc)
+}
+
+pub(crate) fn parse_models_from_description(desc: &str) -> Vec<String> {
+    let trimmed = desc.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if !lower.contains("model") || !(trimmed.contains(':') || trimmed.contains(',')) {
+        return Vec::new();
+    }
+    let rest = trimmed.split_once(':').map(|(_, rest)| rest).unwrap_or(trimmed);
+    rest.split([',', ';', '&'])
+        .map(|part| {
+            part.trim()
+                .trim_start_matches("and ")
+                .trim_start_matches("y ")
+                .trim()
+                .to_string()
+        })
+        .filter(|part| !part.is_empty() && part.len() < 80)
+        .collect()
+}
+
+fn window_from_bucket(bucket: &Value, _group: &Value) -> (&'static str, i64, &'static str) {
+    let window = json_str(bucket, &["window"]).unwrap_or_default();
+    let bucket_id = json_str(bucket, &["bucketId"]).unwrap_or_default();
+    let display = json_str(bucket, &["displayName", "name"]).unwrap_or_default();
+    let hay = format!("{window} {bucket_id} {display}").to_ascii_lowercase();
+    if hay.contains("week") || hay.contains("7d") || hay.contains("7-d") || hay.contains("weekly")
+    {
+        ("weekly", 604_800, "weekly")
+    } else {
+        ("5h", 18_000, "5h")
+    }
 }
 
 fn bucket_pct(b: &Value) -> Option<f64> {
@@ -515,27 +695,6 @@ fn bucket_pct(b: &Value) -> Option<f64> {
     }
 }
 
-fn push_bucket(
-    lines: &mut Vec<crate::model::MetricLine>,
-    group: &Value,
-    name: &str,
-    key: &str,
-    suffix: &str,
-    window: i64,
-    visible: &str,
-) {
-    let Some(b) = group.get(key) else { return };
-    let Some(pct) = bucket_pct(b) else { return };
-    let reset = json_str(b, &["resetTime", "resetsAt", "reset_at"]);
-    lines.push(progress_pct(
-        &format!("{}_{suffix}", name.to_ascii_lowercase().replace(' ', "_")),
-        &format!("{name} {suffix}"),
-        pct,
-        reset,
-        window,
-        visible,
-    ));
-}
 
 #[cfg(test)]
 mod tests {
@@ -611,6 +770,61 @@ mod tests {
             !parse_blob(&blob("0001-01-01T00:00:00Z"), now)
                 .unwrap()
                 .expired
+        );
+    }
+
+    #[test]
+    fn maps_two_groups_of_two_windows_and_plan_object() {
+        let body = serde_json::json!({
+            "groups": [
+                {
+                    "displayName": "GEMINI MODELS",
+                    "description": "Models within this group: Gemini Flash, Gemini Pro",
+                    "buckets": [
+                        {"bucketId": "gemini-weekly", "displayName": "Weekly Limit Remaining",
+                         "window": "weekly", "remainingFraction": 0.9452, "resetTime": "2099-01-01T00:00:00Z"},
+                        {"bucketId": "gemini-5h", "displayName": "Five Hour Limit Remaining",
+                         "window": "5h", "remainingFraction": 0.8512, "resetTime": "2099-01-01T04:28:00Z"}
+                    ]
+                },
+                {
+                    "displayName": "CLAUDE AND GPT MODELS",
+                    "description": "Models within this group: Claude Opus, Claude Sonnet, GPT-OSS",
+                    "buckets": [
+                        {"bucketId": "3p-weekly", "window": "weekly", "remainingFraction": 1.0},
+                        {"bucketId": "3p-5h", "window": "5h", "remainingFraction": 1.0}
+                    ]
+                }
+            ]
+        });
+        let snapshot = snapshot_from_quota(&body, "Google AI Pro");
+        assert_eq!(snapshot.plan, "Google AI Pro");
+        assert_eq!(snapshot.quotas.len(), 4);
+        let groups = crate::model::groups_from_quotas(&snapshot.quotas);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].id, "gemini_models");
+        assert_eq!(groups[0].models, vec!["Gemini Flash", "Gemini Pro"]);
+        assert_eq!(groups[1].id, "claude_gpt_models");
+        assert_eq!(groups[1].models.len(), 3);
+        let weekly = snapshot.quotas.iter().find(|q| q.id == "gemini_models_weekly").unwrap();
+        assert_eq!(weekly.label, "weekly");
+        assert!((weekly.used_percent.unwrap() - 5.48).abs() < 0.001);
+        assert_eq!(weekly.visible, "always");
+        assert_eq!(
+            plan_from_assist(&serde_json::json!({"currentTier": {"id": "standard-tier", "name": "Google AI Pro"}})),
+            Some("Google AI Pro".into())
+        );
+    }
+
+    #[test]
+    fn description_without_model_list_does_not_become_models() {
+        assert!(parse_models_from_description(
+            "Quota is consumed proportionally to the cost of the tokens."
+        )
+        .is_empty());
+        assert_eq!(
+            parse_models_from_description("Models within this group: Gemini Flash, Gemini Pro"),
+            vec!["Gemini Flash", "Gemini Pro"]
         );
     }
 

@@ -351,6 +351,12 @@ function appearanceBody(dash: Dashboard): string {
   const theme = localStorage.getItem("theme") || "system";
   return `
     ${toggleRow("cfg-compact", t("compactMode"), dash.compactMode)}
+    <div class="setting-stack"><span>${t("percentageMode")}</span>
+      <span class="choice-seg" role="group" aria-label="${t("percentageMode")}">
+        <button type="button" class="seg ${(dash.percentageMode || "used") === "used" ? "active" : ""}" data-percentage-mode="used">${t("quotaAsUsed")}</button>
+        <button type="button" class="seg ${dash.percentageMode === "remaining" ? "active" : ""}" data-percentage-mode="remaining">${t("quotaAsRemaining")}</button>
+      </span>
+    </div>
     <div class="setting-stack"><span>${t("theme")}</span>
       <span class="choice-seg" role="group" aria-label="${t("theme")}">
         <button class="seg ${theme === "system" ? "active" : ""}" data-theme="system">${t("themeSystem")}</button>
@@ -657,6 +663,7 @@ export async function persistConfig(dash: Dashboard | null): Promise<void> {
       notify_thresholds: thresholds.length ? thresholds : dash.notifyThresholds,
       always_on_top: (document.getElementById("cfg-pin") as HTMLInputElement)?.checked ?? dash.alwaysOnTop,
       compact_mode: (document.getElementById("cfg-compact") as HTMLInputElement)?.checked ?? dash.compactMode,
+      percentage_mode: document.querySelector<HTMLButtonElement>("[data-percentage-mode].active")?.dataset.percentageMode || dash.percentageMode || "used",
       providers: Object.fromEntries(
         dash.catalog.map((v) => [
           v.id,

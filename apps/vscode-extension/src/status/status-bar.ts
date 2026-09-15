@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { t } from "../i18n";
 import { settings } from "../settings";
 import { DashboardSnapshot } from "../types";
-import { buildStatusBarLabel, shouldWarnBackground, visible } from "./format";
+import { buildStatusBarLabel, recommendationBackground, recommendationCopy, shouldWarnBackground, visible } from "./format";
 import { pickProviders, showMenu } from "./quick-menu";
 import { tooltip } from "./tooltip";
 
@@ -79,7 +79,16 @@ export class StatusBar implements vscode.Disposable {
       ? `${spinner}${providers.map((provider) => buildStatusBarLabel(provider, config)).join("  ")}`
       : `${spinner}$(pulse) ${t("menu.title")}`;
     this.item.tooltip = tooltip(this.snapshot, providers, this.logos);
-    this.item.backgroundColor = shouldWarnBackground(providers) ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
+    const recBackground = recommendationBackground(this.snapshot.recommendation);
+    this.item.backgroundColor = recBackground === "error"
+      ? new vscode.ThemeColor("statusBarItem.errorBackground")
+      : recBackground === "warning" || shouldWarnBackground(providers)
+        ? new vscode.ThemeColor("statusBarItem.warningBackground")
+        : undefined;
+    const rec = recommendationCopy(this.snapshot);
+    this.item.accessibilityInformation = rec
+      ? { label: `${rec.title}. ${rec.meta}` }
+      : { label: t("menu.title") };
   }
 
   showMenu(onRefresh: () => void, onReconnect: () => void): void {

@@ -331,6 +331,7 @@ button, input, select { font: inherit; color: inherit; }
   box-shadow: 0 0 0 2px rgba(255,255,255,.04);
 }
 .status-connected { background: var(--ok); }
+.status-partial_limited { background: var(--warn); }
 .status-needs_auth, .status-needs_permission { background: var(--warn); }
 .status-unavailable, .status-error { background: var(--hot); }
 .status-loading { background: var(--faint); }
@@ -369,7 +370,30 @@ button, input, select { font: inherit; color: inherit; }
   scrollbar-gutter: stable;
 }
 .detail-inner { width: min(100%, 760px); margin: 0 auto; }
+.provider-warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  color: var(--warn);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  margin: 10px 0 4px;
+}
+.provider-warning-banner .warning-icon { font-size: 14px; }
 .quota-grid { display: block; }
+.quota-group { margin: 0 0 16px; }
+.group-title {
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 650;
+}
+.group-models { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
 
 .block { margin: 18px 0 8px; }
 .block-top {
@@ -522,6 +546,22 @@ button, input, select { font: inherit; color: inherit; }
   padding: 5px 0;
 }
 .kv span:last-child { color: var(--muted); text-align: right; }
+.breakdown-group {
+  margin-bottom: 12px;
+}
+.breakdown-group:last-child {
+  margin-bottom: 0;
+}
+.breakdown-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+}
 
 .provider-actions {
   margin-top: 20px;
@@ -974,7 +1014,10 @@ button, input, select { font: inherit; color: inherit; }
 
 @media (min-width: 700px) {
   .detail-inner, .settings-body, .spend-body, .settings-cats, .settings-head { width: min(100%, 780px); align-self: center; }
-  .quota-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+  .quota-grid { display: flex; flex-direction: column; gap: 8px; }
+  .quota-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
+  .quota-group .group-title,
+  .quota-group .group-models { grid-column: 1 / -1; }
   .quota-grid .block { min-width: 0; }
 }
 

@@ -10,6 +10,14 @@ use crate::descriptor::FetchStrategyKind;
 use crate::model::{CredentialSource, VendorId};
 use crate::paths::{app_config_dir, config_path, detect_path};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PercentageMode {
+    #[default]
+    Used,
+    Remaining,
+}
+
 const CREDENTIAL_SERVICE: &str = "com.alberth.iausagebar";
 pub(crate) const SYNC_PASSPHRASE_ACCOUNT: &str = "sync-passphrase";
 
@@ -36,6 +44,10 @@ pub struct AppConfig {
     pub always_on_top: bool,
     #[serde(default)]
     pub compact_mode: bool,
+    /// Protagonista de las barras: usado o restante. No se llama `available`
+    /// para no chocar con `ProviderAvailability`.
+    #[serde(default)]
+    pub percentage_mode: PercentageMode,
     /// M5 sync con el teléfono: escribe el blob cifrado tras cada refresh.
     #[serde(default)]
     pub sync_enabled: bool,
@@ -46,6 +58,11 @@ pub struct AppConfig {
     /// Exponer el sync HTTP en LAN (0.0.0.0). Solo con opt-in explícito.
     #[serde(default)]
     pub sync_lan: bool,
+    /// Adaptador cuya IPv4 se anuncia en el QR. Identidad estable (nombre),
+    /// nunca la IP: DHCP puede cambiarla. `None` = auto (Wi-Fi > Ethernet >
+    /// VPN > virtual).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_lan_interface: Option<String>,
     /// Teléfonos vinculados por Sync V2. Los secretos NUNCA viven aquí — solo
     /// en Credential Manager, cuenta `device-secret-<client_device_id>`.
     #[serde(default)]
@@ -111,9 +128,11 @@ impl Default for AppConfig {
             providers: HashMap::new(),
             always_on_top: true,
             compact_mode: false,
+            percentage_mode: PercentageMode::Used,
             sync_enabled: false,
             sync_export_dir: None,
             sync_lan: false,
+            sync_lan_interface: None,
             paired_devices: Vec::new(),
             load_recovered: false,
         }
@@ -800,6 +819,24 @@ mod tests {
         let reloaded = AppConfig::load_from(&path);
         assert_eq!(reloaded.paired_devices.len(), 1);
         assert_eq!(reloaded.paired_devices[0].client_device_id, "phone-1");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sync_lan_interface_persists_by_name_not_ip() {
+        let dir = scratch_dir("lan-interface");
+        let path = dir.join("config.toml");
+        let mut cfg = AppConfig::default();
+        cfg.sync_lan_interface = Some("Wi-Fi".into());
+        atomic_write(&path, toml::to_string_pretty(&cfg).unwrap().as_bytes()).unwrap();
+
+        let reloaded = AppConfig::load_from(&path);
+        assert_eq!(reloaded.sync_lan_interface.as_deref(), Some("Wi-Fi"));
+        let toml = fs::read_to_string(&path).unwrap();
+        assert!(
+            !toml.contains("192.168"),
+            "interface identity must not store an IP"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 

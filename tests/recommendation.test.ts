@@ -27,6 +27,7 @@ function dash(partial: Partial<Dashboard>): Dashboard {
       { id: "anthropic", name: "Claude Code", short: "CLD", authKind: "oauth", envKey: null, hint: "", needsKey: false, enabled: true, detected: true, hasCredential: true, links: { usageUrl: null, billingUrl: null, statusUrl: null }, strategies: ["oauth"], sourcePreference: null },
       { id: "openai", name: "Codex", short: "CDX", authKind: "oauth", envKey: null, hint: "", needsKey: false, enabled: true, detected: true, hasCredential: true, links: { usageUrl: null, billingUrl: null, statusUrl: null }, strategies: ["oauth"], sourcePreference: null },
       { id: "opencode", name: "OpenCode Go", short: "OCG", authKind: "apikey", envKey: null, hint: "", needsKey: true, enabled: true, detected: true, hasCredential: true, links: { usageUrl: null, billingUrl: null, statusUrl: null }, strategies: ["api"], sourcePreference: null },
+      { id: "cursor", name: "Cursor", short: "CUR", authKind: "oauth", envKey: null, hint: "", needsKey: false, enabled: true, detected: true, hasCredential: true, links: { usageUrl: null, billingUrl: null, statusUrl: null }, strategies: ["oauth"], sourcePreference: null },
     ],
     refreshMinutes: 5,
     refreshAdaptive: true,
@@ -47,6 +48,8 @@ function dash(partial: Partial<Dashboard>): Dashboard {
     recommendLeft: null,
     recommendAction: "",
     recommendReason: "",
+    recommendSeverity: "",
+    recommendLimitingQuota: null,
     recommendConfidence: 0,
     recommendFrom: null,
     recommendScores: [],
@@ -246,4 +249,93 @@ test("durations render compactly", () => {
   assert.equal(durLabelSecs(6300), "1h 45m");
   assert.equal(durLabelSecs(9000), "2h 30m");
   assert.equal(durLabelSecs(3 * 86_400 + 3600), "3d 1h");
+});
+
+test("weekly critical quota drives the banner instead of the session forecast", () => {
+  setLang("es");
+  const d = dash({
+    recommendId: "openai",
+    recommendName: "Codex",
+    recommendLeft: 60,
+    recommendAction: "switch",
+    recommendReason: "quota_near_exhaustion",
+    recommendSeverity: "critical",
+    recommendConfidence: 0.9,
+    recommendFrom: "anthropic",
+    recommendLimitingQuota: {
+      id: "weekly",
+      label: "Semanal",
+      windowType: "weekly",
+      usedPercent: 99,
+      availablePercent: 1,
+      resetAt: "2026-09-16T00:00:00Z",
+      resetInSeconds: 126_000,
+      expectedUsedPercent: 79,
+      deltaPercent: 20,
+      estimatedExhaustedAt: "2026-09-14T14:00:00Z",
+      exhaustsBeforeResetSeconds: 122_400,
+    },
+  });
+  const rec = recCopy(d, "anthropic");
+  assert.ok(rec);
+  assert.equal(rec.severity, "critical");
+  assert.equal(rec.title, "Claude casi agotado");
+  assert.match(rec.meta, /Semanal · 99% usado · reinicia en 1d 11h/);
+  assert.ok(rec.detailLines.some((line) => /Codex es la mejor alternativa/.test(line)));
+  assert.doesNotMatch(rec.text, /sesión|53 min/i);
+});
+
+test("partial_limited generates warning banner with some models exhausted", () => {
+  setLang("es");
+  const d = dash({
+    recommendId: "cursor",
+    recommendName: "Cursor",
+    recommendLeft: 62,
+    recommendAction: "stay",
+    recommendReason: "partial_limited",
+    recommendSeverity: "warning",
+    recommendConfidence: 0.9,
+    recommendFrom: "cursor",
+    recommendLimitingQuota: {
+      id: "other_models",
+      label: "Other Models",
+      windowType: "monthly",
+      usedPercent: 100,
+      availablePercent: 0,
+      resetAt: "2026-09-23T00:00:00Z",
+      resetInSeconds: 600_000,
+    },
+    recommendScores: [
+      cand({ id: "cursor", name: "Cursor", score: 65, displayLeft: 62, sustainable: true }),
+    ],
+  });
+  const rec = recCopy(d, "cursor");
+  assert.ok(rec);
+  assert.equal(rec.severity, "warning");
+  assert.equal(rec.title, "Cursor tiene algunos modelos agotados");
+  assert.match(rec.meta, /Other Models ha alcanzado su límite/);
+});
+
+test("switch copy is contextual when already viewing the destination", () => {
+  setLang("es");
+  const d = dash({
+    recommendId: "antigravity",
+    recommendName: "Antigravity",
+    recommendLeft: 85,
+    recommendAction: "switch",
+    recommendReason: "critical_short",
+    recommendSeverity: "critical",
+    recommendFrom: "anthropic",
+    recommendScores: [
+      cand({ id: "anthropic", name: "Claude Code", exhaustInSecs: 60 }),
+      cand({ id: "antigravity", name: "Antigravity", displayLeft: 85 }),
+    ],
+  });
+  const here = recCopy(d, "antigravity");
+  assert.ok(here);
+  assert.match(here.title, /Ya estás en Antigravity/);
+  assert.doesNotMatch(here.title, /Cambia a/);
+  const from = recCopy(d, "anthropic");
+  assert.ok(from);
+  assert.match(from.title, /Claude/);
 });

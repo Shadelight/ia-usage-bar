@@ -10,8 +10,9 @@ test("formats a relative session reset without fetching again", () => {
   assert.equal(formatResetRelative("2026-09-11T13:40:00-04:00", NOW, "es"), "4 h 35 min");
 });
 
-test("formats relative weekly resets with days and hours", () => {
-  assert.equal(formatResetRelative("2026-09-16T05:00:00-04:00", NOW, "es"), "4 d 19 h");
+test("formats relative weekly resets with days, hours and leftover minutes", () => {
+  assert.equal(formatResetRelative("2026-09-16T05:00:00-04:00", NOW, "es"), "4 d 19 h 55 min");
+  assert.equal(formatResetRelative("2026-09-16T05:00:00-04:00", NOW, "es", true), "4 d 19 h");
 });
 
 test("formats same-day and future absolute resets in the requested timezone", () => {

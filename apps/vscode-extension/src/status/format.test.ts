@@ -10,7 +10,11 @@ import {
   formatResetCompact,
   formatResetLong,
   getPrimaryQuota,
+  recommendationBackground,
+  recommendationCopy,
+  ROUNDING_VECTORS,
   shouldWarnBackground,
+  summaryPercents,
   usedPercent,
   visible,
 } from "./format";
@@ -54,6 +58,13 @@ test("formatResetLong spells out units for the tooltip", () => {
   assert.equal(formatResetLong(39 * 60), "39 min");
   assert.equal(formatResetLong(4 * 3600 + 31 * 60), "4 h 31 min");
   assert.equal(formatResetLong(3 * 86400), "3 d");
+  assert.equal(formatResetLong(3 * 86400 + 16 * 3600 + 5 * 60), "3 d 16 h 5 min");
+});
+
+test("summaryPercents matches the cross-platform rounding contract", () => {
+  for (const [exact, used, remaining] of ROUNDING_VECTORS) {
+    assert.deepEqual(summaryPercents(exact), { used, remaining }, `usedExact=${exact}`);
+  }
 });
 
 test("getPrimaryQuota uses the configured quota id when it still exists", () => {
@@ -86,8 +97,11 @@ test("usedPercent and formatPercentage respect percentageMode", () => {
   const q = quota({ usedPercent: 21 });
   assert.equal(usedPercent(q), 21);
   assert.equal(formatPercentage(q, "used"), "21%");
+  assert.equal(formatPercentage(q, "remaining"), "79%");
   assert.equal(formatPercentage(q, "available"), "79%");
   assert.equal(formatPercentage(undefined, "used"), "—");
+  assert.equal(formatPercentage(quota({ usedPercent: 5.5 }), "used"), "6%");
+  assert.equal(formatPercentage(quota({ usedPercent: 5.5 }), "remaining"), "94%");
 });
 
 test("visible() filters to enabled providers and orders them per iaUsage.providers", () => {
@@ -121,11 +135,11 @@ test("buildStatusBarLabel: icons can be hidden", () => {
   assert.equal(buildStatusBarLabel(provider(), config({ showProviderIcons: false })), "CDX 21%");
 });
 
-test("buildStatusBarLabel: available mode appends the localized suffix", () => {
+test("buildStatusBarLabel: remaining mode appends the localized suffix", () => {
   setLang("en");
-  assert.equal(buildStatusBarLabel(provider(), config({ percentageMode: "available" })), "$(ia-openai) CDX 79% free");
+  assert.equal(buildStatusBarLabel(provider(), config({ percentageMode: "remaining" })), "$(ia-openai) CDX 79% free");
   setLang("es");
-  assert.equal(buildStatusBarLabel(provider(), config({ percentageMode: "available" })), "$(ia-openai) CDX 79% libre");
+  assert.equal(buildStatusBarLabel(provider(), config({ percentageMode: "remaining" })), "$(ia-openai) CDX 79% libre");
   setLang("en");
 });
 
@@ -144,4 +158,32 @@ test("buildStatusBarLabel: stale marker respects showStaleIndicator", () => {
 test("buildStatusBarLabel: honors a custom primary metric", () => {
   const p = provider({ quotas: [quota({ id: "five_hour", usedPercent: 18 }), quota({ id: "weekly", usedPercent: 30 })] });
   assert.equal(buildStatusBarLabel(p, config({ primaryMetric: { openai: "weekly" } })), "$(ia-openai) CDX 30%");
+});
+
+test("shared recommendation names the weekly critical quota", () => {
+  setLang("es");
+  const snapshot: DashboardSnapshot = {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    providers: [provider({ id: "anthropic", name: "Claude Code" }), provider()],
+    recommendation: {
+      severity: "critical",
+      action: "switch",
+      fromId: "anthropic",
+      toId: "openai",
+      toName: "Codex",
+      reason: "quota_near_exhaustion",
+      confidence: 0.9,
+      limitingQuota: {
+        id: "weekly", label: "Semanal", windowType: "weekly", usedPercent: 99, availablePercent: 1,
+        resetAt: null, resetInSeconds: 126_000, expectedUsedPercent: 79, deltaPercent: 20,
+        estimatedExhaustedAt: null, exhaustsBeforeResetSeconds: 122_400,
+      },
+    },
+  };
+  const copy = recommendationCopy(snapshot);
+  assert.equal(copy?.title, "Claude casi agotado");
+  assert.match(copy?.meta ?? "", /Semanal · 99% usado · reinicia en 1 d 11 h/);
+  assert.equal(recommendationBackground(snapshot.recommendation), "error");
+  setLang("en");
 });

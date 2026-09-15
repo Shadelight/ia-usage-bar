@@ -1,7 +1,19 @@
 import * as vscode from "vscode";
 import { isRenderOnlyChange as isRenderOnlyChangePure } from "./config-change";
 
-export type PercentageMode = "used" | "available";
+export type PercentageMode = "used" | "remaining";
+
+export function normalizePercentageMode(value: string | undefined): PercentageMode {
+  return value === "remaining" || value === "available" ? "remaining" : "used";
+}
+
+/** `"available"` is a read alias of remaining and is rewritten on save/startup. */
+export async function migrateLegacyPercentageMode(): Promise<void> {
+  const config = vscode.workspace.getConfiguration("iaUsage");
+  if (config.get<string>("percentageMode") === "available") {
+    await config.update("percentageMode", "remaining", vscode.ConfigurationTarget.Global);
+  }
+}
 
 export interface Settings {
   cliPath: string;
@@ -26,7 +38,7 @@ export function settings(): Settings {
     remotePollSeconds: interval,
     showAllMetrics: config.get<boolean>("showAllMetrics", false),
     showResetInStatusBar: config.get<boolean>("showResetInStatusBar", false),
-    percentageMode: config.get<PercentageMode>("percentageMode", "used"),
+    percentageMode: normalizePercentageMode(config.get<string>("percentageMode")),
     primaryMetric: config.get<Record<string, string>>("primaryMetric", {}),
     showProviderIcons: config.get<boolean>("showProviderIcons", true),
     showStaleIndicator: config.get<boolean>("showStaleIndicator", true),

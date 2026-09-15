@@ -44,10 +44,10 @@ test("appearance quick settings write display/icons/stale to Global, applied ins
   }
 });
 
-test("percentage quick setting writes percentageMode", async () => {
-  vscodeMock.__queuePick({ action: "percentage" }, { value: "available" });
+test("percentage quick setting writes remaining, never the available alias", async () => {
+  vscodeMock.__queuePick({ action: "percentage" }, { value: "remaining" });
   await showQuickSettings(undefined);
-  assert.equal(updateFor("percentageMode")?.value, "available");
+  assert.equal(updateFor("percentageMode")?.value, "remaining");
 });
 
 test("reset quick setting writes showResetInStatusBar", async () => {

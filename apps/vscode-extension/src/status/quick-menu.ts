@@ -2,11 +2,11 @@ import * as vscode from "vscode";
 import { t } from "../i18n";
 import { settings } from "../settings";
 import { DashboardSnapshot, Provider, UsageQuota } from "../types";
-import { formatPercentage, formatResetLong, getPrimaryQuota, visible } from "./format";
+import { formatPercentage, formatResetLong, getPrimaryQuota, recommendationCopy, summaryPercents, visible } from "./format";
 import { providerVisual } from "./provider-visuals";
 import { choosePrimaryMetricForProvider, showQuickSettings } from "./quick-settings";
 
-type MenuAction = "refresh" | "reconnect" | "configure-providers" | "customize" | "full-settings" | "provider-detail";
+type MenuAction = "refresh" | "reconnect" | "configure-providers" | "customize" | "full-settings" | "provider-detail" | "recommendation-detail";
 
 interface UsageQuickPickItem extends vscode.QuickPickItem {
   action?: MenuAction;
@@ -22,6 +22,15 @@ export function showMenu(snapshot: DashboardSnapshot | undefined, onRefresh: () 
     action: "provider-detail",
     providerId: provider.id,
   }));
+  const recommendation = snapshot ? recommendationCopy(snapshot) : undefined;
+  if (recommendation) {
+    entries.unshift({
+      label: `${snapshot?.recommendation?.severity === "critical" ? "$(error)" : snapshot?.recommendation?.severity === "warning" ? "$(warning)" : "$(pass)"} ${recommendation.title}`,
+      description: recommendation.meta,
+      detail: t("recommendation.details"),
+      action: "recommendation-detail",
+    });
+  }
   entries.push(
     { label: t("menu.customize"), action: "customize" },
     { label: t("menu.chooseProviders"), action: "configure-providers" },
@@ -36,11 +45,22 @@ export function showMenu(snapshot: DashboardSnapshot | undefined, onRefresh: () 
     else if (choice.action === "configure-providers") void pickProviders(snapshot);
     else if (choice.action === "customize") void showQuickSettings(snapshot);
     else if (choice.action === "full-settings") void vscode.commands.executeCommand("workbench.action.openSettings", "iaUsage");
+    else if (choice.action === "recommendation-detail" && snapshot) void showRecommendationDetail(snapshot);
     else if (choice.action === "provider-detail" && choice.providerId) {
       const provider = providers.find((p) => p.id === choice.providerId);
       if (provider) void showProviderDetail(provider);
     }
   });
+}
+
+async function showRecommendationDetail(snapshot: DashboardSnapshot): Promise<void> {
+  const recommendation = recommendationCopy(snapshot);
+  if (!recommendation) return;
+  const items: vscode.QuickPickItem[] = [
+    { label: recommendation.title, description: recommendation.meta },
+    ...recommendation.detail.map((line) => ({ label: line })),
+  ];
+  await vscode.window.showQuickPick(items, { title: recommendation.title });
 }
 
 function quotaSummary(provider: Provider): string {
@@ -72,8 +92,8 @@ export async function showProviderDetail(provider: Provider): Promise<void> {
 function quotaLine(quota: UsageQuota): string {
   const used = quota.usedPercent;
   if (used == null) return "—";
-  const available = Math.min(100, Math.max(0, 100 - used));
-  const base = t("tooltip.usedAvailable", { used: Math.round(used), available: Math.round(available) });
+  const { used: usedRounded, remaining } = summaryPercents(used);
+  const base = t("tooltip.usedAvailable", { used: usedRounded, available: remaining });
   return quota.resetInSeconds ? `${base} · ${t("detail.resetsIn", { time: formatResetLong(quota.resetInSeconds) })}` : base;
 }
 

@@ -23,6 +23,7 @@ export type UsageSource = "auto" | "cli" | "oauth" | "api" | "local-session" | "
 export type DataConfidence = "exact" | "estimated" | "percent_only" | "unknown";
 export type ServiceHealth = "operational" | "degraded" | "outage" | "unknown";
 export type ProviderStatus = "connected" | "needs_auth" | "needs_permission" | "unavailable" | "error";
+export type Availability = "available" | "partial_limited" | "blocked";
 export type ProviderStatusReason =
   | "missing_credential"
   | "invalid_credential"
@@ -52,6 +53,10 @@ export interface UsageQuota {
   fetchedAt: string;
   stale: boolean;
   confidence?: DataConfidence;
+  groupId?: string | null;
+  groupLabel?: string | null;
+  models?: string[];
+  visible?: string;
 }
 
 export interface CreditsSummary {
@@ -62,6 +67,8 @@ export interface CreditsSummary {
 export interface ProductUsage {
   name: string;
   usedPercent: number;
+  parentQuotaId?: string;
+  groupId?: string;
 }
 
 export interface UsageCost {
@@ -80,6 +87,7 @@ export interface ProviderUsage {
   plan: string;
   status: ProviderStatus;
   statusReason: ProviderStatusReason | null;
+  availability?: Availability;
   /** Salud del servicio, independiente de la conexión. */
   service?: ServiceHealth;
   /** Fuente que produjo el snapshot actual. */
@@ -164,6 +172,7 @@ export interface Dashboard {
   autostart: boolean;
   alwaysOnTop: boolean;
   compactMode: boolean;
+  percentageMode?: "used" | "remaining";
   appBootstrapping: boolean;
   refreshing: boolean;
   loadingProviders: string[];

@@ -278,7 +278,7 @@ private fun WidgetConfigurationScreen(
                         selected = !usedMode,
                         onClick = { usedMode = false },
                         shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    ) { Text("Disponible") }
+                    ) { Text("Restante") }
                 }
             }
 

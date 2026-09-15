@@ -75,7 +75,7 @@ test("provider enable patches API-key controls in place and rolls them back", ()
   assert.match(helper, /remove\.disabled = disabled/);
   assert.doesNotMatch(helper, /innerHTML/);
 
-  const changeHandler = main.slice(main.indexOf("dataset.enable"), main.indexOf('el.id === "cfg-sync"'));
+  const changeHandler = main.slice(main.indexOf("dataset.enable"), main.indexOf('el.id === "cfg-autostart"'));
   assert.match(changeHandler, /patchProviderInteractiveState\(id, enabled\)/);
   assert.match(changeHandler, /patchProviderInteractiveState\(id, !enabled\)/);
 });
@@ -137,6 +137,15 @@ test("normal dashboard sections persist their open state per provider", () => {
 
 test("an unavailable provider does not invent a source label", () => {
   const dash = readFileSync(new URL("../src/views/dash.ts", import.meta.url), "utf8");
-  assert.match(dash, /function connectionHtml/);
-  assert.match(dash, /provider\.activeSource[\s\S]*sourceLabel/);
+  assert.match(dash, /function connectionRows/);
+  assert.match(dash, /function sourceText/);
+  assert.match(dash, /default:\s*return "";/);
+});
+
+test("appearance persists Used/Remaining and dashboard groups always quotas", () => {
+  assert.match(settings, /data-percentage-mode="remaining"/);
+  assert.match(settings, /percentage_mode:/);
+  const dash = readFileSync(new URL("../src/views/dash.ts", import.meta.url), "utf8");
+  assert.match(dash, /groupsFromQuotas/);
+  assert.doesNotMatch(dash, /quotas\.slice\(0,\s*2\)/);
 });

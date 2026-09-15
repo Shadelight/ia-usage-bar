@@ -327,19 +327,19 @@ fn parse_product_value(value: &Value) -> Vec<ProductUsage> {
                 continue;
             };
             if let Some(percent) = product_percent(item) {
-                out.push(ProductUsage {
-                    name: product_name(&name),
-                    used_percent: percent.clamp(0.0, 100.0),
-                });
+                out.push(ProductUsage::new(
+                    product_name(&name),
+                    percent.clamp(0.0, 100.0),
+                ));
             }
         }
     } else if let Some(items) = value.as_object() {
         for (name, item) in items {
             if let Some(percent) = product_percent(item) {
-                out.push(ProductUsage {
-                    name: product_name(name),
-                    used_percent: percent.clamp(0.0, 100.0),
-                });
+                out.push(ProductUsage::new(
+                    product_name(name),
+                    percent.clamp(0.0, 100.0),
+                ));
             }
         }
     }

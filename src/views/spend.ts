@@ -180,6 +180,8 @@ export function previewDashboard(): Dashboard {
     recommendLeft: 74,
     recommendAction: "stay",
     recommendReason: "sustainable",
+    recommendSeverity: "healthy",
+    recommendLimitingQuota: null,
     recommendConfidence: 0.85,
     recommendFrom: "anthropic",
     recommendScores: [],

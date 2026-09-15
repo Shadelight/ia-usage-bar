@@ -447,6 +447,33 @@ pub enum ResetStatus {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+pub enum Availability {
+    #[serde(alias = "Available", alias = "available")]
+    Available,
+    #[serde(alias = "PartialLimited", alias = "partial_limited", alias = "partialLimited")]
+    PartialLimited,
+    #[serde(alias = "Blocked", alias = "blocked")]
+    Blocked,
+}
+
+impl Availability {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::PartialLimited => "partial_limited",
+            Self::Blocked => "blocked",
+        }
+    }
+}
+
+impl Default for Availability {
+    fn default() -> Self {
+        Self::Available
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum ProviderStatus {
     Connected,
     NeedsAuth,
@@ -536,6 +563,86 @@ pub struct UsageQuota {
     /// `#[serde(default)]` mantiene legibles los cachés escritos por 0.2.0.
     #[serde(default)]
     pub confidence: DataConfidence,
+    /// Proyección calculada al publicar un snapshot. Los snapshots internos
+    /// del proveedor conservan `None`, para no confundir observación con dato
+    /// derivado y para mantener legibles los cachés anteriores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pace: Option<crate::pace::UsagePace>,
+    /// Familia de modelos que comparte esta ventana. Aditivo: caches v1 sin
+    /// el campo siguen siendo legibles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_label: Option<String>,
+    /// Metadata débil de display. Nunca entra en scoring ni disponibilidad.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
+    /// `always` | `details` | `diagnostic`. Vacío se trata como `always`.
+    #[serde(default = "default_visible_always")]
+    pub visible: String,
+}
+
+fn default_visible_always() -> String {
+    "always".into()
+}
+
+pub fn is_summary_visible(visible: &str) -> bool {
+    visible.is_empty() || visible == "always"
+}
+
+/// Un grupo de cuotas de primera clase (Gemini Models, Cursor Models, …).
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuotaGroupView {
+    pub id: String,
+    pub label: String,
+    pub models: Vec<String>,
+    pub quotas: Vec<UsageQuota>,
+}
+
+impl QuotaGroupView {
+    /// Used más restrictivo de las ventanas del grupo.
+    pub fn used_percent(&self) -> Option<f64> {
+        self.quotas
+            .iter()
+            .filter_map(|quota| quota.used_percent)
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+    }
+}
+
+/// Agrupa ventanas `always`. Cuotas `details`/`diagnostic` no inventan grupos.
+pub fn groups_from_quotas(quotas: &[UsageQuota]) -> Vec<QuotaGroupView> {
+    let mut groups: Vec<QuotaGroupView> = Vec::new();
+    for quota in quotas {
+        if !is_summary_visible(&quota.visible) || quota.id == "total" {
+            continue;
+        }
+        let id = quota
+            .group_id
+            .clone()
+            .unwrap_or_else(|| quota.id.clone());
+        if let Some(existing) = groups.iter_mut().find(|group| group.id == id) {
+            if existing.label.is_empty() {
+                if let Some(label) = &quota.group_label {
+                    existing.label = label.clone();
+                }
+            }
+            if existing.models.is_empty() && !quota.models.is_empty() {
+                existing.models = quota.models.clone();
+            }
+            existing.quotas.push(quota.clone());
+            continue;
+        }
+        groups.push(QuotaGroupView {
+            id,
+            label: quota
+                .group_label
+                .clone()
+                .unwrap_or_else(|| quota.label.clone()),
+            models: quota.models.clone(),
+            quotas: vec![quota.clone()],
+        });
+    }
+    groups
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -543,6 +650,17 @@ pub struct UsageQuota {
 pub struct CreditsSummary {
     pub remaining: f64,
     pub resets_available: Option<u64>,
+    /// Credits are observed by the remote endpoint, not by Codex JSONL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<UsageSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fetched_at: Option<String>,
+    #[serde(default)]
+    pub stale: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_fetched_at: Option<String>,
+    #[serde(default)]
+    pub resets_stale: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -550,6 +668,35 @@ pub struct CreditsSummary {
 pub struct ProductUsage {
     pub name: String,
     pub used_percent: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_quota_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
+}
+
+impl ProductUsage {
+    pub fn new(name: impl Into<String>, used_percent: f64) -> Self {
+        Self {
+            name: name.into(),
+            used_percent,
+            parent_quota_id: None,
+            group_id: None,
+        }
+    }
+
+    pub fn with_parent_quota(
+        name: impl Into<String>,
+        used_percent: f64,
+        parent_quota_id: impl Into<String>,
+    ) -> Self {
+        let parent = parent_quota_id.into();
+        Self {
+            name: name.into(),
+            used_percent,
+            parent_quota_id: Some(parent.clone()),
+            group_id: Some(parent),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -624,6 +771,8 @@ pub struct ProviderUsage {
     pub plan: String,
     pub status: ProviderStatus,
     pub status_reason: Option<ProviderStatusReason>,
+    #[serde(default)]
+    pub availability: Availability,
     /// Salud del servicio del proveedor. Nunca mezclar con `status`.
     #[serde(default)]
     pub service: ServiceHealth,
@@ -652,10 +801,42 @@ impl ProviderUsage {
         self.status == ProviderStatus::Connected
     }
 
+    pub fn compute_availability(&self) -> Availability {
+        if !self.is_connected() {
+            return Availability::Blocked;
+        }
+        let relevant_quotas: Vec<&UsageQuota> = self
+            .quotas
+            .iter()
+            .filter(|q| q.id != "total")
+            .filter(|q| q.used_percent.is_some())
+            .collect();
+        if relevant_quotas.is_empty() {
+            return Availability::Available;
+        }
+        let all_blocked = relevant_quotas
+            .iter()
+            .all(|q| q.used_percent.unwrap_or(0.0) >= 100.0);
+        if all_blocked {
+            return Availability::Blocked;
+        }
+        let any_blocked = relevant_quotas
+            .iter()
+            .any(|q| q.used_percent.unwrap_or(0.0) >= 100.0);
+        if any_blocked {
+            return Availability::PartialLimited;
+        }
+        Availability::Available
+    }
+
     pub fn mark_stale(&mut self) {
         self.stale = true;
         for quota in &mut self.quotas {
             quota.stale = true;
+        }
+        if let Some(credits) = &mut self.credits {
+            credits.stale = true;
+            credits.resets_stale = credits.resets_available.is_some();
         }
     }
 
@@ -726,6 +907,8 @@ pub struct Dashboard {
     pub autostart: bool,
     pub always_on_top: bool,
     pub compact_mode: bool,
+    #[serde(default)]
+    pub percentage_mode: crate::config::PercentageMode,
     pub app_bootstrapping: bool,
     pub refreshing: bool,
     pub loading_providers: Vec<String>,
@@ -741,6 +924,10 @@ pub struct Dashboard {
     pub recommend_action: String,
     #[serde(default)]
     pub recommend_reason: String,
+    #[serde(default)]
+    pub recommend_severity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recommend_limiting_quota: Option<crate::recommend::LimitingQuota>,
     #[serde(default)]
     pub recommend_confidence: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -854,6 +1041,7 @@ fn quota_from_line(line: &MetricLine, source: UsageSource, fetched_at: &str) -> 
         remaining,
         resets_at,
         window_secs,
+        visible,
         ..
     } = line
     else {
@@ -883,6 +1071,17 @@ fn quota_from_line(line: &MetricLine, source: UsageSource, fetched_at: &str) -> 
         fetched_at: fetched_at.to_string(),
         stale: false,
         confidence: DataConfidence::Exact,
+        pace: None,
+        group_id: None,
+        group_label: None,
+        models: Vec::new(),
+        visible: if visible == "demand" {
+            "details".into()
+        } else if visible.is_empty() {
+            "always".into()
+        } else {
+            visible.clone()
+        },
     })
 }
 
@@ -894,7 +1093,11 @@ fn number_from_text(text: &str) -> Option<f64> {
     normalized.parse::<f64>().ok().filter(|n| n.is_finite())
 }
 
-fn credits_from_lines(lines: &[MetricLine]) -> Option<CreditsSummary> {
+fn credits_from_lines(
+    lines: &[MetricLine],
+    source: UsageSource,
+    fetched_at: &str,
+) -> Option<CreditsSummary> {
     let remaining = lines.iter().find_map(|line| match line {
         MetricLine::Values { id, text, .. } if id == "credits" => number_from_text(text),
         _ => None,
@@ -908,6 +1111,11 @@ fn credits_from_lines(lines: &[MetricLine]) -> Option<CreditsSummary> {
     Some(CreditsSummary {
         remaining: remaining.max(0.0).floor(),
         resets_available,
+        source: Some(source),
+        fetched_at: Some(fetched_at.to_string()),
+        stale: false,
+        resets_fetched_at: resets_available.map(|_| fetched_at.to_string()),
+        resets_stale: false,
     })
 }
 
@@ -1028,9 +1236,9 @@ pub fn snapshot_ok(id: VendorId, plan: &str, lines: Vec<MetricLine>) -> Provider
         .iter()
         .filter_map(|line| quota_from_line(line, source, &updated_at))
         .collect();
-    let credits = credits_from_lines(&lines);
+    let credits = credits_from_lines(&lines, source, &updated_at);
     let cost = cost_from_lines(&lines);
-    ProviderSnapshot {
+    let mut snapshot = ProviderSnapshot {
         id: id.slug().to_string(),
         name: id.display_name().to_string(),
         short: id.short().to_string(),
@@ -1041,6 +1249,7 @@ pub fn snapshot_ok(id: VendorId, plan: &str, lines: Vec<MetricLine>) -> Provider
         },
         status: ProviderStatus::Connected,
         status_reason: None,
+        availability: Availability::Available,
         service: ServiceHealth::Unknown,
         active_source: Some(source),
         stale: false,
@@ -1054,7 +1263,9 @@ pub fn snapshot_ok(id: VendorId, plan: &str, lines: Vec<MetricLine>) -> Provider
         cost,
         lines,
         primary_utilization,
-    }
+    };
+    snapshot.availability = snapshot.compute_availability();
+    snapshot
 }
 
 pub fn snapshot_with_status(
@@ -1070,6 +1281,7 @@ pub fn snapshot_with_status(
         plan: String::new(),
         status,
         status_reason: Some(status_reason),
+        availability: Availability::Blocked,
         service: ServiceHealth::Unknown,
         active_source: None,
         stale: false,
@@ -1259,6 +1471,37 @@ mod tests {
             .quotas
             .iter()
             .all(|quota| quota.source == UsageSource::Oauth));
+    }
+
+    #[test]
+    fn groups_from_quotas_skips_details_and_total() {
+        let mut snap = snapshot_ok(
+            VendorId::Cursor,
+            "Pro",
+            vec![
+                progress_pct("cursor_models", "Cursor Models", 38.0, None, 2_592_000, "always"),
+                progress_pct("other_models", "Other Models", 100.0, None, 2_592_000, "always"),
+                progress_pct("total", "Uso incluido total", 50.0, None, 2_592_000, "details"),
+            ],
+        );
+        snap.quotas[0].group_id = Some("cursor_models".into());
+        snap.quotas[0].group_label = Some("Cursor Models".into());
+        snap.quotas[1].group_id = Some("other_models".into());
+        snap.quotas[1].group_label = Some("Other Models".into());
+        let groups = groups_from_quotas(&snap.quotas);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[1].used_percent(), Some(100.0));
+    }
+
+    #[test]
+    fn old_quota_json_without_group_fields_still_parses() {
+        let quota: UsageQuota = serde_json::from_str(
+            r#"{"id":"session","label":"Sesión","windowType":"session","usedPercent":21.0,"remainingPercent":79.0,"usedAmount":null,"limitAmount":null,"unit":"percent","resetAt":null,"resetInSeconds":null,"resetStatus":"not_provided","temporaryMultiplier":null,"temporaryExpiresAt":null,"source":"oauth","fetchedAt":"2026-09-14T00:00:00Z","stale":false}"#,
+        )
+        .unwrap();
+        assert_eq!(quota.group_id, None);
+        assert!(quota.models.is_empty());
+        assert_eq!(quota.visible, "always");
     }
 }
 

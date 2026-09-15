@@ -22,26 +22,27 @@ import com.shadelight.iausage.data.UsageQuota
  * the one place this is drawn, so Dashboard and Device screens agree. */
 @Composable
 fun QuotaProgress(quota: UsageQuota, usedMode: Boolean, modifier: Modifier = Modifier) {
-    val used = quota.usedPercent
-    val available = Formatters.availablePercent(used)
-    val fraction = ((used ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f)
+    val summary = quota.usedPercent?.let { Formatters.summaryPercents(it) }
+    val fraction = ((summary?.first ?: 0) / 100f).coerceIn(0f, 1f)
     val animatedFraction by animateFloatAsState(targetValue = fraction, animationSpec = tween(220), label = "quota-progress")
+    val pair = when {
+        summary == null -> "—"
+        usedMode -> "${summary.first}% usado · ${summary.second}% restante"
+        else -> "${summary.second}% restante · ${summary.first}% usado"
+    }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(quota.label, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                if (used == null) "—" else "${used.toInt()}% usado · ${available?.toInt() ?: 0}% disponible",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Text(Formatters.windowLabel(quota), style = MaterialTheme.typography.bodyMedium)
+            Text(pair, style = MaterialTheme.typography.bodyMedium)
         }
         LinearProgressIndicator(
             progress = { animatedFraction },
             modifier = Modifier
                 .fillMaxWidth()
-                .semantics { contentDescription = "${quota.label}: ${used?.toInt() ?: 0} por ciento usado" },
+                .semantics { contentDescription = "${Formatters.windowLabel(quota)}: ${summary?.first ?: 0} por ciento usado" },
             trackColor = MaterialTheme.colorScheme.surfaceVariant,
         )
-        Formatters.formatResetIn(quota.resetInSeconds)?.let {
+        Formatters.formatResetIn(Formatters.liveResetSeconds(quota))?.let {
             Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

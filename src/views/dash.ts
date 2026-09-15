@@ -4,7 +4,7 @@ import { $, escapeHtml } from "../api.ts";
 import type { Dashboard, MetricLine, ProviderSnapshot, UsageQuota, VendorInfo } from "../api.ts";
 import { normalizeProviderError } from "../errors.ts";
 import { lang, t } from "../i18n.ts";
-import { deriveProviderState, formatStatusText } from "../provider-state.ts";
+import { deriveProviderState } from "../provider-state.ts";
 import { providerVisual } from "../providers.ts";
 import { formatResetAbsolute, formatResetRelative } from "../reset-format.ts";
 import { activeItemScrollDelta, elapsedLabel, horizontalWheelDelta } from "../layout.ts";
@@ -18,6 +18,8 @@ import {
 } from "../provider-actions.ts";
 import { tabHtml } from "../provider-tabs.ts";
 import { recCopy, recPrefix, recWhyTitle } from "../recommend.ts";
+import { groupSummary, groupsFromQuotas } from "../quota-groups.ts";
+import { normalizePercentageMode, summaryPercents, type PercentageMode } from "../percent.ts";
 
 export { actionIconSvg, buildSanitizedDiagnosis };
 
@@ -100,9 +102,30 @@ function temporaryLimit(quota: UsageQuota): string {
   return `<div class="temporary-limit"><strong>${t("temporaryLimit")}</strong> +${increase}%${escapeHtml(suffix)}</div>`;
 }
 
-function progressBlock(quota: UsageQuota): string {
-  const percent = pctOf(quota);
-  const remaining = quota.remainingPercent == null ? null : Math.max(0, Math.min(100, quota.remainingPercent));
+function windowLabel(quota: UsageQuota): string {
+  switch (quota.windowType) {
+    case "weekly": return t("weekly");
+    case "5h": return t("fiveHour");
+    case "session": return t("session");
+    case "daily": return t("daily");
+    case "monthly": return t("monthly");
+    default:
+      if (quota.label === "weekly") return t("weekly");
+      if (quota.label === "5h") return t("fiveHour");
+      return quota.label;
+  }
+}
+
+function progressBlock(quota: UsageQuota, mode: PercentageMode): string {
+  const exact = pctOf(quota);
+  const summary = exact == null ? null : summaryPercents(exact);
+  const primary = summary == null ? null : (mode === "remaining" ? summary.remaining : summary.used);
+  const primaryWord = mode === "remaining" ? t("remaining") : t("used");
+  const secondary = summary == null
+    ? t("notAvailable")
+    : mode === "remaining"
+      ? `${summary.used}% ${t("used")}`
+      : `${summary.remaining}% ${t("remaining")}`;
   const pace = paceHtml(quota);
   const resetAt = quota.resetAt ? escapeHtml(quota.resetAt) : "";
   const knownReset = quota.resetStatus === "known" && !!quota.resetAt;
@@ -110,12 +133,12 @@ function progressBlock(quota: UsageQuota): string {
   return `<article class="block">
     <div class="block-top">
       <div>
-        <div class="kicker">${escapeHtml(quota.label)}</div>
+        <div class="kicker">${escapeHtml(windowLabel(quota))}</div>
         <div class="pct-row">
-          <span class="pct">${percent == null ? "—" : `${Math.round(percent)}%`}</span>
-          <span class="used-word">${t("used")}</span>
+          <span class="pct">${primary == null ? "—" : `${primary}%`}</span>
+          <span class="used-word">${primaryWord}</span>
         </div>
-        <div class="remain">${remaining == null ? t("notAvailable") : `${Math.round(remaining)}% ${t("available")}`}</div>
+        <div class="remain">${escapeHtml(secondary)}</div>
       </div>
       <div class="reset-col ${knownReset ? "" : "reset-unknown"}">
         ${knownReset
@@ -125,7 +148,7 @@ function progressBlock(quota: UsageQuota): string {
           : `<div class="reset-state">${escapeHtml(resetState(quota))}</div>`}
       </div>
     </div>
-    <div class="bar"><div class="fill" style="width:${percent ?? 0}%"></div></div>
+    <div class="bar"><div class="fill" style="width:${summary?.used ?? 0}%"></div></div>
     ${temporaryLimit(quota)}
     ${pace}
   </article>`;
@@ -267,64 +290,94 @@ export function actionsSectionHtml(provider: ProviderSnapshot, vendor: VendorInf
   `);
 }
 
-function connectionLabel(provider: ProviderSnapshot, vendor?: VendorInfo): string {
-  if (vendor) return formatStatusText(deriveProviderState(vendor, provider, false));
-  switch (provider.status) {
-    case "connected": return t("statusConnected");
-    case "needs_permission": return t("statusNeedPermission");
-    case "unavailable": return t("statusUnavailable");
-    case "error": return t("statusError");
-    case "needs_auth":
-    default:
-      // vendor is always undefined here (the truthy case returned above).
-      if (provider.statusReason === "invalid_credential") return t("statusSessionInvalid");
-      return t("statusNeedLogin");
-  }
-}
-
-function sourceLabel(source: string | null | undefined): string {
-  switch ((source || "").toLowerCase()) {
-    case "oauth": return t("viaOAuth");
-    case "api": return t("viaApiKey");
-    case "cli": return t("viaCli");
+function sourceText(provider: ProviderSnapshot): string {
+  const line = provider.lines.find((item) => item.kind === "values" && item.id === "source");
+  if (line && line.kind === "values" && line.text) return line.text;
+  switch ((provider.activeSource || "").toLowerCase()) {
     case "local-session":
-    case "local": return t("viaLocal");
+    case "local":
+      return t("sourceLocal");
+    case "oauth":
+    case "api":
+      return t("sourceGoogleApi");
+    case "cli":
+      return t("viaCli");
     case "web-session":
-    case "web": return t("viaWeb");
-    case "auto": return t("autoSource");
-    default: return t("viaMixed");
+    case "web":
+      return t("viaWeb");
+    default:
+      return "";
   }
 }
 
-function connectionHtml(provider: ProviderSnapshot, vendor?: VendorInfo): string {
-  const status = escapeHtml(connectionLabel(provider, vendor));
-  return provider.activeSource
-    ? `${status} · ${escapeHtml(sourceLabel(provider.activeSource))}`
-    : status;
+function lineText(provider: ProviderSnapshot, id: string): string {
+  const line = provider.lines.find((item) => item.kind === "values" && item.id === id);
+  return line && line.kind === "values" ? line.text : "";
 }
 
-function detailHtml(provider: ProviderSnapshot, vendor: VendorInfo, updating: boolean): string {
-  const main = provider.quotas.slice(0, 2);
+function connectionRows(provider: ProviderSnapshot, vendor: VendorInfo): string {
+  const derived = deriveProviderState(vendor, provider, false);
+  const rows = [
+    ["status", t("status"), t(derived.statusKey)],
+    ["auth", t("authentication"), derived.via],
+    ["source", t("source"), sourceText(provider)],
+  ];
+  const app = lineText(provider, "antigravity_app");
+  if (app) rows.push(["antigravity_app", vendor.name, app]);
+  const account = lineText(provider, "account");
+  if (account) rows.push(["account", t("account"), account]);
+  if (provider.plan) rows.push(["plan", t("plan"), provider.plan]);
+  const overages = lineText(provider, "overages");
+  if (overages) rows.push(["overages", t("creditOverages"), overages]);
+  return rows
+    .filter(([, , value]) => value)
+    .map(([id, label, value]) => `<div class="kv" data-detail="${id}"><span>${escapeHtml(label)}</span><span>${escapeHtml(value)}</span></div>`)
+    .join("");
+}
+
+function groupBlock(provider: ProviderSnapshot, mode: PercentageMode): string {
+  const groups = groupsFromQuotas(provider.quotas);
+  return groups.map((group) => {
+    const models = group.models.length
+      ? `<div class="group-models">${escapeHtml(group.models.join(" · "))}</div>`
+      : "";
+    const named = groups.length > 1 || !!group.models.length;
+    const exhausted = groupSummary(group)?.used === 100;
+    const title = exhausted ? `${group.label} ⚠` : group.label;
+    const windows = group.quotas.map((quota) => progressBlock(quota, mode)).join("");
+    return `<section class="quota-group">${named ? `<h3 class="group-title">${escapeHtml(title)}</h3>${models}` : ""}${windows}</section>`;
+  }).join("");
+}
+
+function detailHtml(provider: ProviderSnapshot, vendor: VendorInfo, dash: Dashboard, updating: boolean): string {
+  const mode = normalizePercentageMode(dash.percentageMode);
   let body = "";
   if (provider.status !== "connected") {
     body = errorCard(provider, vendor);
-    if (provider.stale && main.length) {
-      body += main.map(progressBlock).join("");
+    if (provider.stale && provider.quotas.length) {
+      body += groupBlock(provider, mode);
       body += staleHint(provider);
     }
   } else {
-    body = `<div class="quota-grid">${main.map(progressBlock).join("")}</div>`;
+    const warning = provider.availability === "partial_limited"
+      ? `<div class="provider-warning-banner" role="alert"><span class="warning-icon">⚠</span><span>${escapeHtml(t("someModelsExhausted"))}</span></div>`
+      : "";
+    body = `${warning}<div class="quota-grid">${groupBlock(provider, mode)}</div>`;
     if (provider.stale) body += staleHint(provider);
   }
 
-  const additionalQuotas = provider.quotas.slice(2).map((quota) => {
-    const value = pctOf(quota);
-    return `<div class="kv"><span>${escapeHtml(quota.label)}</span><span>${value == null ? "—" : `${Math.round(value)}% ${t("used")}`}</span></div>`;
-  }).join("");
+  const skipIds = new Set(["source", "antigravity_app", "account", "overages", "credits", "resets"]);
+  const additionalQuotas = provider.quotas
+    .filter((quota) => quota.visible === "details" && quota.id !== "total")
+    .map((quota) => {
+      const exact = pctOf(quota);
+      const shown = exact == null ? "—" : `${exact.toFixed(1)}% ${t("used")}`;
+      return `<div class="kv"><span>${escapeHtml(windowLabel(quota))}</span><span>${shown}</span></div>`;
+    }).join("");
   const costEstimated = provider.cost?.confidence === "estimated";
   const legacyRows = provider.lines
     .filter((line): line is Exclude<MetricLine, { kind: "progress" }> =>
-      line.kind !== "progress" && !["credits", "resets"].includes(line.id))
+      line.kind !== "progress" && !skipIds.has(line.id) && (!provider.credits || !["credits", "resets"].includes(line.id)))
     .map((line) => {
       const suffix = costEstimated && line.id.startsWith("cost") ? ` · ${t("estimated")}` : "";
       return `<div class="kv"><span>${escapeHtml(line.label)}</span><span>${escapeHtml(line.text)}${escapeHtml(suffix)}</span></div>`;
@@ -337,13 +390,38 @@ function detailHtml(provider: ProviderSnapshot, vendor: VendorInfo, updating: bo
   const redeemReset = provider.id === "openai" && (provider.credits?.resetsAvailable ?? 0) > 0 && vendor.links.usageUrl
     ? `<button class="btn ghost" data-redeem-reset="${escapeHtml(provider.id)}" data-reset-url="${escapeHtml(vendor.links.usageUrl)}">${escapeHtml(t("redeemReset"))}</button>`
     : "";
+  let breakdownBody = "";
+  if (provider.productBreakdown.length) {
+    const hasGroups = provider.productBreakdown.some((item) => !!(item.parentQuotaId || item.groupId));
+    if (hasGroups) {
+      const groups = new Map<string, typeof provider.productBreakdown>();
+      for (const item of provider.productBreakdown) {
+        const key = item.parentQuotaId || item.groupId || "other";
+        const list = groups.get(key) || [];
+        list.push(item);
+        groups.set(key, list);
+      }
+      const groupHtmls: string[] = [];
+      for (const [key, items] of groups.entries()) {
+        const quota = provider.quotas.find((q) => q.id === key);
+        const groupTitle = quota ? quota.label : key;
+        const rows = items
+          .map((item) => `<div class="kv"><span>${escapeHtml(item.name)}</span><span>${item.usedPercent.toFixed(1)}%</span></div>`)
+          .join("");
+        groupHtmls.push(`<div class="breakdown-group"><div class="breakdown-group-title">${escapeHtml(groupTitle)}</div>${rows}</div>`);
+      }
+      breakdownBody = groupHtmls.join("");
+    } else {
+      breakdownBody = provider.productBreakdown
+        .map((item) => `<div class="kv"><span>${escapeHtml(item.name)}</span><span>${item.usedPercent.toFixed(1)}%</span></div>`)
+        .join("");
+    }
+  }
   const breakdown = provider.productBreakdown.length
-    ? collapsibleSection(provider.id, "products", t("productUsage"), `
-        ${provider.productBreakdown.map((item) => `<div class="kv"><span>${escapeHtml(item.name)}</span><span>${Math.round(item.usedPercent)}%</span></div>`).join("")}
-       `)
+    ? collapsibleSection(provider.id, "products", t("productUsage"), breakdownBody)
     : "";
   const details = collapsibleSection(provider.id, "details", t("details"), `
-      <div class="kv"><span>${t("connection")}</span><span>${connectionHtml(provider, vendor)}</span></div>
+      ${connectionRows(provider, vendor)}
       ${creditRows}
       ${additionalQuotas}
       ${legacyRows}
@@ -360,14 +438,15 @@ function detailHtml(provider: ProviderSnapshot, vendor: VendorInfo, updating: bo
 }
 
 function compactDetailHtml(provider: ProviderSnapshot, vendor: VendorInfo, dash: Dashboard): string {
-  const quotas = provider.quotas.slice(0, 2);
-  const rows = quotas.map((quota) => {
-    const used = pctOf(quota);
-    const reset = quota.resetAt ? formatResetRelative(quota.resetAt, Date.now(), lang) : resetState(quota);
+  const mode = normalizePercentageMode(dash.percentageMode);
+  const groups = groupsFromQuotas(provider.quotas);
+  const rows = groups.map((group) => {
+    const values = group.quotas.map((quota) => pctOf(quota)).filter((value): value is number => value != null);
+    const summary = values.length ? summaryPercents(Math.max(...values)) : null;
+    const shown = summary == null ? "—" : `${mode === "remaining" ? summary.remaining : summary.used}%`;
     return `<div class="compact-quota">
-      <span class="compact-quota-label">${escapeHtml(quota.label)}</span>
-      <strong>${used == null ? "—" : `${Math.round(used)}%`}</strong>
-      <span data-reset-relative data-reset-at="${escapeHtml(quota.resetAt || "")}">${escapeHtml(reset)}</span>
+      <span class="compact-quota-label">${escapeHtml(group.label)}</span>
+      <strong>${shown}</strong>
     </div>`;
   }).join("");
   const rec = (dash.recommendAction && dash.recommendAction !== "insufficient_data"
@@ -509,7 +588,7 @@ export function renderDash(dash: Dashboard | null, selectedId: string): string {
   const currentLoading = !!currentVendor && dash.loadingProviders.includes(currentVendor.id);
   if (!currentLoading && currentVendor) loadingStarted.delete(currentVendor.id);
   $("detail").innerHTML = current && currentVendor
-    ? dash.compactMode ? compactDetailHtml(current, currentVendor, dash) : detailHtml(current, currentVendor, currentLoading)
+    ? dash.compactMode ? compactDetailHtml(current, currentVendor, dash) : detailHtml(current, currentVendor, dash, currentLoading)
     : currentVendor ? loadingHtml(currentVendor.id, currentVendor.name) : "";
   $("detail").classList.toggle("hidden", !currentVendor);
 

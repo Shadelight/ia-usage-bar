@@ -22,14 +22,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shadelight.iausage.BuildConfig
+import com.shadelight.iausage.data.ReleaseUpdate
 import com.shadelight.iausage.data.ThemeMode
 import com.shadelight.iausage.data.UpdateState
 import com.shadelight.iausage.data.visibleProviders
 import com.shadelight.iausage.ui.components.ErrorBanner
 import com.shadelight.iausage.ui.components.UpdateBanner
+import com.shadelight.iausage.ui.components.launchUpdateInstall
+import com.shadelight.iausage.ui.components.openReleasePage
 import com.shadelight.iausage.ui.screens.AboutScreen
 import com.shadelight.iausage.ui.screens.DashboardScreen
 import com.shadelight.iausage.ui.screens.DeviceScreen
@@ -48,9 +52,41 @@ private fun titleFor(screen: Screen) = when (screen) {
     Screen.ABOUT -> "Acerca de"
 }
 
+private fun shouldShowGlobalUpdateBanner(state: UpdateState): Boolean =
+    when (state) {
+        is UpdateState.Available,
+        is UpdateState.Downloading,
+        is UpdateState.Verifying,
+        is UpdateState.ReadyToInstall -> true
+        else -> false
+    }
+
+@Composable
+internal fun GlobalUpdateBannerSlot(
+    onAbout: Boolean,
+    state: UpdateState,
+    dismissedTag: String?,
+    onDownload: (ReleaseUpdate) -> Unit,
+    onDismiss: (String) -> Unit,
+    onInstall: (ReleaseUpdate, String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (!onAbout && shouldShowGlobalUpdateBanner(state)) {
+        UpdateBanner(
+            state = state,
+            dismissedTag = dismissedTag,
+            onDownload = onDownload,
+            onDismiss = onDismiss,
+            onInstall = onInstall,
+            modifier = modifier,
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UsageApp(viewModel: UsageViewModel, updateViewModel: UpdateViewModel, scanQr: () -> Unit) {
+    val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
     val preferences by viewModel.preferences.collectAsStateWithLifecycle()
     val updateState by updateViewModel.state.collectAsStateWithLifecycle()
@@ -91,7 +127,7 @@ fun UsageApp(viewModel: UsageViewModel, updateViewModel: UpdateViewModel, scanQr
                             if (paired) {
                                 DropdownMenuItem(text = { Text("Proveedores visibles") }, onClick = { menuExpanded = false; screen = Screen.SETTINGS })
                                 DropdownMenuItem(
-                                    text = { Text(if (preferences.usedMode) "Mostrar disponible" else "Mostrar usado") },
+                                    text = { Text(if (preferences.usedMode) "Mostrar restante" else "Mostrar usado") },
                                     onClick = { menuExpanded = false; viewModel.setUsedMode(!preferences.usedMode) },
                                 )
                                 DropdownMenuItem(text = { Text("Actualizar ahora") }, onClick = { menuExpanded = false; viewModel.refresh() })
@@ -111,18 +147,22 @@ fun UsageApp(viewModel: UsageViewModel, updateViewModel: UpdateViewModel, scanQr
             }
             // Aviso global: fuera del `when` de pairing para que un usuario
             // sin PC vinculado también se entere de la actualización.
-            if (updateState !is UpdateState.Idle) {
-                UpdateBanner(
-                    state = updateState,
-                    dismissedTag = preferences.dismissedUpdateTag,
-                    viewModel = updateViewModel,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
-            }
+            GlobalUpdateBannerSlot(
+                onAbout = onAbout,
+                state = updateState,
+                dismissedTag = preferences.dismissedUpdateTag,
+                onDownload = updateViewModel::download,
+                onDismiss = updateViewModel::dismiss,
+                onInstall = { release, fileName -> launchUpdateInstall(context, updateViewModel, release, fileName) },
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
             when {
                 onAbout -> AboutScreen(
                     updateState = updateState,
-                    updateViewModel = updateViewModel,
+                    onCheck = updateViewModel::checkManually,
+                    onDownload = updateViewModel::download,
+                    onInstall = { release, fileName -> launchUpdateInstall(context, updateViewModel, release, fileName) },
+                    onOpenRelease = { release -> openReleasePage(context, release) },
                 )
                 state.payload != null -> {
                     val visible = visibleProviders(state.payload!!.snapshot.providers, preferences.visibleProviderIds)
@@ -152,6 +192,7 @@ fun UsageApp(viewModel: UsageViewModel, updateViewModel: UpdateViewModel, scanQr
                             onVisibleProviderIdsChange = viewModel::setVisibleProviderIds,
                             onMonitorEnabledChange = viewModel::setMonitorEnabled,
                             onClearLocalData = viewModel::clearLocalData,
+                            modifier = Modifier.weight(1f),
                         )
                         Screen.ABOUT -> Unit // rendered above, paired or not
                     }

@@ -55,13 +55,14 @@ fun compareRows(providers: List<ProviderUsage>, visibleIds: Set<String>): Compar
     return CompareRows(candidates.take(MAX_COMPARE_ROWS), (candidates.size - MAX_COMPARE_ROWS).coerceAtLeast(0))
 }
 
-fun metricWord(config: WidgetConfig): String = if (config.usedMode) "usado" else "disponible"
+fun metricWord(config: WidgetConfig): String = if (config.usedMode) "usado" else "restante"
 
 /** "Semanal · 2 h" — the reset rides on the label line so a two-quota large
  * widget still fits in a 4x2 footprint. */
 fun quotaCaption(quota: UsageQuota, config: WidgetConfig): String {
-    val resetIn = quota.resetInSeconds
-    return if (config.showReset && resetIn != null) "${quota.label} · ${Formatters.formatDuration(resetIn)}" else quota.label
+    val label = Formatters.windowLabel(quota)
+    val resetIn = Formatters.liveResetSeconds(quota)
+    return if (config.showReset && resetIn != null) "$label · ${Formatters.formatDuration(resetIn)}" else label
 }
 
 /** Bottom line: time to reset and/or data age, joined so it takes one row.
@@ -69,7 +70,7 @@ fun quotaCaption(quota: UsageQuota, config: WidgetConfig): String {
  * a truncated "Reinicia en 3 h 50 min ·…" helps nobody. A stale warning still
  * wins over the reset, because old data is the more important fact. */
 fun widgetFooter(quota: UsageQuota?, config: WidgetConfig, generatedAt: String?, stale: Boolean, compact: Boolean = false): String {
-    val reset = quota?.resetInSeconds?.takeIf { config.showReset }?.let { "Reinicia en ${Formatters.formatDuration(it)}" }
+    val reset = quota?.let(Formatters::liveResetSeconds)?.takeIf { config.showReset }?.let { "Reinicia en ${Formatters.formatDuration(it)}" }
     val age = generatedAt?.takeIf { config.showStatus }?.let { at ->
         if (stale) "⚠ datos de ${Formatters.formatAge(at)}" else Formatters.formatAge(at)
     }

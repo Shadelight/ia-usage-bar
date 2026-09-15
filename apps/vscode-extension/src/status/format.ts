@@ -1,6 +1,6 @@
 import { t } from "../i18n";
 import type { Settings } from "../settings";
-import type { DashboardSnapshot, Provider, UsageQuota } from "../types";
+import type { DashboardSnapshot, Provider, Recommendation, UsageQuota } from "../types";
 import { providerVisual } from "./provider-visuals";
 
 export function formatResetLong(seconds: number): string {
@@ -12,6 +12,8 @@ export function formatResetLong(seconds: number): string {
   }
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  if (minutes > 0) return `${days} d ${hours} h ${minutes} min`;
   return hours > 0 ? `${days} d ${hours} h` : `${days} d`;
 }
 
@@ -53,29 +55,137 @@ export function getPrimaryQuota(provider: Provider, primaryMetric: Record<string
     const match = provider.quotas.find((quota) => quota.id === configuredId);
     if (match) return match;
   }
-  return provider.quotas[0];
+  return provider.quotas.find((quota) => isSummaryVisible(quota.visible)) ?? provider.quotas[0];
+}
+
+export function isSummaryVisible(visible: string | null | undefined): boolean {
+  return !visible || visible === "always";
+}
+
+export interface QuotaGroup {
+  id: string;
+  label: string;
+  models: string[];
+  quotas: UsageQuota[];
+}
+
+export function groupsFromQuotas(quotas: UsageQuota[]): QuotaGroup[] {
+  const groups: QuotaGroup[] = [];
+  for (const quota of quotas) {
+    if (!isSummaryVisible(quota.visible) || quota.id === "total") continue;
+    const id = quota.groupId || quota.id;
+    const existing = groups.find((group) => group.id === id);
+    if (existing) {
+      if (!existing.label && quota.groupLabel) existing.label = quota.groupLabel;
+      if (!existing.models.length && quota.models?.length) existing.models = quota.models.slice();
+      existing.quotas.push(quota);
+      continue;
+    }
+    groups.push({
+      id,
+      label: quota.groupLabel || quota.label,
+      models: quota.models?.slice() ?? [],
+      quotas: [quota],
+    });
+  }
+  return groups;
+}
+
+export function quotaWindowLabel(quota: UsageQuota): string {
+  const key = quota.windowType || quota.label;
+  if (key === "weekly") return t("quota.weekly");
+  if (key === "5h" || key === "five_hour") return t("quota.fiveHour");
+  if (key === "session") return t("quota.session");
+  return quota.label;
+}
+
+export const ROUNDING_VECTORS: ReadonlyArray<[number, number, number]> = [
+  [5.48, 5, 95],
+  [5.5, 6, 94],
+  [14.88, 15, 85],
+  [38.2711, 38, 62],
+  [99.6, 100, 0],
+  [100, 100, 0],
+  [-1, 0, 100],
+];
+
+export function summaryPercents(usedExact: number): { used: number; remaining: number } {
+  const used = !Number.isFinite(usedExact) ? 0 : Math.round(Math.max(0, Math.min(100, usedExact)));
+  return { used, remaining: 100 - used };
 }
 
 export function usedPercent(quota: UsageQuota | undefined): number | undefined {
   return quota?.usedPercent ?? undefined;
 }
 
-export function availablePercent(quota: UsageQuota | undefined): number | undefined {
+export function remainingPercent(quota: UsageQuota | undefined): number | undefined {
   const used = usedPercent(quota);
   if (used == null) return undefined;
-  return Math.min(100, Math.max(0, 100 - used));
+  return summaryPercents(used).remaining;
 }
 
-/** Single source of truth for "which number goes in the UI": used or
- * available, per iaUsage.percentageMode. Never duplicate this arithmetic in
- * status-bar/tooltip/quick-menu. */
-export function formatPercentage(quota: UsageQuota | undefined, mode: Settings["percentageMode"]): string {
-  const value = mode === "available" ? availablePercent(quota) : usedPercent(quota);
-  return value == null ? "—" : `${Math.round(value)}%`;
+/** @deprecated Use remainingPercent. Kept so older tests keep compiling. */
+export const availablePercent = remainingPercent;
+
+/** Single source of truth for "which number goes in the UI": used or remaining. */
+export function formatPercentage(quota: UsageQuota | undefined, mode: Settings["percentageMode"] | "available"): string {
+  const exact = usedPercent(quota);
+  if (exact == null) return "—";
+  const summary = summaryPercents(exact);
+  const value = mode === "remaining" || mode === "available" ? summary.remaining : summary.used;
+  return `${value}%`;
 }
 
 export function providerLabel(provider: Provider): string {
   return provider.name;
+}
+
+export interface RecommendationCopy {
+  title: string;
+  meta: string;
+  detail: string[];
+}
+
+export function recommendationCopy(snapshot: DashboardSnapshot): RecommendationCopy | undefined {
+  const recommendation = snapshot.recommendation;
+  if (!recommendation || recommendation.action === "insufficient_data") return undefined;
+  const provider = snapshot.providers.find((item) => item.id === recommendation.fromId);
+  const name = (provider?.name ?? recommendation.fromId).replace(/\s+Code$/i, "");
+  const quota = recommendation.limitingQuota;
+  const titleKey = recommendation.reason === "quota_exhausted"
+    ? "recommendation.exhausted"
+    : recommendation.severity === "critical"
+      ? "recommendation.critical"
+      : recommendation.reason === "projected_exhaustion"
+        ? "recommendation.warning"
+        : "recommendation.healthy";
+  const title = t(titleKey, { name });
+  let meta = t("recommendation.reachesReset");
+  if (quota && recommendation.severity === "critical") {
+    meta = quota.resetInSeconds == null
+      ? t("recommendation.quotaNoReset", { quota: quota.label, used: Math.round(quota.usedPercent) })
+      : t("recommendation.quota", {
+          quota: quota.label,
+          used: Math.round(quota.usedPercent),
+          reset: formatResetLong(quota.resetInSeconds),
+        });
+  } else if (quota?.exhaustsBeforeResetSeconds != null) {
+    meta = t("recommendation.projected", { time: formatResetLong(quota.exhaustsBeforeResetSeconds) });
+  }
+  const detail: string[] = [];
+  if (quota?.expectedUsedPercent != null) detail.push(t("recommendation.expected", { value: Math.round(quota.expectedUsedPercent) }));
+  if (quota) detail.push(t("recommendation.actual", { value: Math.round(quota.usedPercent) }));
+  if (quota?.deltaPercent != null && quota.deltaPercent > 0) detail.push(t("recommendation.delta", { value: Math.round(quota.deltaPercent) }));
+  if (recommendation.action === "switch" && recommendation.toName) {
+    detail.push(t("recommendation.alternative", { name: recommendation.toName }));
+  }
+  return { title, meta, detail };
+}
+
+export function recommendationBackground(recommendation: Recommendation | null | undefined): "error" | "warning" | undefined {
+  if (recommendation?.severity === "critical") return "error";
+  if (recommendation?.severity === "warning") return "warning";
+  return undefined;
 }
 
 /** Enabled providers configured to appear in the status bar, in the order
@@ -100,7 +210,8 @@ export function buildStatusBarLabel(provider: Provider, config: Settings): strin
   const visual = providerVisual(provider.id, provider.name);
   const quota = getPrimaryQuota(provider, config.primaryMetric);
   const value = formatPercentage(quota, config.percentageMode);
-  const freeSuffix = config.percentageMode === "available" && value !== "—" ? ` ${t("statusbar.free")}` : "";
+  const remainingMode = config.percentageMode === "remaining";
+  const freeSuffix = remainingMode && value !== "—" ? ` ${t("statusbar.free")}` : "";
   const resetSuffix = config.showResetInStatusBar && quota?.resetInSeconds ? ` (${formatResetCompact(quota.resetInSeconds)})` : "";
   const staleMark = config.showStaleIndicator && provider.stale ? "*" : "";
   const iconPart = config.showProviderIcons ? `$(${visual.icon}) ` : "";

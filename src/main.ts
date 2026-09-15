@@ -436,7 +436,7 @@ async function main() {
 
   document.addEventListener("click", async (e) => {
     const target = e.target as HTMLElement;
-    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-toggle-key],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-open-url],[data-install-update],[data-redeem-reset],[data-startpairing],[data-revokedevice],[data-syncexport],[data-repair-cli],[data-copy-cli-path],[data-test-cli]");
+    const btn = target.closest<HTMLElement>("[data-act],[data-select],[data-savekey],[data-delkey],[data-toggle-key],[data-expand],[data-detect],[data-refresh-provider],[data-copy-cli],[data-setcat],[data-theme],[data-percentage-mode],[data-open-url],[data-install-update],[data-redeem-reset],[data-startpairing],[data-revokedevice],[data-syncexport],[data-repair-cli],[data-copy-cli-path],[data-test-cli]");
     if (!btn) {
       if (!target.closest("#head-menu, #btn-menu")) closeHeadMenu();
       return;
@@ -591,6 +591,12 @@ async function main() {
     if (btn !== document.documentElement && btn.dataset.theme) {
       applyTheme(btn.dataset.theme as AppTheme);
       renderSettings(dash, settingsCategory);
+    }
+    if (btn.dataset.percentageMode && dash) {
+      dash.percentageMode = btn.dataset.percentageMode === "remaining" ? "remaining" : "used";
+      await persistConfig(dash);
+      renderSettings(dash, settingsCategory);
+      renderDash(dash, selectedId);
     }
     if (btn.dataset.openUrl) await openExternal(btn.dataset.openUrl);
     if (btn.hasAttribute("data-install-update")) {

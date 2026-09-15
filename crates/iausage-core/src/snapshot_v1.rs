@@ -13,7 +13,7 @@ use crate::descriptor::FetchStrategyKind;
 use crate::health;
 use crate::model::{
     CreditsSummary, ProviderSnapshot, ProviderStatus, ProviderStatusReason, ServiceHealth,
-    UsageCost, UsageQuota, UsageSource, VendorId, VendorInfo,
+    UsageCost, UsageQuota, UsageSource, VendorId, VendorInfo, WindowType,
 };
 use crate::SNAPSHOT_SCHEMA_VERSION;
 
@@ -63,10 +63,52 @@ pub struct DashboardSnapshotV1 {
     pub generated_at: String,
     pub app_version: Option<String>,
     pub providers: Vec<ProviderV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recommendation: Option<crate::recommend::Recommendation>,
 }
 
 pub fn parse_id(s: &str) -> Option<VendorId> {
     VendorId::all().iter().copied().find(|id| id.slug() == s)
+}
+
+fn window_type_key(window_type: WindowType) -> &'static str {
+    match window_type {
+        WindowType::Session => "session",
+        WindowType::FiveHour => "5h",
+        WindowType::Daily => "daily",
+        WindowType::Weekly => "weekly",
+        WindowType::Monthly => "monthly",
+        WindowType::Credits | WindowType::Custom => "custom",
+    }
+}
+
+fn quota_with_pace(mut quota: UsageQuota, now_unix: Option<i64>) -> UsageQuota {
+    // Never carry an old derived value through a cache read. A public snapshot
+    // is the sole place where pace is recomputed against its generatedAt.
+    quota.pace = None;
+    let Some(now_unix) = now_unix else {
+        return quota;
+    };
+    if quota.stale {
+        return quota;
+    }
+    let Some(used_percent) = quota.used_percent else {
+        return quota;
+    };
+    let Some(reset_unix) = quota
+        .reset_at
+        .as_deref()
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.timestamp())
+        .filter(|reset| *reset > now_unix)
+    else {
+        return quota;
+    };
+    let Some(window_secs) = crate::pace::window_secs_for(window_type_key(quota.window_type)) else {
+        return quota;
+    };
+    quota.pace = crate::pace::compute_pace(used_percent, window_secs, reset_unix, now_unix);
+    quota
 }
 
 pub fn build(
@@ -75,6 +117,29 @@ pub fn build(
     generated_at: String,
     app_version: Option<String>,
 ) -> DashboardSnapshotV1 {
+    build_for_primary(snapshots, catalog, generated_at, app_version, None)
+}
+
+pub fn build_for_primary(
+    snapshots: &HashMap<String, ProviderSnapshot>,
+    catalog: &[VendorInfo],
+    generated_at: String,
+    app_version: Option<String>,
+    primary: Option<&str>,
+) -> DashboardSnapshotV1 {
+    let generated_at_unix = chrono::DateTime::parse_from_rfc3339(&generated_at)
+        .ok()
+        .map(|value| value.timestamp());
+    let recommendation = primary.and_then(|primary_id| {
+        generated_at_unix.map(|now| {
+            let enabled: Vec<ProviderSnapshot> = catalog
+                .iter()
+                .filter(|vendor| vendor.enabled)
+                .filter_map(|vendor| snapshots.get(&vendor.id).cloned())
+                .collect();
+            crate::recommend::recommend(&enabled, primary_id, now)
+        })
+    });
     let providers = catalog
         .iter()
         .map(|vendor| {
@@ -98,7 +163,15 @@ pub fn build(
                     url: vid.and_then(health::status_url),
                 },
                 stale: snap.map(|s| s.stale).unwrap_or(false),
-                quotas: snap.map(|s| s.quotas.clone()).unwrap_or_default(),
+                quotas: snap
+                    .map(|s| {
+                        s.quotas
+                            .iter()
+                            .cloned()
+                            .map(|quota| quota_with_pace(quota, generated_at_unix))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 credits: snap.and_then(|s| s.credits.clone()),
                 cost: snap.and_then(|s| s.cost.clone()),
                 accounts: snap
@@ -117,6 +190,7 @@ pub fn build(
         generated_at,
         app_version,
         providers,
+        recommendation,
     }
 }
 
@@ -174,5 +248,84 @@ mod tests {
         assert!(p.connection.is_none());
         assert!(p.quotas.is_empty());
         assert!(p.accounts.is_empty());
+    }
+
+    #[test]
+    fn v1_adds_pace_only_when_the_window_is_fresh_and_projectable() {
+        let reset = "2026-09-14T15:00:00Z".to_string();
+        let snap = snapshot_ok(
+            VendorId::Anthropic,
+            "Max",
+            vec![progress_pct(
+                "session",
+                "Sesión",
+                88.0,
+                Some(reset),
+                18_000,
+                "always",
+            )],
+        );
+        let snaps = HashMap::from([(snap.id.clone(), snap)]);
+        // 72% de la ventana transcurrida: 88% no alcanzará el reset.
+        let v1 = build(&snaps, &catalog(), "2026-09-14T13:36:00Z".into(), None);
+        let quota = &v1.providers[0].quotas[0];
+        let pace = quota.pace.as_ref().expect("pace should be present");
+        assert_eq!(pace.will_last_to_reset, Some(false));
+        assert!(pace.estimated_exhausted_at.is_some());
+
+        let json = serde_json::to_value(&v1).unwrap();
+        assert_eq!(json["schemaVersion"], 1);
+        assert!(json["providers"][0]["quotas"][0]["pace"].is_object());
+        assert_eq!(json["providers"][0]["quotas"][0]["windowType"], "session");
+    }
+
+    #[test]
+    fn v1_omits_pace_for_stale_or_unusable_windows() {
+        let mut snap = snapshot_ok(
+            VendorId::Anthropic,
+            "Max",
+            vec![progress_pct(
+                "session",
+                "Sesión",
+                88.0,
+                Some("2026-09-14T15:00:00Z".into()),
+                18_000,
+                "always",
+            )],
+        );
+        snap.mark_stale();
+        let snaps = HashMap::from([(snap.id.clone(), snap)]);
+        let v1 = build(&snaps, &catalog(), "2026-09-14T13:36:00Z".into(), None);
+        assert!(v1.providers[0].quotas[0].pace.is_none());
+        let json = serde_json::to_value(&v1).unwrap();
+        assert!(json["providers"][0]["quotas"][0].get("pace").is_none());
+    }
+
+    #[test]
+    fn v1_exposes_the_primary_providers_limiting_quota() {
+        let snap = snapshot_ok(
+            VendorId::Anthropic,
+            "Max",
+            vec![progress_pct(
+                "weekly",
+                "Semanal",
+                99.0,
+                Some("2026-09-16T00:00:00Z".into()),
+                604_800,
+                "always",
+            )],
+        );
+        let snaps = HashMap::from([(snap.id.clone(), snap)]);
+        let v1 = build_for_primary(
+            &snaps,
+            &catalog(),
+            "2026-09-14T13:00:00Z".into(),
+            None,
+            Some("anthropic"),
+        );
+        let recommendation = v1.recommendation.expect("recommendation");
+        assert_eq!(recommendation.severity, "critical");
+        assert_eq!(recommendation.reason, "quota_near_exhaustion");
+        assert_eq!(recommendation.limiting_quota.expect("quota").id, "weekly");
     }
 }

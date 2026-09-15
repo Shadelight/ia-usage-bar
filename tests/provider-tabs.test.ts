@@ -66,6 +66,18 @@ test("active tab carries real tab semantics plus inline plan badge", () => {
   assert.match(html, /status-connected/);
 });
 
+test("tab with partial_limited availability exposes status-partial_limited", () => {
+  const html = tabHtml({
+    vendor: vendor({ id: "cursor", name: "Cursor", short: "CUR" }),
+    snapshot: snapshot({ id: "cursor", plan: "Pro", status: "connected", availability: "partial_limited" }),
+    active: true,
+    loading: false,
+    visual,
+    logoHtml: logo,
+  });
+  assert.match(html, /status-partial_limited/);
+});
+
 test("inactive tabs expose no badge and stay out of tab order", () => {
   const html = tabHtml({
     vendor: vendor({ id: "openai", name: "Codex / ChatGPT", short: "CDX" }),
@@ -80,6 +92,20 @@ test("inactive tabs expose no badge and stay out of tab order", () => {
   assert.match(html, /aria-label="Codex \/ ChatGPT, plan Plus"/);
   assert.doesNotMatch(html, /tab-plan/);
   assert.doesNotMatch(html, / active"/);
+});
+
+test("refreshing a connected tab keeps the previous health dot", () => {
+  const html = tabHtml({
+    vendor: vendor({ id: "antigravity", name: "Antigravity", short: "AGY" }),
+    snapshot: snapshot({ id: "antigravity", plan: "Google AI Pro", status: "connected", activeSource: "oauth" }),
+    active: true,
+    loading: true,
+    visual,
+    logoHtml: logo,
+  });
+  assert.match(html, /status-connected/);
+  assert.doesNotMatch(html, /status-loading/);
+  assert.match(html, /Google AI Pro · API/);
 });
 
 test("loading tabs never invent a plan badge", () => {

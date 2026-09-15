@@ -538,6 +538,7 @@ mod tests {
             generated_at: "2026-09-12T00:00:00Z".into(),
             app_version: Some("vector".into()),
             providers: vec![],
+            recommendation: None,
         };
         let payload = build_payload(
             "vector-device".into(),

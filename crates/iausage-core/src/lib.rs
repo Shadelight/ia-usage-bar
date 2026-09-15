@@ -19,6 +19,7 @@ pub mod model;
 pub mod pace;
 pub mod pairing;
 pub mod paths;
+pub mod percent;
 pub mod pricing;
 pub mod providers;
 pub mod recommend;

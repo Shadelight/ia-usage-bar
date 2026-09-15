@@ -8,7 +8,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{DataConfidence, ProviderSnapshot, ProviderStatusReason, WindowType};
+use crate::model::{
+    Availability, DataConfidence, ProviderSnapshot, ProviderStatus, ProviderStatusReason,
+    ServiceHealth, UsageQuota, WindowType,
+};
 use crate::pace::{compute_pace, window_secs_for};
 
 /// Margen mínimo (puntos) para recomendar un cambio. Evita el flapping
@@ -18,6 +21,49 @@ pub const SWITCH_MARGIN: f64 = 15.0;
 pub const AT_RISK_SHORT_HEADROOM: f64 = 25.0;
 /// Ventana para considerar un agotamiento como crítico (1h).
 pub const CRITICAL_EXHAUST_SECS: i64 = 3_600;
+pub const CRITICAL_USED_PERCENT: f64 = 95.0;
+pub const PROJECTED_MIN_USED_PERCENT: f64 = 40.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecSeverity {
+    Healthy,
+    Warning,
+    Critical,
+}
+
+impl RecSeverity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Healthy => "healthy",
+            Self::Warning => "warning",
+            Self::Critical => "critical",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitingQuota {
+    pub id: String,
+    pub label: String,
+    pub window_type: WindowType,
+    pub used_percent: f64,
+    pub available_percent: f64,
+    pub reset_at: Option<String>,
+    pub reset_in_seconds: Option<i64>,
+    pub expected_used_percent: Option<f64>,
+    pub delta_percent: Option<f64>,
+    pub estimated_exhausted_at: Option<String>,
+    pub exhausts_before_reset_seconds: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+struct ProviderSignal {
+    severity: RecSeverity,
+    reason: &'static str,
+    quota: Option<LimitingQuota>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -56,6 +102,10 @@ pub struct CandidateScore {
     pub is_reserve: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub excluded: Option<String>,
+    pub severity: String,
+    pub signal_reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limiting_quota: Option<LimitingQuota>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +120,9 @@ pub struct Recommendation {
     pub confidence: f64,
     /// Código de motivo para i18n, nunca texto libre.
     pub reason: String,
+    pub severity: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limiting_quota: Option<LimitingQuota>,
     pub candidates: Vec<CandidateScore>,
 }
 
@@ -161,13 +214,8 @@ fn sustainability_of(
     snap: &ProviderSnapshot,
     now_unix: i64,
 ) -> (Option<bool>, Option<i64>, Option<i64>) {
-    // Las ventanas cortas mandan: una semanal al 15% recién abierta no puede
-    // declarar "insostenible" a un proveedor con la sesión sana. Solo se mira
-    // la larga cuando la corta no proyecta.
-    let short = verdict_for(snap, now_unix, true);
-    if short.3 {
-        return (short.0, short.1, short.2);
-    }
+    // Every canonical window participates. Presentation chooses the limiting
+    // quota by severity, so long windows can no longer be hidden by sessions.
     let all = verdict_for(snap, now_unix, false);
     (all.0, all.1, all.2)
 }
@@ -257,6 +305,9 @@ fn reset_fallback(snap: &ProviderSnapshot, now_unix: i64) -> Option<i64> {
 fn headroom_for(snap: &ProviderSnapshot, short: bool) -> Option<f64> {
     let mut best: Option<f64> = None;
     for q in &snap.quotas {
+        if q.id == "total" {
+            continue;
+        }
         let matches = if short {
             is_short_window(q.window_type)
         } else {
@@ -269,6 +320,9 @@ fn headroom_for(snap: &ProviderSnapshot, short: bool) -> Option<f64> {
             continue;
         }
         if let Some(r) = quota_remaining(q) {
+            if snap.availability == Availability::PartialLimited && r <= 0.0 {
+                continue;
+            }
             best = Some(match best {
                 Some(prev) => prev.min(r),
                 None => r,
@@ -324,8 +378,166 @@ fn exclusion_reason(snap: &ProviderSnapshot, now_unix: i64) -> Option<String> {
     None
 }
 
+fn limiting_quota(quota: &crate::model::UsageQuota, used: f64, now_unix: i64) -> LimitingQuota {
+    let reset_unix = parse_unix(&quota.reset_at);
+    let reset_in_seconds = reset_unix
+        .map(|reset| (reset - now_unix).max(0))
+        .or(quota.reset_in_seconds);
+    let pace = if quota.stale {
+        None
+    } else {
+        reset_unix
+            .zip(window_secs_for(window_type_str(quota.window_type)))
+            .and_then(|(reset, window)| compute_pace(used, window, reset, now_unix))
+    };
+    let exhausted_unix = pace
+        .as_ref()
+        .and_then(|value| value.estimated_exhausted_at.as_ref())
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.timestamp());
+    let exhausts_before_reset_seconds = reset_unix
+        .zip(exhausted_unix)
+        .map(|(reset, exhausted)| (reset - exhausted).max(0));
+
+    LimitingQuota {
+        id: quota.id.clone(),
+        label: quota.label.clone(),
+        window_type: quota.window_type,
+        used_percent: used,
+        available_percent: (100.0 - used).clamp(0.0, 100.0),
+        reset_at: quota.reset_at.clone(),
+        reset_in_seconds,
+        expected_used_percent: pace.as_ref().map(|value| value.expected_used_percent),
+        delta_percent: pace.as_ref().map(|value| value.delta_percent),
+        estimated_exhausted_at: pace
+            .as_ref()
+            .and_then(|value| value.estimated_exhausted_at.clone()),
+        exhausts_before_reset_seconds,
+    }
+}
+
+/// Chooses the provider's most restrictive signal. Severity always wins over
+/// window length: a weekly quota at 99% outranks a merely fast session.
+fn provider_signal(snap: &ProviderSnapshot, now_unix: i64) -> ProviderSignal {
+    if snap.availability == Availability::PartialLimited {
+        let limiting = snap
+            .quotas
+            .iter()
+            .filter(|q| q.id != "total")
+            .filter_map(|q| quota_used_percent(q).map(|u| (q, u)))
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(q, u)| limiting_quota(q, u, now_unix));
+
+        return ProviderSignal {
+            severity: RecSeverity::Warning,
+            reason: "partial_limited",
+            quota: limiting,
+        };
+    }
+
+    let mut critical: Option<LimitingQuota> = None;
+    for quota in &snap.quotas {
+        if quota.id == "total" {
+            continue;
+        }
+        let Some(used) = quota_used_percent(quota) else {
+            continue;
+        };
+        if used < CRITICAL_USED_PERCENT {
+            continue;
+        }
+        let candidate = limiting_quota(quota, used, now_unix);
+        let replace = critical
+            .as_ref()
+            .map(|current| candidate.used_percent > current.used_percent)
+            .unwrap_or(true);
+        if replace {
+            critical = Some(candidate);
+        }
+    }
+    if let Some(quota) = critical {
+        let reason = if quota.used_percent >= 100.0 {
+            "quota_exhausted"
+        } else {
+            "quota_near_exhaustion"
+        };
+        return ProviderSignal {
+            severity: RecSeverity::Critical,
+            reason,
+            quota: Some(quota),
+        };
+    }
+
+    if !snap.stale {
+        let mut projected: Option<LimitingQuota> = None;
+        for quota in &snap.quotas {
+            if quota.id == "total" || quota.stale {
+                continue;
+            }
+            let Some(used) = quota_used_percent(quota) else {
+                continue;
+            };
+            if used < PROJECTED_MIN_USED_PERCENT {
+                continue;
+            }
+            let candidate = limiting_quota(quota, used, now_unix);
+            if candidate.delta_percent.unwrap_or(0.0) < 5.0
+                || candidate.exhausts_before_reset_seconds.unwrap_or(0) <= 0
+            {
+                continue;
+            }
+            let replace = projected
+                .as_ref()
+                .map(|current| {
+                    candidate.exhausts_before_reset_seconds.unwrap_or(0)
+                        > current.exhausts_before_reset_seconds.unwrap_or(0)
+                        || (candidate.exhausts_before_reset_seconds
+                            == current.exhausts_before_reset_seconds
+                            && candidate.used_percent > current.used_percent)
+                })
+                .unwrap_or(true);
+            if replace {
+                projected = Some(candidate);
+            }
+        }
+        if let Some(quota) = projected {
+            return ProviderSignal {
+                severity: RecSeverity::Warning,
+                reason: "projected_exhaustion",
+                quota: Some(quota),
+            };
+        }
+    }
+
+    match (snap.status, snap.service) {
+        (_, ServiceHealth::Outage) | (ProviderStatus::Unavailable | ProviderStatus::Error, _) => {
+            ProviderSignal {
+                severity: RecSeverity::Critical,
+                reason: "service_outage",
+                quota: None,
+            }
+        }
+        (_, ServiceHealth::Degraded) => ProviderSignal {
+            severity: RecSeverity::Warning,
+            reason: "service_degraded",
+            quota: None,
+        },
+        (ProviderStatus::NeedsAuth | ProviderStatus::NeedsPermission, _) => ProviderSignal {
+            severity: RecSeverity::Warning,
+            reason: "auth_problem",
+            quota: None,
+        },
+        _ => ProviderSignal {
+            severity: RecSeverity::Healthy,
+            reason: "sustainable",
+            quota: None,
+        },
+    }
+}
+
 fn score_candidate(snap: &ProviderSnapshot, current_id: &str, now_unix: i64) -> CandidateScore {
     let excluded = exclusion_reason(snap, now_unix);
+    let signal = provider_signal(snap, now_unix);
 
     let mut short_headroom = headroom_for(snap, true);
     let mut long_headroom = headroom_for(snap, false);
@@ -353,7 +565,11 @@ fn score_candidate(snap: &ProviderSnapshot, current_id: &str, now_unix: i64) -> 
     };
     let is_reserve = !has_data && snap.is_connected();
 
-    let (sustainable, exhaust_in_secs, reset_in_secs) = sustainability_of(snap, now_unix);
+    let (sustainable, exhaust_in_secs, reset_in_secs) = if snap.stale {
+        (None, None, reset_fallback(snap, now_unix))
+    } else {
+        sustainability_of(snap, now_unix)
+    };
 
     let short = short_headroom.unwrap_or(50.0);
     let long = long_headroom.unwrap_or(50.0);
@@ -384,6 +600,9 @@ fn score_candidate(snap: &ProviderSnapshot, current_id: &str, now_unix: i64) -> 
     if sustainable == Some(false) {
         score -= 10.0;
     }
+    if snap.availability == Availability::PartialLimited {
+        score -= 20.0;
+    }
     if !has_data {
         score -= 20.0;
         score = score.min(50.0);
@@ -406,6 +625,9 @@ fn score_candidate(snap: &ProviderSnapshot, current_id: &str, now_unix: i64) -> 
         has_data,
         is_reserve,
         excluded,
+        severity: signal.severity.as_str().to_string(),
+        signal_reason: signal.reason.to_string(),
+        limiting_quota: signal.quota,
     }
 }
 
@@ -456,6 +678,9 @@ pub fn recommend(
 
     let valid: Vec<&CandidateScore> = candidates.iter().filter(|c| c.excluded.is_none()).collect();
     let with_data: Vec<&CandidateScore> = valid.iter().filter(|c| c.has_data).copied().collect();
+    let current_any = candidates
+        .iter()
+        .find(|candidate| candidate.id == current_id);
     let any_stale = providers.iter().any(|p| p.stale);
 
     if with_data.is_empty() {
@@ -467,22 +692,40 @@ pub fn recommend(
             left: None,
             confidence: confidence_for(&RecAction::InsufficientData, None, None, any_stale),
             reason: "insufficient_data".to_string(),
+            severity: RecSeverity::Healthy.as_str().to_string(),
+            limiting_quota: None,
             candidates: top_candidates(candidates),
         };
     }
     // Un solo candidato con datos: quedarse (o señalar la reserva).
     if with_data.len() == 1 {
         let only = with_data[0];
+        if only.id != current_id {
+            return Recommendation {
+                action: RecAction::Switch.as_str().to_string(),
+                from_id: current_id.to_string(),
+                to_id: Some(only.id.clone()),
+                to_name: Some(only.name.clone()),
+                left: only.display_left,
+                confidence: confidence_for(&RecAction::Switch, current_any, Some(only), any_stale),
+                reason: current_any
+                    .map(|candidate| candidate.signal_reason.clone())
+                    .unwrap_or_else(|| "current_unavailable".to_string()),
+                severity: current_any
+                    .map(|candidate| candidate.severity.clone())
+                    .unwrap_or_else(|| RecSeverity::Warning.as_str().to_string()),
+                limiting_quota: current_any.and_then(|candidate| candidate.limiting_quota.clone()),
+                candidates: top_candidates(candidates),
+            };
+        }
         let has_reserve = valid.iter().any(|c| c.is_reserve);
-        let reason = if has_reserve && only.id == current_id {
+        let reason = if only.severity != RecSeverity::Healthy.as_str() {
+            only.signal_reason.as_str()
+        } else if has_reserve && only.id == current_id {
             // Hay un 100% vacío al acecho: el destino sigue siendo el
             // actual (acción Stay); el frontend nombra la reserva desde
             // `candidates` para la copia informativa.
             "reserve_no_history"
-        } else if only.sustainable == Some(false) {
-            reserves_or_critical(only)
-        } else if short_is_low(only) {
-            "at_risk"
         } else {
             "sustainable"
         };
@@ -497,6 +740,8 @@ pub fn recommend(
             left,
             confidence: confidence_for(&RecAction::Stay, Some(only), Some(only), any_stale),
             reason: reason.to_string(),
+            severity: only.severity.clone(),
+            limiting_quota: only.limiting_quota.clone(),
             candidates: top_candidates(candidates),
         };
     }
@@ -521,13 +766,64 @@ pub fn recommend(
                 to_name: Some(best.name.clone()),
                 left: best.display_left,
                 confidence: confidence_for(&RecAction::Switch, None, Some(best), any_stale),
-                reason: "current_unavailable".to_string(),
+                reason: current_any
+                    .map(|candidate| candidate.signal_reason.clone())
+                    .unwrap_or_else(|| "current_unavailable".to_string()),
+                severity: current_any
+                    .map(|candidate| candidate.severity.clone())
+                    .unwrap_or_else(|| RecSeverity::Warning.as_str().to_string()),
+                limiting_quota: current_any.and_then(|candidate| candidate.limiting_quota.clone()),
                 candidates: top_candidates(candidates),
             };
         }
     }
 
     if let (Some(cur), Some(best)) = (current, best) {
+        // The limiting signal drives the diagnosis. Candidate scoring only
+        // chooses an alternative and cannot replace a severe weekly quota
+        // with a less severe short-window prediction.
+        if cur.severity != RecSeverity::Healthy.as_str() {
+            let alt = with_data
+                .iter()
+                .copied()
+                .filter(|candidate| {
+                    candidate.id != cur.id
+                        && candidate.display_left.is_some_and(|left| left > 0.0)
+                        && candidate.severity != RecSeverity::Critical.as_str()
+                        && (cur.severity == RecSeverity::Critical.as_str()
+                            || candidate.severity == RecSeverity::Healthy.as_str()
+                                && (candidate.score >= cur.score + SWITCH_MARGIN
+                                    || cur.sustainable == Some(false)
+                                        && candidate.sustainable != Some(false))
+                            || cur.sustainable == Some(false)
+                                && candidate.exhaust_in_secs.unwrap_or(0)
+                                    >= (2 * cur.exhaust_in_secs.unwrap_or(0))
+                                        .max(cur.exhaust_in_secs.unwrap_or(0) + 3_600))
+                })
+                .max_by(|a, b| {
+                    a.score
+                        .partial_cmp(&b.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            let action = if alt.is_some() {
+                RecAction::Switch
+            } else {
+                RecAction::Stay
+            };
+            let target = alt.unwrap_or(cur);
+            return Recommendation {
+                action: action.as_str().to_string(),
+                from_id: current_id.to_string(),
+                to_id: Some(target.id.clone()),
+                to_name: Some(target.name.clone()),
+                left: target.display_left,
+                confidence: confidence_for(&action, Some(cur), Some(target), any_stale),
+                reason: cur.signal_reason.clone(),
+                severity: cur.severity.clone(),
+                limiting_quota: cur.limiting_quota.clone(),
+                candidates: top_candidates(candidates),
+            };
+        }
         // El actual se agota antes de su reset: SWITCH_MARGIN y el bonus del
         // actual evitan el flapping entre proveedores sanos, pero no pueden
         // retener al usuario en el que se acaba primero (tampoco la
@@ -560,13 +856,18 @@ pub fn recommend(
                     left: alt.display_left,
                     confidence: confidence_for(&RecAction::Switch, Some(cur), Some(alt), any_stale),
                     reason: reserves_or_critical(cur).to_string(),
+                    severity: cur.severity.clone(),
+                    limiting_quota: cur.limiting_quota.clone(),
                     candidates: top_candidates(candidates),
                 };
             }
         }
 
         // El mejor nunca es una reserva: with_data ya las excluye.
-        if best.id != cur.id && best.score >= cur.score + SWITCH_MARGIN {
+        if best.id != cur.id
+            && best.score >= cur.score + SWITCH_MARGIN
+            && cur.severity != RecSeverity::Healthy.as_str()
+        {
             // Solo cambiar a un destino que no se agote (salvo que el
             // actual tampoco llegue y el destino aguante más).
             let dest_ok = best.sustainable != Some(false)
@@ -597,6 +898,8 @@ pub fn recommend(
                         any_stale,
                     ),
                     reason: reason.to_string(),
+                    severity: cur.severity.clone(),
+                    limiting_quota: cur.limiting_quota.clone(),
                     candidates: top_candidates(candidates),
                 };
             }
@@ -613,6 +916,8 @@ pub fn recommend(
                 left: cur.display_left,
                 confidence: confidence_for(&RecAction::Stay, Some(cur), Some(cur), any_stale),
                 reason: reason.to_string(),
+                severity: cur.severity.clone(),
+                limiting_quota: cur.limiting_quota.clone(),
                 candidates: top_candidates(candidates),
             };
         }
@@ -642,11 +947,13 @@ pub fn recommend(
                         any_stale,
                     ),
                     reason: "balanced".to_string(),
+                    severity: RecSeverity::Healthy.as_str().to_string(),
+                    limiting_quota: None,
                     candidates: top_candidates(candidates),
                 };
             }
         }
-        if short_is_low(cur) {
+        if short_is_low(cur) && cur.severity != RecSeverity::Healthy.as_str() {
             // Va justo pero sin alternativa ≥15 pts: avisar sin ordenar cambio.
             let alt = if best.id != cur.id { Some(best) } else { None };
             return Recommendation {
@@ -657,6 +964,8 @@ pub fn recommend(
                 left: alt.map(|b| b.display_left).unwrap_or(cur.display_left),
                 confidence: confidence_for(&RecAction::Stay, Some(cur), Some(cur), any_stale),
                 reason: "at_risk".to_string(),
+                severity: RecSeverity::Warning.as_str().to_string(),
+                limiting_quota: cur.limiting_quota.clone(),
                 candidates: top_candidates(candidates),
             };
         }
@@ -668,6 +977,8 @@ pub fn recommend(
             left: cur.display_left,
             confidence: confidence_for(&RecAction::Stay, Some(cur), Some(cur), any_stale),
             reason: "sustainable".to_string(),
+            severity: RecSeverity::Healthy.as_str().to_string(),
+            limiting_quota: None,
             candidates: top_candidates(candidates),
         };
     }
@@ -680,6 +991,8 @@ pub fn recommend(
         left: None,
         confidence: confidence_for(&RecAction::InsufficientData, None, None, any_stale),
         reason: "insufficient_data".to_string(),
+        severity: RecSeverity::Healthy.as_str().to_string(),
+        limiting_quota: None,
         candidates: top_candidates(candidates),
     }
 }
@@ -789,7 +1102,7 @@ mod tests {
         let rec = recommend(&[claude, codex], "anthropic", n);
         assert_eq!(rec.action, "switch", "candidates: {:?}", rec.candidates);
         assert_eq!(rec.to_id.as_deref(), Some("openai"));
-        assert!(rec.reason == "exhausts_before_reset" || rec.reason == "critical_short");
+        assert_eq!(rec.reason, "projected_exhaustion");
     }
 
     #[test]
@@ -810,6 +1123,30 @@ mod tests {
         let rec = recommend(&[claude, codex], "anthropic", now());
         assert_eq!(rec.action, "switch", "candidates: {:?}", rec.candidates);
         assert_eq!(rec.to_id.as_deref(), Some("openai"));
+    }
+
+    #[test]
+    fn critical_weekly_quota_outranks_session_projection() {
+        let mut claude = snap_window(VendorId::Anthropic, 44.0, 99.0, 3_180);
+        claude.id = "anthropic".into();
+        claude.name = "Claude Code".into();
+        // Match the reported case: weekly reset is still more than a day away.
+        claude.quotas[1].reset_at = Some(rfc(now() + 35 * 3_600));
+        claude.quotas[1].reset_in_seconds = Some(35 * 3_600);
+
+        let mut codex = snap_window(VendorId::Openai, 20.0, 40.0, 4 * 3_600);
+        codex.id = "openai".into();
+        codex.name = "Codex".into();
+
+        let rec = recommend(&[claude, codex], "anthropic", now());
+        assert_eq!(rec.severity, "critical");
+        assert_eq!(rec.reason, "quota_near_exhaustion");
+        assert_eq!(rec.action, "switch");
+        assert_eq!(rec.to_id.as_deref(), Some("openai"));
+        let limiting = rec.limiting_quota.expect("limiting quota");
+        assert_eq!(limiting.id, "weekly");
+        assert_eq!(limiting.used_percent, 99.0);
+        assert_eq!(limiting.available_percent, 1.0);
     }
 
     #[test]
@@ -859,6 +1196,54 @@ mod tests {
     }
 
     #[test]
+    fn current_auth_problem_recommends_a_usable_alternative() {
+        let mut claude = snapshot_with_status(
+            VendorId::Anthropic,
+            ProviderStatus::NeedsAuth,
+            ProviderStatusReason::OAuthExpired,
+            "expired",
+        );
+        claude.id = "anthropic".into();
+        claude.name = "Claude Code".into();
+        let mut codex = snap_window(VendorId::Openai, 20.0, 20.0, 4 * 3_600);
+        codex.id = "openai".into();
+        codex.name = "Codex".into();
+
+        let rec = recommend(&[claude, codex], "anthropic", now());
+        assert_eq!(rec.action, "switch");
+        assert_eq!(rec.reason, "auth_problem");
+        assert_eq!(rec.severity, "warning");
+        assert_eq!(rec.to_id.as_deref(), Some("openai"));
+    }
+
+    #[test]
+    fn service_outage_is_critical_when_no_quota_signal_is_worse() {
+        let mut claude = snap_window(VendorId::Anthropic, 20.0, 20.0, 4 * 3_600);
+        claude.id = "anthropic".into();
+        claude.name = "Claude Code".into();
+        claude.service = ServiceHealth::Outage;
+        let mut codex = snap_window(VendorId::Openai, 20.0, 20.0, 4 * 3_600);
+        codex.id = "openai".into();
+        codex.name = "Codex".into();
+
+        let rec = recommend(&[claude, codex], "anthropic", now());
+        assert_eq!(rec.reason, "service_outage");
+        assert_eq!(rec.severity, "critical");
+        assert_eq!(rec.action, "switch");
+    }
+
+    #[test]
+    fn stale_quota_keeps_absolute_critical_but_not_a_new_projection() {
+        let mut claude = snap_window(VendorId::Anthropic, 88.0, 20.0, 3_600);
+        claude.id = "anthropic".into();
+        claude.mark_stale();
+        let rec = recommend(&[claude], "anthropic", now());
+        assert_eq!(rec.severity, "healthy");
+        assert_eq!(rec.reason, "sustainable");
+        assert!(rec.limiting_quota.is_none());
+    }
+
+    #[test]
     fn no_valid_data_reports_insufficient() {
         let a = snapshot_with_status(
             VendorId::Anthropic,
@@ -874,5 +1259,48 @@ mod tests {
         );
         let rec = recommend(&[a, b], "anthropic", now());
         assert_eq!(rec.action, "insufficient_data");
+    }
+
+    #[test]
+    fn partial_limited_provider_yields_warning_with_penalty_and_does_not_exclude() {
+        let mut cursor = snap_window(VendorId::Cursor, 38.0, 38.0, 2_592_000);
+        cursor.id = "cursor".into();
+        cursor.name = "Cursor".into();
+        cursor.availability = Availability::PartialLimited;
+        cursor.quotas[0].id = "cursor_models".into();
+        cursor.quotas[0].label = "Cursor Models".into();
+        cursor.quotas.push(UsageQuota {
+            id: "other_models".into(),
+            label: "Other Models".into(),
+            window_type: WindowType::Monthly,
+            used_percent: Some(100.0),
+            remaining_percent: Some(0.0),
+            used_amount: None,
+            limit_amount: None,
+            unit: Some(crate::model::UsageUnit::Percent),
+            reset_at: None,
+            reset_in_seconds: None,
+            reset_status: crate::model::ResetStatus::NotProvided,
+            temporary_multiplier: None,
+            temporary_expires_at: None,
+            source: crate::model::UsageSource::LocalSession,
+            fetched_at: String::new(),
+            stale: false,
+            confidence: DataConfidence::Exact,
+            pace: None,
+            group_id: Some("other_models".into()),
+            group_label: Some("Other Models".into()),
+            models: Vec::new(),
+            visible: "always".into(),
+        });
+
+        let rec = recommend(&[cursor], "cursor", now());
+        assert_eq!(rec.severity, "warning");
+        assert_eq!(rec.reason, "partial_limited");
+        let candidate = rec.candidates.iter().find(|c| c.id == "cursor").unwrap();
+        assert!(candidate.excluded.is_none());
+        assert_eq!(candidate.severity, "warning");
+        assert_eq!(candidate.signal_reason, "partial_limited");
+        assert!(candidate.score > 0.0);
     }
 }

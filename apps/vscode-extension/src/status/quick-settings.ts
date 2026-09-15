@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { t } from "../i18n";
-import { PercentageMode, settings } from "../settings";
+import { settings } from "../settings";
 import { DashboardSnapshot, Provider } from "../types";
 import { formatResetLong } from "./format";
 import { pickProviders } from "./quick-menu";
@@ -73,9 +73,9 @@ async function showPercentageSettings(): Promise<void> {
   const current = settings().percentageMode;
   const mode = await pickRadio(t("percentage.title"), [
     { label: `${current === "used" ? "● " : "○ "}${t("percentage.used")}`, description: t("percentage.usedExample"), value: "used" },
-    { label: `${current === "available" ? "● " : "○ "}${t("percentage.available")}`, description: t("percentage.availableExample"), value: "available" },
+    { label: `${current === "remaining" ? "● " : "○ "}${t("percentage.remaining")}`, description: t("percentage.remainingExample"), value: "remaining" },
   ]);
-  if (mode) await setGlobal("percentageMode", mode as PercentageMode);
+  if (mode) await setGlobal("percentageMode", mode === "remaining" ? "remaining" : "used");
 }
 
 async function showResetSettings(): Promise<void> {

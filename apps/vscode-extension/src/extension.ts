@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { CliClient } from "./cli-client";
 import { setLang, t } from "./i18n";
-import { isRenderOnlyChange } from "./settings";
+import { isRenderOnlyChange, migrateLegacyPercentageMode } from "./settings";
 import { reorderProviders } from "./status/quick-menu";
 import { showQuickSettings } from "./status/quick-settings";
 import { StatusBar } from "./status/status-bar";
@@ -53,6 +53,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
   );
+  void migrateLegacyPercentageMode();
   client.start();
 }
 

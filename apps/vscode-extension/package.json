@@ -231,13 +231,14 @@
         },
         "iaUsage.percentageMode": {
           "type": "string",
-          "enum": ["used", "available"],
+          "enum": ["used", "remaining", "available"],
           "enumDescriptions": [
             "Show the percentage already used, e.g. \"21%\"",
-            "Show the percentage still available, e.g. \"79% libre\""
+            "Show the percentage still remaining, e.g. \"79%\"",
+            "Deprecated alias of remaining."
           ],
           "default": "used",
-          "description": "Whether the status bar and tooltip show used or available percentage."
+          "description": "Whether the status bar shows used or remaining percentage. \"available\" is kept as a legacy alias of remaining."
         },
         "iaUsage.primaryMetric": {
           "type": "object",

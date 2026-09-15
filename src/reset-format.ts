@@ -16,6 +16,7 @@ export function formatResetRelative(
   resetAt: string | null | undefined,
   nowMs = Date.now(),
   language: UiLanguage = "es",
+  compact = false,
 ): string {
   if (!resetAt) return "";
   const end = new Date(resetAt).getTime();
@@ -25,7 +26,10 @@ export function formatResetRelative(
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3_600);
   const minutes = Math.floor((seconds % 3_600) / 60);
-  if (days > 0) return `${days} d ${hours} h`;
+  if (days > 0) {
+    if (compact || minutes === 0) return `${days} d ${hours} h`;
+    return `${days} d ${hours} h ${minutes} min`;
+  }
   if (hours > 0) return `${hours} h ${minutes} min`;
   return `${minutes} min`;
 }
