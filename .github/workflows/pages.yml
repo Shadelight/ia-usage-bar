@@ -6,7 +6,11 @@ on:
       - main
     paths:
       - "website/**"
+      - "scripts/snapshot-latest-release.mjs"
       - ".github/workflows/pages.yml"
+  release:
+    types:
+      - published
   workflow_dispatch:
 
 permissions:
@@ -27,6 +31,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Snapshot latest GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/snapshot-latest-release.mjs
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

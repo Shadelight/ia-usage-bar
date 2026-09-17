@@ -39,6 +39,9 @@ jobs:
       - name: Test frontend
         run: npm run test:frontend
 
+      - name: Test website
+        run: npm run test:website
+
       - name: Check Rust workspace
         run: cargo check --workspace --locked
 

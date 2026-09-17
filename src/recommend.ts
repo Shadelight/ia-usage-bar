@@ -95,7 +95,19 @@ export function bestAltName(dash: Dashboard, excludeId: string): string | undefi
  * Copia contextual del banner. Null cuando no hay recomendación que mostrar
  * (legado: usa stall/stallHere si el payload no trae el motor).
  */
+function labelGlobalAlert(dash: Dashboard, selectedId: string, rec: RecCopy): RecCopy {
+  const fromId = dash.recommendFrom || dash.primary || selectedId;
+  if (!fromId || fromId === selectedId || rec.selectId === selectedId) return rec;
+  const title = `${t("recGlobalPrefix")} · ${rec.title}`;
+  return { ...rec, title, text: rec.meta ? `${title} · ${rec.meta}` : title };
+}
+
 export function recCopy(dash: Dashboard, selectedId: string): RecCopy | null {
+  const copy = recCopyUnscoped(dash, selectedId);
+  return copy ? labelGlobalAlert(dash, selectedId, copy) : null;
+}
+
+function recCopyUnscoped(dash: Dashboard, selectedId: string): RecCopy | null {
   const toId = dash.recommendId;
   const toName = dash.recommendName ?? "";
   const action = dash.recommendAction || "";

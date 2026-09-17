@@ -138,8 +138,10 @@ test("normal dashboard sections persist their open state per provider", () => {
 test("an unavailable provider does not invent a source label", () => {
   const dash = readFileSync(new URL("../src/views/dash.ts", import.meta.url), "utf8");
   assert.match(dash, /function connectionRows/);
-  assert.match(dash, /function sourceText/);
-  assert.match(dash, /default:\s*return "";/);
+  assert.match(dash, /providerDetails\(provider, vendor\)/);
+  assert.doesNotMatch(dash, /function sourceText/);
+  assert.doesNotMatch(dash, /sourceLocal/);
+  assert.doesNotMatch(dash, /sourceGoogleApi/);
 });
 
 test("appearance persists Used/Remaining and dashboard groups always quotas", () => {

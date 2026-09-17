@@ -1196,6 +1196,19 @@ button, input, select { font: inherit; color: inherit; }
 .sync-technical { margin-top: 10px; color: var(--muted); font-size: 12px; }
 .sync-technical summary { cursor: pointer; }
 .sync-technical button { margin-top: 6px; }
+.sync-device-row { align-items: center; gap: 10px; }
+.sync-device-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sync-device-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sync-revoke {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
+  padding: 5px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+  white-space: nowrap;
+}
+.sync-revoke:hover { color: var(--hot); border-color: var(--hot); }
+.sync-revoke:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .cli-diagnostic { margin-top: 18px; padding-top: 2px; border-top: 1px solid var(--line); }
 .cli-diagnostic .row { align-items: flex-start; }
 .cli-diagnostic code { max-width: 65%; text-align: right; overflow-wrap: anywhere; color: var(--muted); }

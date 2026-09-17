@@ -1395,6 +1395,48 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_ok_binds_id_plan_and_source_to_that_vendor() {
+        let cursor = snapshot_ok(
+            VendorId::Cursor,
+            "Pro",
+            vec![progress_pct("monthly", "Mensual", 50.0, None, 2_592_000, "always")],
+        );
+        let antigravity = snapshot_ok(
+            VendorId::Antigravity,
+            "Free",
+            vec![progress_pct("5h", "5h", 10.0, None, 18_000, "always")],
+        );
+        let openai = snapshot_ok(
+            VendorId::Openai,
+            "Plus",
+            vec![progress_pct("5h", "5 horas", 20.0, None, 18_000, "always")],
+        );
+        let go = snapshot_ok(
+            VendorId::OpenCodeGo,
+            "OpenCode Go",
+            vec![progress_pct("rolling", "5 horas", 0.0, None, 18_000, "always")],
+        );
+        assert_eq!(cursor.id, "cursor");
+        assert_eq!(cursor.active_source, Some(UsageSource::LocalSession));
+        assert_eq!(antigravity.id, "antigravity");
+        assert_eq!(antigravity.active_source, Some(UsageSource::LocalSession));
+        assert_eq!(openai.id, "openai");
+        assert_eq!(openai.active_source, Some(UsageSource::Oauth));
+        assert_eq!(go.id, "opencode_go");
+        assert_eq!(go.active_source, Some(UsageSource::Api));
+
+        let mut map = std::collections::HashMap::new();
+        map.insert(cursor.id.clone(), cursor);
+        map.insert(antigravity.id.clone(), antigravity);
+        map.insert(openai.id.clone(), openai);
+        map.insert(go.id.clone(), go);
+        assert_eq!(map["cursor"].plan, "Pro");
+        assert_eq!(map["openai"].plan, "Plus");
+        assert_eq!(map["opencode_go"].plan, "OpenCode Go");
+        assert_eq!(map["antigravity"].plan, "Free");
+    }
+
+    #[test]
     fn parse_usd_strips_dollar() {
         assert_eq!(parse_usd("$12.50"), Some(12.5));
         assert_eq!(parse_usd("1,200.00"), Some(1200.0));

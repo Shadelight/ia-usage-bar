@@ -39,6 +39,12 @@ test("sync menu i18n keys exist in both languages", () => {
   assert.notEqual(I18N.en.syncPairNeedsLan, "syncPairNeedsLan");
 });
 
+test("about surfaces the product website, not only GitHub", () => {
+  const settings = readFileSync(new URL("../src/views/settings.ts", import.meta.url), "utf8");
+  assert.match(settings, /shadelight\.github\.io\/ia-usage-bar/);
+  assert.match(settings, /aboutWebsite/);
+});
+
 test("sync settings no longer render a passphrase input or manual toggle", () => {
   const settings = readFileSync(new URL("../src/views/settings.ts", import.meta.url), "utf8");
   assert.ok(!settings.includes('data-savesyncpass'), "passphrase save button must be gone");
@@ -46,6 +52,7 @@ test("sync settings no longer render a passphrase input or manual toggle", () =>
   assert.ok(!settings.includes('toggleRow("cfg-sync",'), "manual sync-enable toggle must be gone");
   assert.ok(settings.includes("data-startpairing"), "pairing button must exist");
   assert.ok(settings.includes("data-revokedevice"), "device revoke control must exist");
+  assert.ok(settings.includes('class="sync-revoke"'), "unlink button must use the styled sync-revoke class");
 });
 
 test("menu icons exist and render svg", () => {

@@ -65,4 +65,41 @@ mod tests {
         assert!(loaded["anthropic"].quotas.iter().all(|quota| quota.stale));
         let _ = fs::remove_file(path);
     }
+
+    #[test]
+    fn cache_is_namespaced_by_provider_id() {
+        let path = std::env::temp_dir().join(format!(
+            "iausagebar-cache-ns-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let antigravity = snapshot_ok(
+            VendorId::Antigravity,
+            "Free",
+            vec![progress_pct("5h", "5h", 10.0, None, 18_000, "always")],
+        );
+        let cursor = snapshot_ok(
+            VendorId::Cursor,
+            "Pro",
+            vec![progress_pct(
+                "monthly", "Mensual", 50.0, None, 2_592_000, "always",
+            )],
+        );
+        let body = serde_json::to_vec(&HashMap::from([
+            (antigravity.id.clone(), antigravity),
+            (cursor.id.clone(), cursor),
+        ]))
+        .unwrap();
+        fs::write(&path, body).unwrap();
+
+        let loaded = load_from(&path);
+        assert_eq!(loaded["cursor"].id, "cursor");
+        assert_eq!(loaded["cursor"].plan, "Pro");
+        assert_eq!(loaded["antigravity"].id, "antigravity");
+        assert_eq!(loaded["antigravity"].plan, "Free");
+        let _ = fs::remove_file(path);
+    }
 }

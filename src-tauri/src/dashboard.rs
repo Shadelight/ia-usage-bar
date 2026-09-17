@@ -417,7 +417,9 @@ fn merge_snapshot(
     }
 
     if let Some(previous) = previous.filter(|snapshot| {
-        snapshot.is_connected() && (!snapshot.lines.is_empty() || !snapshot.quotas.is_empty())
+        snapshot.id == incoming.id
+            && snapshot.is_connected()
+            && (!snapshot.lines.is_empty() || !snapshot.quotas.is_empty())
     }) {
         let rate_limited = incoming.status_reason == Some(ProviderStatusReason::RateLimited);
         let mut retained = previous.clone();
@@ -581,5 +583,31 @@ mod tests {
         assert_eq!(merged.status, ProviderStatus::Error);
         assert_eq!(merged.status_reason, Some(ProviderStatusReason::Unknown));
         assert!(!merged.stale);
+    }
+
+    #[test]
+    fn merge_snapshot_never_inherits_another_provider() {
+        let previous = crate::model::snapshot_ok(
+            VendorId::Antigravity,
+            "Free",
+            vec![crate::model::progress_pct(
+                "5h", "5h", 10.0, None, 18_000, "always",
+            )],
+        );
+        let incoming = crate::model::snapshot_with_status(
+            VendorId::Cursor,
+            ProviderStatus::NeedsAuth,
+            ProviderStatusReason::OAuthExpired,
+            "session expired",
+        );
+        let merged = merge_snapshot(Some(&previous), incoming);
+        assert_eq!(merged.id, "cursor");
+        assert!(merged.plan.is_empty());
+        assert!(merged.lines.is_empty());
+        assert_ne!(merged.active_source, previous.active_source);
+        assert!(!merged.lines.iter().any(|line| match line {
+            crate::model::MetricLine::Values { text, .. } => text.contains("Antigravity"),
+            _ => false,
+        }));
     }
 }

@@ -1,13 +1,14 @@
 {
   "name": "iausagebar",
   "private": true,
-  "version": "0.3.8",
+  "version": "0.3.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "brand:generate": "node scripts/generate-brand-assets.mjs",
     "test:frontend": "node scripts/run-frontend-tests.mjs",
+    "test:website": "node --test website/*.test.js",
     "preview": "vite preview",
     "tauri": "tauri"
   },

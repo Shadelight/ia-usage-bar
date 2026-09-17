@@ -39,6 +39,19 @@ pub fn refresh(id: VendorId, cfg: &AppConfig) -> ProviderSnapshot {
         crate::http::redact_json(&mut value);
         eprintln!("[usage normalized {}] {value}", id.slug());
     }
+    if snapshot.id != id.slug() {
+        debug_assert_eq!(
+            snapshot.id,
+            id.slug(),
+            "ProviderSnapshot.id must equal the requested provider"
+        );
+        return snapshot_with_status(
+            id,
+            ProviderStatus::Error,
+            ProviderStatusReason::Unknown,
+            "snapshot providerId mismatch",
+        );
+    }
     snapshot
 }
 

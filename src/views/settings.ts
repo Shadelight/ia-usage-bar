@@ -475,10 +475,12 @@ function syncBody(): string {
     <h3>${escapeHtml(t("syncPairedDevices"))}</h3>
     ${devices.length === 0 ? `<p class="lede">${escapeHtml(t("syncNoPairedDevices"))}</p>` : `
       <div class="sync-devices">${devices.map((d) => `
-        <div class="row" data-device-row="${escapeHtml(d.clientDeviceId)}">
-          <span>${escapeHtml(d.name)}</span>
-          <span class="lede">${d.lastSeenAt ? escapeHtml(t("syncDeviceConnected")) : ""}</span>
-          <button type="button" data-revokedevice="${escapeHtml(d.clientDeviceId)}">${escapeHtml(t("syncRevokeDevice"))}</button>
+        <div class="row sync-device-row" data-device-row="${escapeHtml(d.clientDeviceId)}">
+          <div class="sync-device-meta">
+            <span class="sync-device-name">${escapeHtml(d.name)}</span>
+            <span class="lede">${d.lastSeenAt ? escapeHtml(t("syncDeviceConnected")) : ""}</span>
+          </div>
+          <button type="button" class="sync-revoke" data-revokedevice="${escapeHtml(d.clientDeviceId)}">${escapeHtml(t("syncRevokeDevice"))}</button>
         </div>
       `).join("")}</div>
     `}
@@ -517,6 +519,7 @@ export async function refreshSyncView(): Promise<void> {
 }
 
 const REPO_URL = "https://github.com/Shadelight/ia-usage-bar";
+const WEBSITE_URL = "https://shadelight.github.io/ia-usage-bar/";
 
 function aboutBody(): string {
   const action = (label: string, url: string) => `<button class="about-action" data-open-url="${url}"><span class="about-action-icon" aria-hidden="true">${actionIconSvg("external-link", 14)}</span><span>${escapeHtml(label)}</span><span class="about-action-arrow" aria-hidden="true">${actionIconSvg("chevron-right", 14)}</span></button>`;
@@ -525,6 +528,7 @@ function aboutBody(): string {
     <p class="about-copy">${t("aboutTagline")}</p>
     <p class="about-author">${t("aboutAuthor")}</p>
     <div class="about-actions">
+      ${action(t("aboutWebsite"), WEBSITE_URL)}
       ${action(t("aboutRepo"), REPO_URL)}
       ${action(t("aboutLicense"), `${REPO_URL}/blob/main/LICENSE`)}
       ${action(t("aboutNotices"), `${REPO_URL}/blob/main/NOTICE`)}

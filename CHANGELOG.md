@@ -4,6 +4,19 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-09-16
+
+### Added
+
+- Landing oficial con sitemap, JSON-LD y hreflang ES/EN.
+- El pipeline de release publica el VSIX en Open VSX y comprueba la versión.
+
+### Fixed
+
+- DETAILS reutilizaba "Fuente" de otro proveedor (Cursor como Antigravity, Codex como Google API).
+- El aviso de Claude se leía como si fuera del tab actual.
+- El botón Desvincular de sync se veía como un rectángulo blanco.
+
 ## [0.3.8] - 2026-09-15
 
 ### Added

@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "tag": "v0.3.8",
+  "version": "0.3.8",
+  "publishedAt": "2026-09-15T14:46:05Z",
+  "htmlUrl": "https://github.com/Shadelight/ia-usage-bar/releases/tag/v0.3.8",
+  "windowsExe": "https://github.com/Shadelight/ia-usage-bar/releases/download/v0.3.8/IA.Usage.Bar_0.3.8_x64-setup.exe",
+  "windowsMsi": "https://github.com/Shadelight/ia-usage-bar/releases/download/v0.3.8/IA.Usage.Bar_0.3.8_x64_en-US.msi",
+  "androidApk": "https://github.com/Shadelight/ia-usage-bar/releases/download/v0.3.8/IA-Usage-Android-0.3.8.apk",
+  "vscodeVsix": "https://github.com/Shadelight/ia-usage-bar/releases/download/v0.3.8/IA-Usage-VSCode-0.3.8.vsix",
+  "checksums": "https://github.com/Shadelight/ia-usage-bar/releases/download/v0.3.8/SHA256SUMS.txt"
+}

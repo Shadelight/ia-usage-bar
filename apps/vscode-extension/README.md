@@ -148,6 +148,14 @@ npm run package  # crear paquete .vsix
 
 ---
 
+## Website
+
+Product site, downloads, and screenshots: [IA Usage](https://shadelight.github.io/ia-usage-bar/).
+
+## Publishing (maintainers)
+
+Tagged GitHub releases upload the VSIX to GitHub Releases and publish it to [Open VSX](https://open-vsx.org/extension/shadelightdev/ia-usage). Set the repository secret `OVSX_PAT` to a token from [Open VSX user settings](https://open-vsx.org/user-settings/tokens). The job fails if the secret is missing or if the registry version does not match `package.json` after publish. Claim the `shadelightdev` namespace at Open VSX if the listing still shows an unverified-publisher warning.
+
 ## License
 
 MIT © [Shadelight](https://github.com/Shadelight)

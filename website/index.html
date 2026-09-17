@@ -1,23 +1,46 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>IA Usage — AI usage limits for Windows, Android & VS Code</title>
-<meta name="description" content="Monitor AI usage limits, quota resets, spend and provider status for Claude Code, Codex, Cursor, Copilot and more — from a Windows tray app, Android companion, or VS Code status bar.">
+<title>IA Usage – Claude, ChatGPT, Codex &amp; Cursor Usage Monitor</title>
+<meta name="description" content="Track Claude Code, ChatGPT Codex, Cursor, Antigravity, Copilot and other AI usage limits, quotas and reset times from Windows, Android and VS Code.">
 <meta property="og:type" content="website">
-<meta property="og:title" content="IA Usage">
-<meta property="og:description" content="All your AI usage limits. Windows, Android, and VS Code.">
-<meta property="og:image" content="https://shadelight.github.io/ia-usage-bar/og-image.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="es_ES">
+<meta property="og:title" content="IA Usage – Claude, ChatGPT, Codex &amp; Cursor Usage Monitor">
+<meta property="og:description" content="Track Claude Code, ChatGPT Codex, Cursor, Antigravity, Copilot and other AI usage limits, quotas and reset times from Windows, Android and VS Code.">
+<meta property="og:image" content="https://shadelight.github.io/ia-usage-bar/assets/product/desktop-dashboard.png">
+<meta property="og:image:width" content="1080">
+<meta property="og:image:height" content="676">
 <meta property="og:url" content="https://shadelight.github.io/ia-usage-bar/">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="IA Usage">
-<meta name="twitter:description" content="All your AI usage limits. Windows, Android, and VS Code.">
-<meta name="twitter:image" content="https://shadelight.github.io/ia-usage-bar/og-image.png">
-<meta name="theme-color" content="#18181B">
+<meta name="twitter:title" content="IA Usage – Claude, ChatGPT, Codex &amp; Cursor Usage Monitor">
+<meta name="twitter:description" content="Track Claude Code, ChatGPT Codex, Cursor, Antigravity, Copilot and other AI usage limits, quotas and reset times from Windows, Android and VS Code.">
+<meta name="twitter:image" content="https://shadelight.github.io/ia-usage-bar/assets/product/desktop-dashboard.png">
+<meta name="theme-color" content="#1c1c1e">
 <link rel="canonical" href="https://shadelight.github.io/ia-usage-bar/">
+<link rel="alternate" hreflang="en" href="https://shadelight.github.io/ia-usage-bar/?lang=en">
+<link rel="alternate" hreflang="es" href="https://shadelight.github.io/ia-usage-bar/?lang=es">
+<link rel="alternate" hreflang="x-default" href="https://shadelight.github.io/ia-usage-bar/">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "IA Usage",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Windows 10, Windows 11, Android, VS Code",
+  "url": "https://shadelight.github.io/ia-usage-bar/",
+  "downloadUrl": "https://github.com/Shadelight/ia-usage-bar/releases/latest",
+  "screenshot": "https://shadelight.github.io/ia-usage-bar/assets/product/desktop-dashboard.png",
+  "description": "Track Claude Code, ChatGPT Codex, Cursor, Antigravity, Copilot and other AI usage limits, quotas and reset times from Windows, Android and VS Code.",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  }
+}
+</script>
 <link rel="icon" href="./favicon-16.png" type="image/png" sizes="16x16">
 <link rel="icon" href="./favicon-32.png" type="image/png" sizes="32x32">
 <link rel="icon" href="./favicon-48.png" type="image/png" sizes="48x48">
@@ -42,13 +65,13 @@
       <a href="https://github.com/Shadelight/ia-usage-bar" data-i18n="navGithub">GitHub</a>
     </nav>
     <div class="nav-actions">
-      <button class="icon-btn theme-btn" data-theme-btn title="Toggle theme" aria-label="Toggle theme">
-        <svg class="theme-icon-dark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-        <svg class="theme-icon-light" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      <button class="icon-btn theme-btn" data-theme-btn data-i18n-aria="themeToggle" aria-label="Cambiar tema">
+        <svg class="theme-icon-dark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="theme-icon-light" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
       </button>
-      <button class="icon-btn" data-lang-btn="es">ES</button>
-      <button class="icon-btn" data-lang-btn="en">EN</button>
-      <a class="btn btn-primary btn-sm" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="navDownload">Descargar</a>
+      <button class="icon-btn" data-lang-btn="es" aria-label="Español">ES</button>
+      <button class="icon-btn" data-lang-btn="en" aria-label="English">EN</button>
+      <a class="btn btn-primary btn-sm" href="#download" data-i18n="navDownload">Descargar</a>
       <button class="icon-btn menu-btn" data-menu-btn aria-expanded="false" aria-controls="mobile-menu" aria-label="Abrir menú">
         <span></span><span></span><span></span>
       </button>
@@ -63,10 +86,10 @@
         <a href="https://github.com/Shadelight/ia-usage-bar" data-i18n="navGithub">GitHub</a>
       </nav>
       <div class="mobile-actions">
-        <a class="btn btn-primary" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="navDownload">Descargar</a>
+        <a class="btn btn-primary" href="#download" data-i18n="navDownload">Descargar</a>
         <div class="mobile-lang">
-          <button class="icon-btn" data-lang-btn="es">ES</button>
-          <button class="icon-btn" data-lang-btn="en">EN</button>
+          <button class="icon-btn" data-lang-btn="es" aria-label="Español">ES</button>
+          <button class="icon-btn" data-lang-btn="en" aria-label="English">EN</button>
         </div>
       </div>
     </div>
@@ -76,162 +99,163 @@
 <main id="top">
 
   <section class="hero">
-    <div class="wrap">
-      <span class="eyebrow"><span class="dot"></span> Windows · Android · VS Code · Open source</span>
-      <p class="brand-tagline">Insights for a smarter tomorrow</p>
-      <h1 data-i18n="heroTitle">Todos tus límites de IA.<br>Una sola app de <span>Windows</span>.</h1>
-      <p class="subtitle" data-i18n="heroSubtitle">Monitoriza cuotas de sesión, reinicios semanales, gasto y estado de las herramientas de IA que realmente usas.</p>
-      <div class="cta-row">
-        <a class="btn btn-primary" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="ctaPrimary">Descargar para Windows</a>
-        <a class="btn btn-secondary" href="https://github.com/Shadelight/ia-usage-bar" data-i18n="ctaSecondary">Ver en GitHub</a>
-      </div>
-      <p class="fine-print" data-i18n="finePrint">Gratis · Open source · Windows 10/11</p>
-      <div class="shot-frame">
-        <img src="./assets/hero.png" alt="IA Usage provider panel" loading="eager">
-      </div>
-    </div>
-  </section>
-
-  <section id="platforms" class="alt">
-    <div class="wrap">
-      <div class="section-head">
-        <span class="kicker" style="color:var(--accent);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;" data-i18n="platformsKicker">Also available on</span>
-        <h2 data-i18n="platformsTitle">Same quotas, wherever you work</h2>
-        <p data-i18n="platformsSubtitle">The Windows tray app is the flagship. The Android companion and VS Code extension mirror the same provider data.</p>
-      </div>
-      <div class="grid-3">
-        <div class="card">
-          <h3 data-i18n="platformCard1t">Windows</h3>
-          <p data-i18n="platformCard1p">Tray app with quota panel, compact mode, and spend view. Windows 10/11.</p>
-          <p style="margin-top:14px;"><a class="btn btn-secondary btn-sm" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="platformCard1cta">Download .exe / .msi</a></p>
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="brand-tagline" data-i18n="heroKicker">AI quota monitor</p>
+        <h1>Monitor Claude, ChatGPT, Codex, Cursor and AI usage limits</h1>
+        <p class="hero-line" data-i18n="heroTitle">Todos tus límites de IA. Una sola <span>experiencia</span>.</p>
+        <p class="subtitle" data-i18n="heroSubtitle">Monitoriza cuotas, reinicios, disponibilidad y uso de las herramientas de IA que realmente utilizas desde Windows, Android y VS Code.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" data-asset="windowsExe" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="ctaPrimary">Descargar para Windows</a>
+          <a class="btn btn-secondary" href="https://github.com/Shadelight/ia-usage-bar" data-i18n="ctaSecondary">Ver en GitHub</a>
         </div>
-        <div class="card">
-          <h3 data-i18n="platformCard2t">Android</h3>
-          <p data-i18n="platformCard2p">Companion app paired by QR code, with a home-screen widget and background refresh.</p>
-          <p style="margin-top:14px;"><a class="btn btn-secondary btn-sm" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="platformCard2cta">Download APK</a></p>
-        </div>
-        <div class="card">
-          <h3 data-i18n="platformCard3t">VS Code</h3>
-          <p data-i18n="platformCard3p">Status bar and tooltip for VS Code and compatible forks (Cursor, Windsurf, Antigravity).</p>
-          <p style="margin-top:14px;"><a class="btn btn-secondary btn-sm" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="platformCard3cta">Download .vsix</a></p>
+        <p class="fine-print" data-i18n="finePrint">Gratis · Open source · Windows 10/11 · Android · VS Code</p>
+      </div>
+      <div class="hero-shot">
+        <div class="shot-glow" aria-hidden="true"></div>
+        <div class="shot-frame hero-frame">
+          <img src="./assets/product/desktop-dashboard.png" width="1080" height="676" data-i18n-alt="heroShotAlt" alt="IA Usage Desktop mostrando cuotas de Claude Code, Codex, Cursor y OpenAI API" fetchpriority="high">
         </div>
       </div>
     </div>
   </section>
 
-  <section id="providers">
+  <section id="features" class="benefits">
+    <div class="wrap benefits-grid">
+      <article class="benefit">
+        <span class="benefit-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6H4zM14 4h6v6h-6zM14 14h6v6h-6zM4 4h6v6H4z"/></svg>
+        </span>
+        <div>
+          <h2 data-i18n="benefit1t">Control total</h2>
+          <p data-i18n="benefit1p">Tus cuotas y límites en un mismo lugar.</p>
+        </div>
+      </article>
+      <article class="benefit">
+        <span class="benefit-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        </span>
+        <div>
+          <h2 data-i18n="benefit2t">Alertas útiles</h2>
+          <p data-i18n="benefit2p">Anticípate a límites, resets y agotamientos.</p>
+        </div>
+      </article>
+      <article class="benefit">
+        <span class="benefit-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        </span>
+        <div>
+          <h2 data-i18n="benefit3t">Privado y local-first</h2>
+          <p data-i18n="benefit3p">Tus credenciales permanecen en tus dispositivos.</p>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section id="download" class="alt platforms">
     <div class="wrap">
       <div class="section-head">
+        <span class="kicker" data-i18n="platformsKicker">También disponible en</span>
+        <h2 data-i18n="platformsTitle">Las mismas cuotas, dondequiera que trabajes</h2>
+        <p data-i18n="platformsSubtitle">IA Usage Desktop es el centro principal. Android y VS Code mantienen tus límites visibles mientras trabajas o estás lejos del escritorio.</p>
+      </div>
+      <div class="platform-grid">
+        <article class="platform-card">
+          <header class="platform-head">
+            <img src="./assets/platform/windows.svg" width="20" height="20" alt="">
+            <h3>Windows</h3>
+            <span class="badge" data-i18n="platformWindowsBadge">Principal</span>
+          </header>
+          <div class="shot-frame">
+            <img src="./assets/product/desktop-dashboard.png" width="1080" height="676" data-i18n-alt="windowsShotAlt" alt="Panel de cuotas de IA Usage Desktop en Windows" loading="lazy">
+          </div>
+          <p data-i18n="platformWindowsP">App de bandeja con panel de cuotas, recomendaciones, alertas, modo compacto y vista detallada. Windows 10/11.</p>
+          <div class="platform-cta">
+            <a class="btn btn-primary" data-asset="windowsExe" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="platformWindowsCta">Descargar .exe</a>
+            <a class="text-link" data-asset="windowsMsi" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="platformWindowsMsi">.msi</a>
+          </div>
+          <p class="release-meta" data-release-meta hidden>
+            <span data-i18n="latestVersion">Última versión</span>
+            <span aria-hidden="true"> · </span>
+            <span data-release-version></span>
+          </p>
+        </article>
+
+        <article class="platform-card">
+          <header class="platform-head">
+            <img src="./assets/platform/android.svg" width="20" height="20" alt="">
+            <h3>Android</h3>
+          </header>
+          <div class="shot-frame shot-android">
+            <img src="./assets/product/android-widgets.png" width="720" height="1280" data-optional-shot data-i18n-alt="androidShotAlt" alt="Companion Android de IA Usage con widgets de cuota en la pantalla de inicio" loading="lazy">
+          </div>
+          <p data-i18n="platformAndroidP">App companion vinculada de forma segura al PC, con dashboard, alertas, actualizaciones y widgets para consultar las cuotas desde la pantalla de inicio.</p>
+          <div class="platform-cta">
+            <a class="btn btn-primary" data-asset="androidApk" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="platformAndroidCta">Descargar APK</a>
+          </div>
+          <p class="release-meta" data-release-meta hidden>
+            <span data-i18n="latestVersion">Última versión</span>
+            <span aria-hidden="true"> · </span>
+            <span data-release-version></span>
+          </p>
+        </article>
+
+        <article class="platform-card">
+          <header class="platform-head">
+            <img src="./assets/platform/vscode.svg" width="20" height="20" alt="">
+            <h3>VS Code</h3>
+          </header>
+          <div class="shot-frame">
+            <img src="./assets/product/vscode-extension.png" width="1080" height="720" data-optional-shot data-i18n-alt="vscodeShotAlt" alt="Extensión IA Usage en VS Code con barra de estado y tooltip de cuotas" loading="lazy">
+          </div>
+          <p data-i18n="platformVscodeP">Tus límites directamente en la barra de estado del editor. Compatible con VS Code y forks compatibles como Cursor, Windsurf y Antigravity.</p>
+          <div class="platform-cta">
+            <a class="btn btn-primary" data-asset="vscodeVsix" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="platformVscodeCta">Descargar .vsix</a>
+            <a class="text-link" href="https://open-vsx.org/extension/shadelightdev/ia-usage" data-i18n="platformVscodeOpenVsx">Open VSX</a>
+          </div>
+          <p class="release-meta" data-release-meta hidden>
+            <span data-i18n="latestVersion">Última versión</span>
+            <span aria-hidden="true"> · </span>
+            <span data-release-version></span>
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="tour-section">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 data-i18n="tourTitle">Todo sincronizado</h2>
+        <p data-i18n="tourSubtitle">Un solo producto, tres superficies: escritorio, editor y teléfono.</p>
+      </div>
+      <div class="tour">
+        <div class="tour-piece tour-desktop">
+          <img src="./assets/product/desktop-dashboard.png" width="1080" height="676" data-i18n-alt="tourDesktopAlt" alt="IA Usage Desktop" loading="lazy">
+        </div>
+        <div class="tour-piece tour-compact">
+          <img src="./assets/product/desktop-compact.png" width="1080" height="383" data-i18n-alt="tourDesktopAlt" alt="IA Usage Desktop" loading="lazy">
+        </div>
+        <div class="tour-piece tour-vscode">
+          <img src="./assets/product/vscode-extension.png" width="1080" height="720" data-optional-shot data-i18n-alt="tourVscodeAlt" alt="IA Usage en VS Code" loading="lazy">
+        </div>
+        <div class="tour-piece tour-android">
+          <img src="./assets/product/android-widgets.png" width="720" height="1280" data-optional-shot data-i18n-alt="tourAndroidAlt" alt="Widgets de IA Usage en Android" loading="lazy">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="providers" class="alt">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker" data-i18n="providersEyebrow">Proveedores compatibles</span>
         <h2 data-i18n="providersTitle">Una app, todos los proveedores que pagas</h2>
         <p data-i18n="providersSubtitle">Activa solo los que usas. IA Usage nunca desactiva un proveedor por ti.</p>
       </div>
       <div class="provider-grid">
-        <span class="chip">Claude Code</span>
-        <span class="chip">Codex / ChatGPT</span>
-        <span class="chip">Cursor</span>
-        <span class="chip">Antigravity</span>
-        <span class="chip">GitHub Copilot</span>
-        <span class="chip">OpenAI API</span>
-        <span class="chip">Anthropic API</span>
-        <span class="chip">OpenRouter</span>
-        <span class="chip">Z.AI</span>
-        <span class="chip">DeepSeek</span>
-        <span class="chip">Grok</span>
-        <span class="chip">Groq</span>
-        <span class="chip">Kiro</span>
-        <span class="chip">Windsurf</span>
+        <div class="provider-chips" data-provider-grid></div>
         <span class="chip faint" data-i18n="providersMore">+ más vía clave API o sesión local</span>
-      </div>
-    </div>
-  </section>
-
-  <section id="features" class="alt">
-    <div class="wrap">
-      <div class="section-head">
-        <span class="card kicker" style="display:inline-block;background:none;border:none;padding:0;" data-i18n="limitsKicker">Límites y reinicios</span>
-        <h2 data-i18n="limitsTitle">Sesión, semanal, mensual — todo de un vistazo</h2>
-        <p data-i18n="limitsSubtitle">Porcentaje usado vs. disponible, cuenta atrás del reinicio, y avisos de ritmo.</p>
-      </div>
-      <div class="grid-3">
-        <div class="card">
-          <div class="kicker">01</div>
-          <h3 data-i18n="limitCard1t">Cuota de sesión</h3>
-          <p data-i18n="limitCard1p">Usado/disponible en vivo para la ventana de sesión actual, por proveedor.</p>
-        </div>
-        <div class="card">
-          <div class="kicker">02</div>
-          <h3 data-i18n="limitCard2t">Semanal y mensual</h3>
-          <p data-i18n="limitCard2p">Cuotas de ventana móvil y calendario con hora exacta de reinicio.</p>
-        </div>
-        <div class="card">
-          <div class="kicker">03</div>
-          <h3 data-i18n="limitCard3t">Manejo de datos obsoletos</h3>
-          <p data-i18n="limitCard3p">Si un proveedor no responde, se mantienen los últimos datos válidos.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="wrap">
-      <div class="callout">
-        <span class="badge" data-i18n="calloutBadge">Cambia</span>
-        <p data-i18n="calloutText"><b>Cursor</b> tiene el mayor margen ahora mismo (74%).</p>
-      </div>
-    </div>
-  </section>
-
-  <section class="alt">
-    <div class="wrap split">
-      <div>
-        <div class="card kicker" style="background:none;border:none;padding:0;" data-i18n="compactKicker">Modo compacto</div>
-        <h2 data-i18n="compactTitle">Ventana pequeña, misma señal</h2>
-        <p data-i18n="compactP1">Se reduce a la cuota principal del proveedor seleccionado y oculta el detalle secundario. Pin la mantiene siempre visible.</p>
-        <p data-i18n="compactP2">Ambos estados persisten entre reinicios y se reflejan en el menú de la bandeja.</p>
-      </div>
-      <div class="shot-frame">
-        <img src="./assets/compact.png" alt="IA Usage compact mode" loading="lazy">
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="wrap split reverse">
-      <div>
-        <div class="card kicker" style="background:none;border:none;padding:0;" data-i18n="spendKicker">Gasto y créditos</div>
-        <h2 data-i18n="spendTitle">Entiende tu uso y coste estimado</h2>
-        <p data-i18n="spendP1">Consulta el gasto reportado por el proveedor cuando lo expone, y una estimación local calculada a partir de los logs de uso cuando no — siempre etiquetado, nunca mezclado.</p>
-        <ul>
-          <li><span class="tag" data-i18n="spendLi1tag">Reportado por el proveedor</span><span data-i18n="spendLi1">cifras directas del propio endpoint de uso del proveedor</span></li>
-          <li><span class="tag" data-i18n="spendLi2tag">Estimado</span><span data-i18n="spendLi2">coste equivalente calculado localmente a partir de los logs de uso, no una factura</span></li>
-        </ul>
-      </div>
-      <div class="shot-frame">
-        <img src="./assets/settings.png" alt="IA Usage settings" loading="lazy">
-      </div>
-    </div>
-  </section>
-
-  <section class="alt">
-    <div class="wrap">
-      <div class="section-head">
-        <span class="kicker" style="color:var(--accent);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;" data-i18n="statusKicker">Estado y notificaciones</span>
-        <h2 data-i18n="statusTitle">Estado estructurado, no un error genérico</h2>
-        <p data-i18n="statusSubtitle">Cada proveedor reporta lo que realmente falla. Umbrales de notificación configurables.</p>
-      </div>
-      <div class="grid-3">
-        <div class="card">
-          <h3 data-i18n="statusCard1t">Necesita login</h3>
-          <p data-i18n="statusCard1p">Inicia sesión en la app/CLI del proveedor y usa Detectar o Actualizar.</p>
-        </div>
-        <div class="card">
-          <h3 data-i18n="statusCard2t">Necesita permiso</h3>
-          <p data-i18n="statusCard2p">La credencial autentica pero no puede leer el uso — revisa el plan.</p>
-        </div>
-        <div class="card">
-          <h3 data-i18n="statusCard3t">Límite de tasa / no disponible</h3>
-          <p data-i18n="statusCard3p">IA Usage no pudo obtener datos frescos ahora. Conserva el último dato válido y muestra la causa cuando puede determinarla.</p>
-        </div>
       </div>
     </div>
   </section>
@@ -239,57 +263,49 @@
   <section id="privacy">
     <div class="wrap">
       <div class="section-head">
-        <span style="color:var(--accent);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;" data-i18n="privacyKicker">Privacidad y seguridad</span>
-        <h2 data-i18n="privacyTitle">Tus credenciales se quedan en tu equipo</h2>
-        <p data-i18n="privacySubtitle">IA Usage reutiliza sesiones y credenciales que ya existen localmente cuando el proveedor lo permite.</p>
+        <span class="kicker" data-i18n="privacyKicker">Privacidad</span>
+        <h2 data-i18n="privacyTitle">Tus credenciales se quedan en tus dispositivos</h2>
+        <p data-i18n="privacySubtitle">IA Usage reutiliza sesiones y credenciales que ya existen localmente cuando el proveedor lo permite, en vez de pedirte que vuelvas a autenticarte.</p>
       </div>
       <ul class="priv-list">
-        <li data-i18n="privacyLi1">Las claves API añadidas manualmente se guardan en Windows Credential Manager, nunca en texto plano.</li>
+        <li data-i18n="privacyLi1">Las claves API añadidas manualmente se guardan en el almacén de credenciales del sistema, nunca en texto plano.</li>
         <li data-i18n="privacyLi2">La app nunca almacena contraseñas.</li>
         <li data-i18n="privacyLi3">El procesamiento es local, salvo las llamadas que cada proveedor activo necesita a su propio endpoint de uso.</li>
         <li data-i18n="privacyLi4">Sin telemetría, sin analítica.</li>
       </ul>
       <div class="priv-table">
         <div class="priv-row"><span data-i18n="privacyRow1k">Sesión del proveedor</span><span data-i18n="privacyRow1v">La gestiona la app/CLI original, leída localmente</span></div>
-        <div class="priv-row"><span data-i18n="privacyRow2k">Claves API manuales</span><span data-i18n="privacyRow2v">Windows Credential Manager</span></div>
+        <div class="priv-row"><span data-i18n="privacyRow2k">Claves API manuales</span><span data-i18n="privacyRow2v">Almacén de credenciales del sistema</span></div>
         <div class="priv-row"><span data-i18n="privacyRow3k">Configuración</span><span data-i18n="privacyRow3v">Solo local</span></div>
         <div class="priv-row"><span data-i18n="privacyRow4k">Telemetría</span><span class="none" data-i18n="privacyRow4vNone">Ninguna</span></div>
       </div>
-      <p style="text-align:center;margin-top:22px;">
-        <a href="https://github.com/Shadelight/ia-usage-bar/blob/main/SECURITY.md" style="color:var(--accent);font-weight:600;font-size:14px;" data-i18n="privacyLink">Política completa en SECURITY.md →</a>
+      <p class="privacy-link">
+        <a href="https://github.com/Shadelight/ia-usage-bar/blob/main/SECURITY.md" data-i18n="privacyLink">Política completa en SECURITY.md →</a>
       </p>
     </div>
   </section>
 
-  <section class="alt">
+  <section class="final-cta alt">
     <div class="wrap">
-      <div class="section-head">
-        <span style="color:var(--accent);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;" data-i18n="ossKicker">Open source</span>
-        <h2 data-i18n="ossTitle">Licencia MIT, inspecciona todo</h2>
-        <p data-i18n="ossSubtitle">Sin caja negra. Lee el código, abre un issue o envía un PR.</p>
+      <h2 data-i18n="finalTitle">Descarga siempre la última versión</h2>
+      <p data-i18n="finalSubtitle">Windows, Android y VS Code se sirven desde la última release publicada.</p>
+      <div class="final-downloads">
+        <a class="final-dl" data-asset="windowsExe" href="https://github.com/Shadelight/ia-usage-bar/releases/latest">
+          <img src="./assets/platform/windows.svg" width="18" height="18" alt="">
+          <span data-i18n="finalWindows">Windows</span>
+          <small data-release-meta hidden><span data-i18n="latestVersion">Última versión</span> <span data-release-version></span></small>
+        </a>
+        <a class="final-dl" data-asset="androidApk" href="https://github.com/Shadelight/ia-usage-bar/releases/latest">
+          <img src="./assets/platform/android.svg" width="18" height="18" alt="">
+          <span data-i18n="finalAndroid">Android</span>
+          <small data-release-meta hidden><span data-i18n="latestVersion">Última versión</span> <span data-release-version></span></small>
+        </a>
+        <a class="final-dl" data-asset="vscodeVsix" href="https://github.com/Shadelight/ia-usage-bar/releases/latest">
+          <img src="./assets/platform/vscode.svg" width="18" height="18" alt="">
+          <span data-i18n="finalVscode">VS Code</span>
+          <small data-release-meta hidden><span data-i18n="latestVersion">Última versión</span> <span data-release-version></span></small>
+        </a>
       </div>
-      <div class="grid-3">
-        <a class="card" href="https://github.com/Shadelight/ia-usage-bar">
-          <h3 data-i18n="ossCard1t">Código</h3>
-          <p data-i18n="ossCard1p">Historial completo e issues en GitHub.</p>
-        </a>
-        <a class="card" href="https://github.com/Shadelight/ia-usage-bar/blob/main/CONTRIBUTING.md">
-          <h3 data-i18n="ossCard2t">Contribuir</h3>
-          <p data-i18n="ossCard2p">Setup, convenciones de código y checklist de PR.</p>
-        </a>
-        <a class="card" href="https://github.com/Shadelight/ia-usage-bar/blob/main/SECURITY.md">
-          <h3 data-i18n="ossCard3t">Seguridad</h3>
-          <p data-i18n="ossCard3p">Política de reporte de vulnerabilidades y manejo de credenciales.</p>
-        </a>
-      </div>
-    </div>
-  </section>
-
-  <section class="final-cta">
-    <div class="wrap">
-      <h2 data-i18n="finalTitle">Deja de adivinar tu cuota.</h2>
-      <p data-i18n="finalSubtitle">Una app en la bandeja, todos los proveedores, siempre al día.</p>
-      <a class="btn btn-primary" href="https://github.com/Shadelight/ia-usage-bar/releases/latest" data-i18n="finalCta">Descargar IA Usage para Windows</a>
     </div>
   </section>
 
@@ -297,7 +313,11 @@
 
 <footer>
   <div class="wrap footer-row">
-    <span>&copy; <span data-year>2026</span> IA Usage. MIT License. <span data-i18n="footerNote">No afiliado con Anthropic, OpenAI, Cursor ni ningún proveedor listado.</span></span>
+    <div class="footer-copy">
+      <span>&copy; <span data-year>2026</span> IA Usage. MIT License.</span>
+      <span data-i18n="footerNote">No afiliado con Anthropic, OpenAI, Cursor ni ningún proveedor listado.</span>
+      <span data-i18n="footerCli">CLI disponible en el repositorio para scripts y automatización.</span>
+    </div>
     <nav class="footer-links">
       <a href="https://github.com/Shadelight/ia-usage-bar">GitHub</a>
       <a href="https://github.com/Shadelight/ia-usage-bar/blob/main/CHANGELOG.md">Changelog</a>
@@ -307,6 +327,6 @@
   </div>
 </footer>
 
-<script src="./app.js" defer></script>
+<script type="module" src="./app.js"></script>
 </body>
 </html>

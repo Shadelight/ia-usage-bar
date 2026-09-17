@@ -81,6 +81,20 @@ jobs:
         run: |
           npm ci
           npm run package
+      - name: Publish to Open VSX
+        working-directory: apps/vscode-extension
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::error::OVSX_PAT is not set. Add a token from https://open-vsx.org/user-settings/tokens as the OVSX_PAT repository secret."
+            exit 1
+          fi
+          npx --yes ovsx publish ./*.vsix --pat "$OVSX_PAT"
+      - name: Verify Open VSX version
+        working-directory: apps/vscode-extension
+        run: node scripts/verify-openvsx-version.mjs
+
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4
         with:

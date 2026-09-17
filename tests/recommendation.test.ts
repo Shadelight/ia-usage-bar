@@ -339,3 +339,27 @@ test("switch copy is contextual when already viewing the destination", () => {
   assert.ok(from);
   assert.match(from.title, /Claude/);
 });
+
+test("auth alert on another tab is labeled as a global alert", () => {
+  setLang("es");
+  const d = dash({
+    recommendId: "anthropic",
+    recommendName: "Claude Code",
+    recommendLeft: 0,
+    recommendAction: "stay",
+    recommendReason: "auth_problem",
+    recommendSeverity: "warning",
+    recommendFrom: "anthropic",
+    recommendScores: [
+      cand({ id: "anthropic", name: "Claude Code", hasData: false }),
+    ],
+  });
+  const here = recCopy(d, "anthropic");
+  assert.ok(here);
+  assert.match(here.title, /Claude necesita atención/);
+  assert.doesNotMatch(here.title, /Alerta global/);
+  const elsewhere = recCopy(d, "cursor");
+  assert.ok(elsewhere);
+  assert.match(elsewhere.title, /^Alerta global · /);
+  assert.match(elsewhere.title, /Claude necesita atención/);
+});

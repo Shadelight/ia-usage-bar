@@ -17,6 +17,7 @@ import {
   pctOf,
 } from "../provider-actions.ts";
 import { tabHtml } from "../provider-tabs.ts";
+import { providerDetails } from "../data-source.ts";
 import { recCopy, recPrefix, recWhyTitle } from "../recommend.ts";
 import { groupSummary, groupsFromQuotas } from "../quota-groups.ts";
 import { normalizePercentageMode, summaryPercents, type PercentageMode } from "../percent.ts";
@@ -290,45 +291,32 @@ export function actionsSectionHtml(provider: ProviderSnapshot, vendor: VendorInf
   `);
 }
 
-function sourceText(provider: ProviderSnapshot): string {
-  const line = provider.lines.find((item) => item.kind === "values" && item.id === "source");
-  if (line && line.kind === "values" && line.text) return line.text;
-  switch ((provider.activeSource || "").toLowerCase()) {
-    case "local-session":
-    case "local":
-      return t("sourceLocal");
-    case "oauth":
-    case "api":
-      return t("sourceGoogleApi");
-    case "cli":
-      return t("viaCli");
-    case "web-session":
-    case "web":
-      return t("viaWeb");
-    default:
-      return "";
-  }
-}
-
 function lineText(provider: ProviderSnapshot, id: string): string {
   const line = provider.lines.find((item) => item.kind === "values" && item.id === id);
   return line && line.kind === "values" ? line.text : "";
 }
 
 function connectionRows(provider: ProviderSnapshot, vendor: VendorInfo): string {
-  const derived = deriveProviderState(vendor, provider, false);
+  const owned = provider.id === vendor.id;
+  const snapshot = owned ? provider : undefined;
+  const details = owned
+    ? providerDetails(provider, vendor)
+    : { providerId: vendor.id, auth: deriveProviderState(vendor, undefined, false).via, source: "", plan: "" };
+  const derived = deriveProviderState(vendor, snapshot, false);
   const rows = [
     ["status", t("status"), t(derived.statusKey)],
-    ["auth", t("authentication"), derived.via],
-    ["source", t("source"), sourceText(provider)],
+    ["auth", t("authentication"), details.auth],
+    ["source", t("source"), details.source],
   ];
-  const app = lineText(provider, "antigravity_app");
-  if (app) rows.push(["antigravity_app", vendor.name, app]);
-  const account = lineText(provider, "account");
-  if (account) rows.push(["account", t("account"), account]);
-  if (provider.plan) rows.push(["plan", t("plan"), provider.plan]);
-  const overages = lineText(provider, "overages");
-  if (overages) rows.push(["overages", t("creditOverages"), overages]);
+  if (owned) {
+    const app = lineText(provider, "antigravity_app");
+    if (app) rows.push(["antigravity_app", vendor.name, app]);
+    const account = lineText(provider, "account");
+    if (account) rows.push(["account", t("account"), account]);
+    if (details.plan) rows.push(["plan", t("plan"), details.plan]);
+    const overages = lineText(provider, "overages");
+    if (overages) rows.push(["overages", t("creditOverages"), overages]);
+  }
   return rows
     .filter(([, , value]) => value)
     .map(([id, label, value]) => `<div class="kv" data-detail="${id}"><span>${escapeHtml(label)}</span><span>${escapeHtml(value)}</span></div>`)
