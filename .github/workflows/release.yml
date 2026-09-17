@@ -81,6 +81,12 @@ jobs:
         run: |
           npm ci
           npm run package
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ia-usage-vscode-extension
+          path: apps/vscode-extension/*.vsix
+          if-no-files-found: error
       - name: Publish to Open VSX
         working-directory: apps/vscode-extension
         env:
@@ -90,17 +96,21 @@ jobs:
             echo "::error::OVSX_PAT is not set. Add a token from https://open-vsx.org/user-settings/tokens as the OVSX_PAT repository secret."
             exit 1
           fi
-          npx --yes ovsx publish ./*.vsix --pat "$OVSX_PAT"
+          vsix=$(ls -1 ./*.vsix | head -n 1)
+          if [ -z "$vsix" ]; then
+            echo "::error::No VSIX found to publish."
+            exit 1
+          fi
+          echo "Publishing $vsix"
+          if npx --yes ovsx publish "$vsix" --pat "$OVSX_PAT"; then
+            echo "ovsx publish succeeded"
+          else
+            echo "ovsx publish failed; succeeding only if this version is already on Open VSX"
+            node scripts/verify-openvsx-version.mjs
+          fi
       - name: Verify Open VSX version
         working-directory: apps/vscode-extension
         run: node scripts/verify-openvsx-version.mjs
-
-      - name: Upload VSIX artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ia-usage-vscode-extension
-          path: apps/vscode-extension/*.vsix
-          if-no-files-found: error
 
   release:
     needs: [android, vscode-extension]

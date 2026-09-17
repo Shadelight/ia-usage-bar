@@ -1,6 +1,6 @@
-// Fails the build if package.json's version is not strictly greater than
-// what's already published on Open VSX — this is exactly how 0.2.7 briefly
-// regressed behind an already-published, already-installed 0.3.0.
+// Fails the build if Open VSX already has a greater version than package.json
+// (how 0.2.7 briefly regressed behind 0.3.0). Equal versions are allowed so a
+// retried release can still package a VSIX that is already live.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -40,11 +40,11 @@ const published = await publishedVersion().catch((error) => {
 });
 
 if (published === undefined) process.exit(0); // network/API failure: don't block local packaging on it
-if (published !== null && !isGreater(pkg.version, published)) {
+if (published !== null && isGreater(published, pkg.version)) {
   console.error(
-    `check-published-version: package.json tiene ${pkg.version}, pero Open VSX ya publicó ${published}. ` +
+    `check-published-version: Open VSX ya tiene ${published}, pero package.json sigue en ${pkg.version}. ` +
       `Sube la versión antes de empaquetar/publicar.`,
   );
   process.exit(1);
 }
-console.log(`check-published-version: ${pkg.version} > ${published ?? "(sin publicar)"} — OK`);
+console.log(`check-published-version: local ${pkg.version} vs Open VSX ${published ?? "(sin publicar)"} — OK`);

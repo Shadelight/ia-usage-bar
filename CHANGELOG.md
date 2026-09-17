@@ -4,6 +4,12 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-09-16
+
+### Fixed
+
+- Open VSX ya publicaba 0.4.1, pero el job exigía que el alias `latest` cambiara al instante y cancelaba el release de Windows.
+
 ## [0.3.9] - 2026-09-16
 
 ### Added

@@ -1,6 +1,6 @@
 [package]
 name = "iausagebar"
-version = "0.3.9"
+version = "0.3.10"
 description = "Monitor de uso de planes de IA para la bandeja de Windows"
 authors = ["Alberth Salazar"]
 edition = "2021"
