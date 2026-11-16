@@ -129,7 +129,10 @@ function progressBlock(quota: UsageQuota, mode: PercentageMode): string {
       : `${summary.remaining}% ${t("remaining")}`;
   const pace = paceHtml(quota);
   const resetAt = quota.resetAt ? escapeHtml(quota.resetAt) : "";
-  const knownReset = quota.resetStatus === "known" && !!quota.resetAt;
+  // A reset already in the past means these numbers belong to the previous
+  // window: say so instead of a frozen "resets now".
+  const resetPassed = !!quota.resetAt && new Date(quota.resetAt).getTime() <= Date.now();
+  const knownReset = quota.resetStatus === "known" && !!quota.resetAt && !resetPassed;
   if (import.meta.env.DEV) console.debug(`[usage rendered ${quota.id}]`, quota);
   return `<article class="block">
     <div class="block-top">
@@ -146,7 +149,7 @@ function progressBlock(quota: UsageQuota, mode: PercentageMode): string {
           ? `<div class="reset-kicker">${t("resetsIn")}</div>
              <div class="reset-val" data-reset-relative data-reset-at="${resetAt}">${escapeHtml(formatResetRelative(quota.resetAt, Date.now(), lang))}</div>
              <div class="reset-abs" data-reset-absolute data-reset-at="${resetAt}">${escapeHtml(formatResetAbsolute(quota.resetAt, lang))}</div>`
-          : `<div class="reset-state">${escapeHtml(resetState(quota))}</div>`}
+          : `<div class="reset-state">${escapeHtml(resetPassed ? t("resetPassed") : resetState(quota))}</div>`}
       </div>
     </div>
     <div class="bar"><div class="fill" style="width:${summary?.used ?? 0}%"></div></div>
@@ -179,9 +182,13 @@ function updatingBadge(id: string): string {
 
 function relativeAge(timestamp: string | null | undefined): string {
   const elapsed = timestamp ? elapsedLabel(timestamp) : null;
-  return elapsed?.unit === "minutes"
-    ? t("minutesShort").replace("{count}", String(elapsed.count))
-    : t("justNow");
+  if (elapsed?.unit !== "minutes") return t("justNow");
+  const minutes = elapsed.count;
+  const fmt = (key: string, n: number) => t(key).replace("{count}", String(n));
+  if (minutes < 60) return fmt("minutesShort", minutes);
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${fmt("hoursShort", hours)} ${fmt("minutesShort", minutes % 60)}`;
+  return `${fmt("daysShort", Math.floor(hours / 24))} ${fmt("hoursShort", hours % 24)}`;
 }
 
 function staleHint(provider: ProviderSnapshot): string {
@@ -329,7 +336,9 @@ function groupBlock(provider: ProviderSnapshot, mode: PercentageMode): string {
     const models = group.models.length
       ? `<div class="group-models">${escapeHtml(group.models.join(" · "))}</div>`
       : "";
-    const named = groups.length > 1 || !!group.models.length;
+    // Only real model groups get a heading; an ungrouped window would just
+    // repeat its own kicker ("SESIÓN / SESIÓN").
+    const named = !!group.models.length || group.quotas.some((quota) => !!quota.groupId);
     const exhausted = groupSummary(group)?.used === 100;
     const title = exhausted ? `${group.label} ⚠` : group.label;
     const windows = group.quotas.map((quota) => progressBlock(quota, mode)).join("");

@@ -142,9 +142,12 @@ function recCopyUnscoped(dash: Dashboard, selectedId: string): RecCopy | null {
     let meta = t("recHealthyMeta");
     if (reason === "quota_exhausted") title = fill(t("recExhaustedTitle"), { name: shortName });
     else if (reason === "partial_limited") title = fill(t("recPartialLimitedTitle"), { name: shortName });
-    else if (severity === "critical") title = fill(t("recCriticalTitle"), { name: shortName });
+    // "Almost out" only when a real quota drives the alert, never for a
+    // service or fetch problem that happens to be critical.
+    else if (severity === "critical" && quota) title = fill(t("recCriticalTitle"), { name: shortName });
     else if (reason === "projected_exhaustion") title = fill(t("recWarningTitle"), { name: shortName });
-    else if (reason === "auth_problem" || reason === "current_unavailable") title = fill(t("recAuthTitle"), { name: shortName });
+    else if (reason === "current_unavailable") title = fill(t("recUnavailableTitle"), { name: shortName });
+    else if (reason === "auth_problem") title = fill(t("recAuthTitle"), { name: shortName });
     else if (reason === "service_degraded" || reason === "service_outage") title = fill(t("recServiceTitle"), { name: shortName });
 
     if (reason === "partial_limited") {
@@ -162,7 +165,9 @@ function recCopyUnscoped(dash: Dashboard, selectedId: string): RecCopy | null {
       meta = fill(t("recProjectedMeta"), {
         dur: durLabelSecs(quota.exhaustsBeforeResetSeconds ?? 0),
       });
-    } else if (reason === "auth_problem" || reason === "current_unavailable") {
+    } else if (reason === "current_unavailable") {
+      meta = t("recUnavailableMeta");
+    } else if (reason === "auth_problem") {
       meta = t("recAuthMeta");
     } else if (reason === "service_degraded" || reason === "service_outage") {
       meta = t("recServiceMeta");

@@ -4,6 +4,19 @@ All notable changes to this project are documented here. This project follows [K
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-11-16
+
+### Fixed
+
+- Claude Code dejaba de actualizar su uso en equipos con muchos logs: el cálculo de costo releía todos los `.jsonl` en cada refresh y superaba el plazo de 12 s. Ahora cachea por archivo y solo relee los que cambian.
+- Un proveedor que tarda más de 12 s ya no pierde su resultado: sigue en "Actualizando" y se aplica al terminar (timeout real a los 120 s).
+- Un fallo de consulta propio (timeout, sin red) ya no aparece como "casi agotado" ni como caída del servicio del proveedor.
+- El timeout muestra "El proveedor tarda en responder" en lugar de pedir revisar la red.
+- Un reinicio ya pasado muestra "Ya se reinició · actualizando" en vez de "ahora".
+- La antigüedad de los datos se muestra en horas y días ("2 d 5 h") en lugar de miles de minutos.
+- Se eliminó el encabezado duplicado en cuotas sin grupo ("SESIÓN / SESIÓN").
+- "Sin conexión" lleva tilde.
+
 ## [0.3.10] - 2026-09-16
 
 ### Fixed

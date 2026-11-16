@@ -15,6 +15,10 @@ use chrono::{DateTime, Datelike, Duration, Local, Utc};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 /// Solo miramos archivos modificados en los ultimos N dias (cubre hoy / semana
 /// / mes-calendario de 31d / 30d rolling). Acelera mucho el escaneo. Margen
@@ -36,6 +40,7 @@ pub struct CostReport {
     pub empty: bool,
 }
 
+#[derive(Clone)]
 struct Record {
     ts: DateTime<Utc>,
     model: String,
@@ -132,17 +137,45 @@ fn parse_line(line: &str) -> Option<(String, Record)> {
     Some((key, record))
 }
 
+/// Registros ya parseados de un archivo, válidos mientras no cambien su
+/// tamaño ni su mtime.
+struct CachedFile {
+    len: u64,
+    modified: SystemTime,
+    records: Vec<(String, Record)>,
+}
+
+/// Caché por archivo para todo el proceso. Usuarios intensivos acumulan GB
+/// de logs; releerlos enteros en cada refresh superaba el plazo del
+/// dashboard y el uso de Claude nunca se actualizaba. Con la caché solo se
+/// reparsean los archivos que cambiaron (la sesión activa). El Mutex
+/// además serializa escaneos concurrentes.
+static FILE_CACHE: Mutex<Option<HashMap<PathBuf, CachedFile>>> = Mutex::new(None);
+
+fn parse_file(path: &Path) -> Option<Vec<(String, Record)>> {
+    let file = std::fs::File::open(path).ok()?;
+    // Línea a línea: no cargamos archivos de cientos de MB enteros en memoria.
+    Some(
+        BufReader::new(file)
+            .lines()
+            .map_while(Result::ok)
+            .filter_map(|line| parse_line(&line))
+            .collect(),
+    )
+}
+
 /// Recorre los logs y agrega el costo en ventanas de tiempo.
 pub fn compute() -> CostReport {
     let projects = claude_dir().join("projects");
-    let cutoff_file = std::time::SystemTime::now()
+    let cutoff_file = SystemTime::now()
         .checked_sub(std::time::Duration::from_secs(
             (WINDOW_DAYS as u64) * 86_400,
         ))
         .unwrap_or(std::time::UNIX_EPOCH);
 
-    // requestId -> registro mas completo (mayor cantidad de tokens).
-    let mut records: HashMap<String, Record> = HashMap::new();
+    let mut guard = FILE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut previous = guard.take().unwrap_or_default();
+    let mut cache: HashMap<PathBuf, CachedFile> = HashMap::with_capacity(previous.len());
 
     for entry in walkdir::WalkDir::new(&projects).into_iter().flatten() {
         if !entry.file_type().is_file() {
@@ -152,25 +185,34 @@ pub fn compute() -> CostReport {
         if path.extension().map(|e| e != "jsonl").unwrap_or(true) {
             continue;
         }
-        // Salta archivos viejos (fuera de la ventana de 32 dias).
-        if let Ok(meta) = entry.metadata() {
-            if let Ok(modified) = meta.modified() {
-                if modified < cutoff_file {
-                    continue;
-                }
-            }
+        let Ok(meta) = entry.metadata() else { continue };
+        let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+        // Salta archivos viejos (fuera de la ventana).
+        if modified < cutoff_file {
+            continue;
         }
-        let content = match std::fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => continue,
+        let len = meta.len();
+        let cached = previous
+            .remove(path)
+            .filter(|c| c.len == len && c.modified == modified);
+        let file = match cached {
+            Some(c) => c,
+            None => match parse_file(path) {
+                Some(records) => CachedFile { len, modified, records },
+                None => continue,
+            },
         };
-        for line in content.lines() {
-            if let Some((key, rec)) = parse_line(line) {
-                match records.get(&key) {
-                    Some(existing) if existing.total_tokens() >= rec.total_tokens() => {}
-                    _ => {
-                        records.insert(key, rec);
-                    }
+        cache.insert(path.to_path_buf(), file);
+    }
+
+    // requestId -> registro mas completo (mayor cantidad de tokens).
+    let mut records: HashMap<&str, &Record> = HashMap::new();
+    for file in cache.values() {
+        for (key, rec) in &file.records {
+            match records.get(key.as_str()) {
+                Some(existing) if existing.total_tokens() >= rec.total_tokens() => {}
+                _ => {
+                    records.insert(key, rec);
                 }
             }
         }
@@ -211,5 +253,7 @@ pub fn compute() -> CostReport {
         }
     }
 
+    drop(records);
+    *guard = Some(cache);
     report
 }

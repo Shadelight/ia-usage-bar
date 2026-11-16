@@ -510,13 +510,19 @@ fn provider_signal(snap: &ProviderSnapshot, now_unix: i64) -> ProviderSignal {
     }
 
     match (snap.status, snap.service) {
-        (_, ServiceHealth::Outage) | (ProviderStatus::Unavailable | ProviderStatus::Error, _) => {
-            ProviderSignal {
-                severity: RecSeverity::Critical,
-                reason: "service_outage",
-                quota: None,
-            }
-        }
+        (_, ServiceHealth::Outage) => ProviderSignal {
+            severity: RecSeverity::Critical,
+            reason: "service_outage",
+            quota: None,
+        },
+        // A failed fetch (timeout, offline, unreadable response) says nothing
+        // about the provider's service or quota: never report it as an outage
+        // or as "almost out".
+        (ProviderStatus::Unavailable | ProviderStatus::Error, _) => ProviderSignal {
+            severity: RecSeverity::Warning,
+            reason: "current_unavailable",
+            quota: None,
+        },
         (_, ServiceHealth::Degraded) => ProviderSignal {
             severity: RecSeverity::Warning,
             reason: "service_degraded",
@@ -1214,6 +1220,18 @@ mod tests {
         assert_eq!(rec.reason, "auth_problem");
         assert_eq!(rec.severity, "warning");
         assert_eq!(rec.to_id.as_deref(), Some("openai"));
+    }
+
+    // Regression: our own fetch timeout surfaced as "Claude casi agotado ·
+    // El servicio del proveedor tiene problemas" with the session at 1%.
+    #[test]
+    fn failed_fetch_is_not_an_outage_nor_critical() {
+        let mut claude = snap_window(VendorId::Anthropic, 1.0, 20.0, 4 * 3_600);
+        claude.id = "anthropic".into();
+        claude.status = ProviderStatus::Unavailable;
+        let signal = provider_signal(&claude, now());
+        assert_eq!(signal.reason, "current_unavailable");
+        assert_eq!(signal.severity, RecSeverity::Warning);
     }
 
     #[test]

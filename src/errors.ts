@@ -99,8 +99,21 @@ export function normalizeProviderError(
       missingScopes: [],
     };
   }
-  const entry = STATUS_COPY[snap.status][reason] ?? FALLBACK_BY_STATUS[snap.status];
   const technicalDetails = snap.error ? sanitizeTechnicalDetails(snap.error) : undefined;
+  // The app's own refresh deadline is not a network outage: don't send the
+  // user to check a connection that works.
+  if (reason === "network_unavailable" && snap.error?.startsWith("timeout after")) {
+    return {
+      title: t("errorTimeoutTitle"),
+      message: t("errorTimeoutMessage"),
+      severity: "warning",
+      action: "retry",
+      actionLabel: t("actionRetry"),
+      technicalDetails,
+      missingScopes: [],
+    };
+  }
+  const entry = STATUS_COPY[snap.status][reason] ?? FALLBACK_BY_STATUS[snap.status];
   const canLaunchLogin = entry.action !== "login" || CLIENT_LOGIN_VENDORS.has(vendor.id);
   return {
     title: t(entry.title),

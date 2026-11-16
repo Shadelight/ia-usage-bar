@@ -296,9 +296,18 @@ fn refresh_once(app: &AppHandle, only: Option<&str>) {
     };
     let now = Instant::now();
     let backoff = lock_or_recover(&state.backoff_until).clone();
+    // A periodic refresh does not start a provider still running from an
+    // earlier one. Targeted refreshes (e.g. right after saving a new key)
+    // always run so the new credential is validated.
+    let in_flight = if only.is_none() {
+        lock_or_recover(&state.loading_providers).clone()
+    } else {
+        HashSet::new()
+    };
     let ids: Vec<VendorId> = ids
         .into_iter()
         .filter(|id| backoff.get(id.slug()).is_none_or(|until| now >= *until))
+        .filter(|id| !in_flight.contains(id.slug()))
         .collect();
     let attempted_at = now_iso();
     {
@@ -327,67 +336,39 @@ fn refresh_once(app: &AppHandle, only: Option<&str>) {
     drop(sender);
 
     let started = Instant::now();
-    let deadline = started + Duration::from_secs(12);
     let mut pending: HashSet<String> = ids.iter().map(|id| id.slug().to_string()).collect();
-    while !pending.is_empty() {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let Ok((id, snap)) = receiver.recv_timeout(remaining) else {
-            break;
-        };
-        if pending.remove(id.slug()) {
-            let rate_limited = snap.status_reason == Some(ProviderStatusReason::RateLimited);
-            if rate_limited {
-                lock_or_recover(&state.backoff_until).insert(
-                    id.slug().to_string(),
-                    Instant::now() + Duration::from_secs(300),
-                );
-            }
-            let stored = {
-                let mut snaps = lock_or_recover(&state.snapshots);
-                let merged = merge_snapshot(snaps.get(id.slug()), snap);
-                snaps.insert(id.slug().to_string(), merged.clone());
-                merged
-            };
-            lock_or_recover(&state.loading_providers).remove(id.slug());
-            if stored.is_connected() {
-                if let Err(error) = crate::cache::save_valid(&stored) {
-                    eprintln!(
-                        "snapshot cache could not be updated for {}: {error}",
-                        stored.id
-                    );
-                }
-            }
-            if !stored.is_connected() {
-                crate::logfile::append(&format!(
-                    "{} status={:?} reason={:?}",
-                    stored.id, stored.status, stored.status_reason
-                ));
-            }
-            check_notifications(app, &stored);
-            #[cfg(debug_assertions)]
-            eprintln!(
-                "provider {} completed: {} ms",
-                id.slug(),
-                started.elapsed().as_millis()
-            );
-            emit_dashboard(app);
-        }
-    }
+    collect_results(app, &receiver, &mut pending, started + REFRESH_WAIT, started);
 
     if !pending.is_empty() {
-        for id in pending {
-            lock_or_recover(&state.loading_providers).remove(&id);
-            if let Some(vendor_id) = parse_id(&id) {
-                let timeout = providers::map_fetch_err(
-                    vendor_id,
-                    crate::http::FetchError::Network("timeout after 12s".into()),
-                );
-                let mut snapshots = lock_or_recover(&state.snapshots);
-                let merged = merge_snapshot(snapshots.get(&id), timeout);
-                snapshots.insert(id.clone(), merged);
+        // Slow providers (cold disk, large local logs, slow APIs) keep their
+        // "loading" state and are applied when they finish. Dropping the
+        // receiver here used to discard their result forever, so a provider
+        // that always needed >12s never showed fresh usage.
+        let app = app.clone();
+        std::thread::spawn(move || {
+            collect_results(&app, &receiver, &mut pending, started + PROVIDER_HARD_TIMEOUT, started);
+            let state = app.state::<AppState>();
+            for id in pending {
+                lock_or_recover(&state.loading_providers).remove(&id);
+                if let Some(vendor_id) = parse_id(&id) {
+                    let timeout = providers::map_fetch_err(
+                        vendor_id,
+                        crate::http::FetchError::Network(format!(
+                            "timeout after {}s",
+                            PROVIDER_HARD_TIMEOUT.as_secs()
+                        )),
+                    );
+                    let mut snapshots = lock_or_recover(&state.snapshots);
+                    let merged = merge_snapshot(snapshots.get(&id), timeout);
+                    snapshots.insert(id.clone(), merged);
+                }
+                crate::logfile::append(&format!(
+                    "{id} status=timeout after {}s",
+                    PROVIDER_HARD_TIMEOUT.as_secs()
+                ));
             }
-            crate::logfile::append(&format!("{id} status=timeout after 12s"));
-        }
+            emit_dashboard(&app);
+        });
     }
     *lock_or_recover(&state.last_refresh) = Some(Instant::now());
     state.app_bootstrapping.store(false, Ordering::Release);
@@ -405,6 +386,67 @@ fn refresh_once(app: &AppHandle, only: Option<&str>) {
                 Err(error) => eprintln!("sync auto-export skipped: {error}"),
             }
         }
+    }
+}
+
+/// How long a refresh blocks before returning; slower providers keep loading.
+const REFRESH_WAIT: Duration = Duration::from_secs(12);
+/// After this a provider still running is reported as timed out.
+const PROVIDER_HARD_TIMEOUT: Duration = Duration::from_secs(120);
+
+fn collect_results(
+    app: &AppHandle,
+    receiver: &mpsc::Receiver<(VendorId, ProviderSnapshot)>,
+    pending: &mut HashSet<String>,
+    deadline: Instant,
+    started: Instant,
+) {
+    let state = app.state::<AppState>();
+    while !pending.is_empty() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let Ok((id, snap)) = receiver.recv_timeout(remaining) else {
+            break;
+        };
+        if !pending.remove(id.slug()) {
+            continue;
+        }
+        let rate_limited = snap.status_reason == Some(ProviderStatusReason::RateLimited);
+        if rate_limited {
+            lock_or_recover(&state.backoff_until).insert(
+                id.slug().to_string(),
+                Instant::now() + Duration::from_secs(300),
+            );
+        }
+        let stored = {
+            let mut snaps = lock_or_recover(&state.snapshots);
+            let merged = merge_snapshot(snaps.get(id.slug()), snap);
+            snaps.insert(id.slug().to_string(), merged.clone());
+            merged
+        };
+        lock_or_recover(&state.loading_providers).remove(id.slug());
+        if stored.is_connected() {
+            if let Err(error) = crate::cache::save_valid(&stored) {
+                eprintln!(
+                    "snapshot cache could not be updated for {}: {error}",
+                    stored.id
+                );
+            }
+        } else {
+            crate::logfile::append(&format!(
+                "{} status={:?} reason={:?}",
+                stored.id, stored.status, stored.status_reason
+            ));
+        }
+        check_notifications(app, &stored);
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "provider {} completed: {} ms",
+            id.slug(),
+            started.elapsed().as_millis()
+        );
+        #[cfg(not(debug_assertions))]
+        let _ = started;
+        emit_dashboard(app);
     }
 }
 
